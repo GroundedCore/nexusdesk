@@ -1,0 +1,1 @@
+{"name":"@nexusdesk/enterprise","version":"0.2.0","type":"module","main":"index.js","engines":{"node":">=20"},"description":"Server-side enterprise API client","scripts":{"test":"node --test"}}

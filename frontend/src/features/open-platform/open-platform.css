@@ -1,0 +1,20 @@
+.op-workspace { max-width:1800px; margin:auto; }
+.op-heading {display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:24px}
+.op-heading h2{font-size:22px;margin:0 0 6px;font-weight:600;color:#252434}
+.op-heading p,.op-muted{color:#81818f;font-size:13px;line-height:1.7;margin:4px 0 16px}
+.op-toolbar{display:flex;gap:16px;align-items:center;margin:0 0 24px}.op-toolbar .ant-input-search{max-width:360px}
+.op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:24px;margin-bottom:24px}
+.op-app-card{border-color:#e9e9f0;border-radius:12px;transition:box-shadow .2s}.op-app-card:hover{box-shadow:0 6px 22px #29204a0b}
+.op-card-top{display:flex;gap:14px;align-items:center}.op-card-top h3{font-size:16px;margin:0 0 8px;overflow-wrap:anywhere}
+.op-icon{width:48px;height:48px;background:#f0edff;color:#6356d9;font-size:22px;border-radius:12px;display:grid;place-items:center;flex-shrink:0}
+.op-description{color:#82818c;min-height:44px;line-height:22px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin:18px 0}
+.op-card-footer{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #f0f0f5;padding-top:14px;font-size:12px;color:#858391}
+.op-workspace .ant-card{border-radius:12px}.op-workspace .ant-alert{margin-bottom:20px}.op-workspace .ant-pagination{margin-top:24px}.op-workspace .ant-table{font-size:13px}
+.op-form-row{display:flex;gap:24px;flex-wrap:wrap}.op-form-row>.ant-form-item{flex:1;min-width:140px}.op-form-row .ant-input-number{width:100%}
+.op-stats{display:flex;gap:60px;margin:24px 0 32px}.op-stats strong{display:block;font-size:28px;font-weight:600;color:#6356d9}.op-stats span{font-size:13px;color:#82818c}
+.op-stack{display:grid;gap:24px}.op-debug{display:grid;grid-template-columns:minmax(320px,1fr) minmax(320px,1fr);gap:24px}
+.op-code{background:#f7f8fc;padding:24px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.7}
+.op-secret{overflow-wrap:anywhere;margin:24px 0!important}.op-answer{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.8}.op-log-detail{display:grid;gap:8px}
+
+@media(max-width:1000px){.op-debug{grid-template-columns:1fr}.op-heading{flex-wrap:wrap}.op-stats{gap:24px}}
+

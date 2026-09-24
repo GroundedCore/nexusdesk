@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "nexusdesk-enterprise"
+version = "0.2.0"
+requires-python = ">=3.10"
+description = "Server-side client for NexusDesk enterprise APIs"

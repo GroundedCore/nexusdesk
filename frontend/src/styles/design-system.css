@@ -1,0 +1,132 @@
+/* Shared console surfaces. Module CSS owns specialized workspace layouts. */
+:root {
+  --ui-accent:#6562ff; --ui-accent-soft:#efefff; --ui-ink:#252936;
+  --ui-muted:#747b8d; --ui-line:#e7e9f1; --ui-surface:#f8f9fc;
+  --ui-radius:8px; --ui-control-radius:6px;
+}
+.console-layout.ant-layout .console-body {background:#fff}
+.console-layout .console-header,.console-layout .console-content {max-width:1800px;width:100%}
+.console-layout .console-header {padding:32px 40px 26px;min-height:120px;background:#fff}
+.console-layout .console-heading h1 {font-size:24px;letter-spacing:-.4px;color:var(--ui-ink)}
+.console-layout .page-description {font-size:13px;color:var(--ui-muted);margin-top:8px}
+.console-layout .console-content {padding:0 40px 40px}
+.console-layout .console-sider {background:#f8f9fb!important;border-right:1px solid #f0f1f5}
+.console-layout .console-nav .ant-btn {border-radius:8px;font-size:13px;height:40px}
+.console-layout .console-nav .nav-selected {background:#edecfb;color:var(--ui-accent)}
+.console-layout .console-nav .nav-selected .anticon {color:var(--ui-accent)}
+.console-layout .console-header-actions .ant-btn {font-size:12px}
+.console-layout .console-sider.ant-layout-sider-collapsed {padding:0;border:0}
+.console-layout .module-page {min-width:0;color:var(--ui-ink)}
+.console-layout .panel {background:white;border:1px solid var(--ui-line);border-radius:var(--ui-radius);padding:24px}
+.console-layout .panel-heading {margin-bottom:20px;gap:16px}
+.console-layout .panel-heading h2 {font-size:15px;font-weight:600;color:var(--ui-ink)}
+.console-layout .field {gap:8px;margin-bottom:18px;min-width:0}
+.console-layout .field>span,.console-layout .label {font-size:12px;color:#656d7b;font-weight:500}
+.console-layout .hint,.console-layout .muted {font-size:12px;color:var(--ui-muted);line-height:1.8}
+.console-layout .split,.console-layout .stack,.console-layout .conversation-layout {gap:24px}
+.console-layout .module-page>.panel,.console-layout .module-page>.split {margin-bottom:24px}
+.console-layout .table-scroll {overflow:auto;border:1px solid var(--ui-line);border-radius:8px}
+.console-layout .table-scroll table {font-size:13px}
+.console-layout .table-scroll th {background:var(--ui-surface);color:#656d7b;font-weight:500;font-size:12px}
+.console-layout .table-scroll td,.console-layout .table-scroll th {padding:16px;border-bottom:1px solid #eef0f5}
+.console-layout .table-scroll tbody tr:last-child td {border-bottom:0}
+.console-layout .table-scroll tbody tr:hover {background:#fafaff}
+.console-layout .ant-table-wrapper .ant-table-thead>tr>th {background:var(--ui-surface);font-size:12px;color:#656d7b;font-weight:500}
+.console-layout .ant-table-wrapper .ant-table-tbody>tr>td {padding-block:16px;font-size:13px}
+.console-layout .ant-table-wrapper .ant-btn-link {color:var(--ui-accent);font-weight:400}
+.console-layout .ant-pagination {margin-top:24px;display:flex;justify-content:flex-end;flex-wrap:wrap;gap:4px}
+.console-layout .ant-tabs-tab {font-size:13px;padding-block:12px}
+.console-layout .ant-tabs-nav {margin-bottom:24px}
+.console-layout .ant-card .ant-card-head {font-size:15px;font-weight:600;border-color:#eef0f5}
+.console-layout .ant-alert {border-radius:8px;font-size:13px}
+.console-layout .ant-tag {font-size:11px;border-radius:4px}
+.console-layout .badge {font-size:11px;font-weight:400;padding:3px 8px;border-radius:4px;background:#f0f1f7;color:#757d8c}
+.console-layout .badge:is(.completed,.bot,.confirmed,.mvp,.resolved) {background:#edf8f0;color:#36865e}
+.console-layout .badge:is(.running,.human,.active,.in_progress) {background:#efefff;color:#605cdd}
+.console-layout .badge:is(.failed,.rejected) {background:#fff0ef;color:#bf5b56}
+.console-layout .badge:is(.waiting,.pending,.queued) {background:#fff8e8;color:#977329}
+.console-layout .alert {border-radius:8px;font-size:13px;padding:12px 16px}
+.console-layout .empty {padding:40px 16px;font-size:13px;color:#8a90a1;text-align:center}
+.console-layout pre {background:#f8f9fc;border:1px solid var(--ui-line);border-radius:6px;line-height:1.8}
+.console-layout .secret {background:#f8f9fc;border:1px solid var(--ui-line);border-radius:6px;padding:16px}
+.console-layout .module-page :is(input,select,textarea):where(:not([class*="ant-"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.ant-picker input):not(.ant-select input):not(.ant-input-number input):not(.ant-input-affix-wrapper input)) {
+  border:1px solid var(--ui-line);border-radius:6px;background:#fff;color:var(--ui-ink);font:inherit;
+  padding:8px 12px;min-height:36px;max-width:100%;box-sizing:border-box;
+}
+.console-layout .module-page :is(input,select,textarea):not([class*="ant-"]):focus-visible {outline:2px solid #e4e3ff;outline-offset:1px;border-color:#8086fb}
+.console-layout :is(.module-overview,.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button:not(.ant-btn) {
+  border:1px solid transparent;border-radius:6px;min-height:36px;padding:8px 14px;background:var(--ui-accent);color:#fff;font-size:13px;font-weight:500;
+}
+.console-layout :is(.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button.secondary {
+  background:white;border-color:var(--ui-line);color:#656d7b;
+}
+.console-layout :is(.module-conversations,.module-handoff,.module-evaluation,.module-observability,.module-access,.channel-workspace) button.text-button {
+  background:transparent;color:var(--ui-accent);padding:4px 8px;min-height:28px;
+}
+.console-layout .module-conversations button.list-item {background:white;color:var(--ui-ink);border:1px solid transparent;width:100%;text-align:left;border-radius:6px;padding:14px}
+.console-layout .module-conversations button.list-item.selected {background:#f5f4ff;border-color:#dcdafe}
+.console-layout .module-conversations button.list-item:hover {background:#f8f8fc}
+.console-layout .module-page button:not(.ant-btn):disabled {opacity:.45;cursor:not-allowed}
+.console-layout :is(.module-conversations,.module-handoff,.channel-workspace) .secondary+.secondary {margin-left:8px}
+.console-layout .message-content {border:1px solid #edf0f5;border-radius:8px;background:#f8f9fc;color:var(--ui-ink)}
+.console-layout .user .message-content {background:#efefff;border-color:#e3e1fd}
+.console-layout .module-card,.console-layout .metric,.console-layout .report,.console-layout .service-card {background:white;border:1px solid var(--ui-line);border-radius:8px;padding:22px}
+.console-layout .module-card h3 {margin-top:16px;font-size:15px}.console-layout .module-card p {font-size:12px}
+.console-layout .metrics {gap:16px}.console-layout .metric strong {font-size:26px}.console-layout .metric>span {margin-bottom:16px;font-size:12px}
+.console-layout .welcome {border-radius:8px;border:1px solid #e3e1fd;background:#f7f7ff;padding:20px 24px}
+.console-layout .welcome p {color:#6965bd;font-size:13px}
+/* Catalogs use the same card anatomy and compact controls as the gateway. */
+.console-layout .agent-card-grid {gap:16px}
+.console-layout .agent-card.ant-card,.console-layout .op-app-card.ant-card,.console-layout .tw-card.ant-card {border:1px solid var(--ui-line);border-radius:8px;box-shadow:none}
+.console-layout .agent-card.ant-card:hover,.console-layout .op-app-card.ant-card:hover {border-color:#b3b2fa;box-shadow:0 3px 12px #30306008}
+.console-layout .agent-card .ant-card-body,.console-layout .op-app-card .ant-card-body {padding:20px}
+.console-layout .agent-card-main {min-height:120px;padding-bottom:20px;gap:14px}
+.console-layout .agent-card-main h2 {font-size:16px;margin-bottom:10px}.console-layout .agent-card-main p {font-size:13px}
+.console-layout .agent-filter-panel {border-color:var(--ui-line);border-radius:8px}
+.console-layout .agent-list-page .ant-btn-primary,.console-layout .agent-topbar .ant-btn-primary,.console-layout .agent-composer .ant-btn-primary {background:var(--ui-accent)}
+.console-layout .agent-workspace {--workspace-accent:var(--ui-accent);--workspace-line:var(--ui-line);--workspace-muted:var(--ui-muted)}
+.console-layout .agent-setting-card {border-radius:8px}
+.console-layout.agent-focus .console-header {display:none}
+.console-layout.agent-focus .console-content {max-width:none;padding:0}
+:root .knowledge-workspace,:root .knowledge-dialog,:root .knowledge-drawer {--knowledge-accent:var(--ui-accent);--knowledge-radius:8px;--knowledge-border:var(--ui-line);--knowledge-selected:#efefff}
+.console-layout .knowledge-workspace .ant-card {border-radius:8px}
+.console-layout .knowledge-workspace .ant-card-head {background:white;border-radius:8px 8px 0 0}
+.console-layout .knowledge-workspace .ant-btn-primary {background:var(--ui-accent);border-radius:6px}
+.console-layout .knowledge-workspace .ant-btn {border-radius:6px}
+.console-layout .ticket-filter .ant-select-selector {border-radius:6px!important}
+.console-layout .ticket-search.ant-input-affix-wrapper {background:white;border:1px solid var(--ui-line);border-radius:6px}
+.console-layout .ticket-workspace .ant-tabs-tab-active .ant-tabs-tab-btn {color:var(--ui-accent);font-weight:500}
+.console-layout .ticket-workspace .ant-tabs-ink-bar {background:var(--ui-accent)}
+.ticket-drawer .ant-descriptions {border-radius:8px;background:#f8f9fc}
+.ticket-drawer .ant-input {background:white;border-radius:6px}
+.console-layout .gateway-workspace>.panel {padding:0;border:0;background:transparent}
+.console-layout .gateway-search input:not([class*="ant-"]) {border:0;background:transparent;padding:8px 0}
+.console-layout .op-workspace {max-width:none;min-width:0}
+.console-layout .op-heading h2,.console-layout .tw-heading h2 {font-size:20px;color:var(--ui-ink)}
+.console-layout .op-heading p,.console-layout .tw-heading p {font-size:13px;color:var(--ui-muted)}
+.console-layout .op-grid {gap:16px;grid-template-columns:repeat(3,minmax(0,1fr))}
+.console-layout .op-card-top {gap:12px;align-items:flex-start}.console-layout .op-card-top h3 {font-size:15px;margin:0}
+.console-layout .op-icon,.console-layout .tw-symbol {width:40px;height:40px;border-radius:8px;background:#efebff;color:var(--ui-accent);font-size:22px;flex-shrink:0}
+.console-layout .op-description {font-size:13px;min-height:44px;margin:16px 0 20px;color:#818797}
+.console-layout .op-card-footer {font-size:12px;border-color:#eef0f5;padding-top:14px;gap:8px}
+.console-layout .op-toolbar,.console-layout .tw-toolbar {margin-bottom:24px;gap:12px}
+.console-layout .op-toolbar .ant-input-search {max-width:420px}
+.catalog-layout {display:grid;grid-template-columns:178px minmax(0,1fr);gap:26px}
+.catalog-filter {position:static;height:auto;display:block;background:white;padding:0 20px 0 0;border:0;border-right:1px solid #eef0f5}
+.catalog-filter h3 {font-size:13px;margin:0 0 24px}.catalog-filter p {font-size:12px;color:var(--ui-muted);margin:20px 0 10px}
+.catalog-filter .ant-btn {font-size:12px}.catalog-filter .ant-btn-primary {background:#efefff;color:var(--ui-accent);border-color:#c5c2ff}
+.catalog-filter .catalog-help {border-top:1px solid var(--ui-line);padding-top:18px;margin-top:28px;font-size:12px;line-height:1.9}
+.catalog-content {min-width:0}.catalog-toolbar {display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:24px}
+.catalog-toolbar .ant-input-search {max-width:420px;width:100%;flex:1;min-width:180px}.catalog-toolbar>.ant-btn-primary {margin-left:auto}
+.catalog-state {font-size:11px;color:#858b96;white-space:nowrap;display:inline-flex;align-items:center;gap:5px;margin-left:auto}
+.catalog-state:before {content:'';width:5px;height:5px;background:currentColor;border-radius:50%}.catalog-state.enabled {color:#3d996d}
+.tool-collection-name {display:flex;align-items:center;gap:12px;min-width:220px}.tool-collection-name strong {font-size:13px;font-weight:500}.tool-collection-name p {font-size:12px;color:var(--ui-muted);max-width:360px;margin:6px 0 0;white-space:normal}
+.provider-choices {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}
+.provider-choices button {background:white;border:1px solid var(--ui-line);color:#656d7b;border-radius:6px;min-height:54px;padding:10px;font:inherit;text-align:left}
+.provider-choices button[aria-pressed=true] {background:#f5f4ff;border-color:#aaa7ff;color:var(--ui-accent)}
+.provider-choices button:disabled {opacity:.6;cursor:default}.provider-choices small {font-size:11px;margin-top:4px;color:#9398a6}
+.console-layout .op-form-row {gap:20px}
+@media(max-width:1200px){.console-layout .op-grid {grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.catalog-layout {grid-template-columns:1fr}.catalog-filter {padding:16px;border:1px solid var(--ui-line);border-radius:8px}.catalog-filter h3 {margin-bottom:12px}.catalog-filter .catalog-help {display:none}.catalog-filter p {margin-top:12px}.console-layout .console-header {padding:28px 24px 24px}.console-layout .console-content {padding:0 24px 32px}}
+@media(max-width:640px){.console-layout .console-header {padding:24px 16px;min-height:110px}.console-layout .console-content {padding:0 16px 24px}.console-layout .console-heading h1 {font-size:21px}.console-layout .console-header-actions {gap:4px}.console-layout .panel {padding:16px;overflow-x:auto}.console-layout .split,.console-layout .conversation-layout {grid-template-columns:minmax(0,1fr)}.console-layout .op-grid {grid-template-columns:minmax(0,1fr)}.console-layout .op-heading {flex-wrap:wrap;gap:12px}.catalog-toolbar>.ant-btn-primary {margin-left:0}.provider-choices {grid-template-columns:repeat(2,minmax(0,1fr))}.console-layout .console-sider {z-index:30}.console-layout .op-form-row {grid-template-columns:minmax(0,1fr)}.console-layout .metrics {grid-template-columns:repeat(2,minmax(0,1fr))}}
+

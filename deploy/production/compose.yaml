@@ -1,0 +1,66 @@
+name: nexusdesk-production
+x-backend: &backend
+  image: nexusdesk-backend:${NEXUSDESK_VERSION:-local}
+  build:
+    context: ../..
+    target: backend
+    network: ${NEXUSDESK_BUILD_NETWORK:-default}
+    args:
+      PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+  env_file: .env
+  environment:
+    AGENT_ENVIRONMENT: production
+    AGENT_QUICKSTART_MODE: "false"
+    AGENT_EMBEDDED_WORKER: "false"
+    AGENT_MODEL_CREDENTIAL_KEY_FILE: /data/credentials/master.key
+  volumes:
+    - credentials:/data/credentials
+  stop_grace_period: 45s
+services:
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: [python, /app/deploy/bootstrap.py, migrate]
+  api:
+    <<: *backend
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, /app/deploy/healthcheck.py]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+  runtime-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: [python, -m, agent_platform.apps.worker]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  knowledge-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: [python, -m, agent_platform.apps.worker.knowledge]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  web:
+    image: nexusdesk-web:${NEXUSDESK_VERSION:-local}
+    build:
+      context: ../..
+      target: web
+      network: ${NEXUSDESK_BUILD_NETWORK:-default}
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.28-alpine}
+    restart: unless-stopped
+    ports:
+      - "${NEXUSDESK_BIND:-127.0.0.1}:${NEXUSDESK_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+volumes:
+  credentials:

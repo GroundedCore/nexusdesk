@@ -1,0 +1,53 @@
+name: nexusdesk-quickstart
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexusdesk
+      POSTGRES_USER: nexusdesk
+      POSTGRES_PASSWORD: nexusdesk_local_only
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U nexusdesk -d nexusdesk]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    image: nexusdesk-quickstart:${NEXUSDESK_VERSION:-local}
+    build:
+      context: ../..
+      target: quickstart
+      network: ${NEXUSDESK_BUILD_NETWORK:-default}
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim-bookworm}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${NEXUSDESK_PORT:-8080}:8080"
+    environment:
+      AGENT_DATABASE_URL: postgresql+asyncpg://nexusdesk:nexusdesk_local_only@postgres:5432/nexusdesk
+      AGENT_ENVIRONMENT: production
+      AGENT_QUICKSTART_MODE: "true"
+      AGENT_MODEL_BACKEND: demo
+      AGENT_TENANT_ID: local
+      AGENT_EMBEDDED_WORKER: "true"
+      AGENT_WORKER_CONCURRENCY: "2"
+      AGENT_DATABASE_POOL_SIZE: "5"
+      AGENT_MODEL_CREDENTIAL_KEY_FILE: /data/credentials/master.key
+    volumes:
+      - app_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, /app/deploy/healthcheck.py, quickstart]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+    stop_grace_period: 45s
+volumes:
+  postgres_data:
+  app_data:

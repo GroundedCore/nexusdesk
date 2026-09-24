@@ -1,0 +1,46 @@
+.language-switch.ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: rgba(255,255,255,.65);
+  color: #626879;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background .18s, border-color .18s, color .18s;
+}
+.language-switch.ant-btn:hover,
+.language-switch.ant-btn.is-open { background: #eeecfa !important; color: #6356d9 !important; border-color: #e4e0f5; }
+.language-switch.ant-btn:focus-visible { outline: 2px solid #958bea; outline-offset: 3px; }
+.language-switch .language-switch-globe { font-size: 16px; color: #858a9b; }
+.language-switch.is-open .language-switch-globe { color: inherit; }
+.language-switch .language-switch-chevron { font-size: 9px; color: #9a9eaa; transition: transform .18s; margin-left: 2px; }
+.language-switch.is-open .language-switch-chevron { transform: rotate(180deg); }
+.language-dropdown .language-menu {
+  width: 236px;
+  max-width: calc(100vw - 24px);
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #ececf3;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px #25233f14, 0 3px 10px #25233f06;
+}
+.language-menu-heading { padding: 7px 10px 10px; color: #9a9eaa; font-size: 11px; line-height: 1.6; }
+.language-dropdown .ant-dropdown-menu { padding: 0; background: transparent; box-shadow: none; }
+.language-dropdown .ant-dropdown-menu .ant-dropdown-menu-item { padding: 9px 10px; border-radius: 10px; margin: 2px 0; }
+.language-dropdown .ant-dropdown-menu .ant-dropdown-menu-item-selected { background: #f0edfc; color: #6356d9; }
+.language-dropdown .ant-dropdown-menu .ant-dropdown-menu-item:hover { background: #f6f5fb; }
+.language-option { display: flex; align-items: center; gap: 11px; min-height: 34px; }
+.language-option-mark { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; border: 1px solid #ebecf2; border-radius: 9px; color: #878c9d; background: #fafafb; font-size: 12px; }
+.ant-dropdown-menu-item-selected .language-option-mark { border-color: #e1dcf8; color: #7365ce; background: #e9e4fa; }
+.language-option-copy { display: flex; flex: 1; flex-direction: column; gap: 1px; font-size: 13px; font-weight: 500; line-height: 1.5; }
+.language-option-copy small { font-size: 10px; font-weight: 400; color: #969aaa; }
+.language-option-check { font-size: 12px; color: #7365ce; }
+@media (prefers-reduced-motion: reduce) {
+  .language-switch.ant-btn, .language-switch .language-switch-chevron { transition: none; }
+}

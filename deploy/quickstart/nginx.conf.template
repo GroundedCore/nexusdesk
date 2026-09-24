@@ -1,0 +1,41 @@
+pid /tmp/nginx.pid;
+error_log /dev/stderr warn;
+worker_processes 1;
+events { worker_connections 1024; }
+http {
+ include /etc/nginx/mime.types;
+ default_type application/octet-stream;
+ access_log /dev/stdout;
+ client_body_temp_path /tmp/nginx-client;
+ proxy_temp_path /tmp/nginx-proxy;
+ fastcgi_temp_path /tmp/nginx-fastcgi;
+ uwsgi_temp_path /tmp/nginx-uwsgi;
+ scgi_temp_path /tmp/nginx-scgi;
+ server {
+   listen 8080;
+   server_name _;
+   root /app/web;
+   client_max_body_size 100m;
+   location /api/ {
+     proxy_pass http://127.0.0.1:8000;
+     proxy_http_version 1.1;
+     proxy_set_header Host $host;
+     proxy_set_header Authorization $http_authorization;
+     proxy_set_header Connection "";
+     proxy_buffering off;
+     proxy_cache off;
+     proxy_read_timeout 650s;
+   }
+ location /openapi/ {
+     proxy_pass http://127.0.0.1:8000;
+     proxy_http_version 1.1;
+     proxy_set_header Host $host;
+     proxy_set_header Authorization $http_authorization;
+     proxy_set_header Connection "";
+     proxy_buffering off;
+     proxy_cache off;
+     proxy_read_timeout 650s;
+   }
+   location / { try_files $uri $uri/ /index.html; }
+ }
+}

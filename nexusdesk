@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+command -v docker >/dev/null 2>&1 || { echo "Install Docker Engine/Desktop with Compose v2 first." >&2; exit 1; }
+docker compose version >/dev/null
+case "${1:-}" in
+ quickstart)
+   docker compose -f "$ROOT/deploy/quickstart/compose.yaml" up -d --build --wait --wait-timeout 300
+   echo "NexusDesk demo: http://localhost:${NEXUSDESK_PORT:-8080}"
+   ;;
+ deploy)
+   ENV_FILE="$ROOT/deploy/production/.env"
+   [ -f "$ENV_FILE" ] || { echo "Copy deploy/production/.env.example to .env and configure credentials first." >&2; exit 1; }
+   dc() { docker compose --env-file "$ENV_FILE" -f "$ROOT/deploy/production/compose.yaml" "$@"; }
+   dc build
+   dc stop web api runtime-worker knowledge-worker
+   dc up --no-deps --force-recreate --exit-code-from migrate migrate
+   dc up -d --wait --wait-timeout 180
+   echo "NexusDesk services started. Open the configured web port."
+   ;;
+ *) echo "Usage: sh nexusdesk quickstart | deploy" >&2; exit 2 ;;
+esac

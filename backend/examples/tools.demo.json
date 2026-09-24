@@ -1,0 +1,13 @@
+[
+  {
+    "name": "demo_order_lookup",
+    "description": "查询本地演示订单。仅测试用，不代表真实订单。",
+    "url": "http://127.0.0.1:8010/orders",
+    "parameters": {
+      "type": "object",
+      "properties": {"order_id": {"type": "string", "pattern": "^DEMO-[0-9]{3}$"}},
+      "required": ["order_id"],
+      "additionalProperties": false
+    }
+  }
+]
