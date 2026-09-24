@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: nexusdesk_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nexusdesk_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # pytest reads these directly. Without them the database tests skip
+      # silently and the run passes without exercising anything.
+      AGENT_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      # Migration tests create and drop disposable databases, so the role needs
+      # CREATEDB; the postgres superuser has it.
+      MIGRATION_TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/nexusdesk_test
+      AGENT_ENVIRONMENT: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          # Pinned to match the version used by the Dockerfile.
+          version: "0.7.21"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install Python dependencies
+        working-directory: backend
+        # Includes the dev group (pytest, pytest-asyncio, ruff, httpx).
+        run: uv sync --frozen
+
+      - name: Lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Migrate the test database
+        working-directory: backend
+        # Required before pytest: the database fixtures expect a migrated schema.
+        run: uv run alembic upgrade head
+
+      - name: Test
+        working-directory: backend
+        run: uv run pytest -q
+
+  frontend:
+    name: Frontend (i18n + typecheck + build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Check locale files
+        working-directory: frontend
+        run: npm run check:i18n
+
+      - name: Typecheck and build
+        working-directory: frontend
+        run: npm run build

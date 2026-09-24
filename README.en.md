@@ -2,6 +2,8 @@
 
 [简体中文](README.md) · English
 
+[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml)
+
 **An AI agent-powered platform for intelligent customer service and service collaboration.**
 
 NexusDesk connects knowledge retrieval, business tool invocation, human collaboration, and ticket handling into a single customer service flow, helping teams build agents that can answer questions, execute tasks, and follow up on outcomes.

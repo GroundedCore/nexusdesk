@@ -2,6 +2,8 @@
 
 简体中文 · [English](README.en.md)
 
+[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml)
+
 **基于 AI Agent 的智能客服与服务协同平台。**
 
 NexusDesk 将知识检索、业务工具调用、人工协同与工单处理连接到统一的客服流程中，帮助团队构建能够回答问题、执行任务并跟进处理结果的智能客服。
