@@ -1,6 +1,8 @@
 # 数据库迁移说明
 
-当前单一 Alembic 链：0001_runtime → 0002_platform → 0003_model_gateway → 0004_tool_versions → 0005_service_identity → 0006_knowledge_jobs → 0007_vector_index → 0008_ticketing → 0009_ticket_settings。
+当前单一 Alembic 链（共 29 个版本，以 `backend/migrations/versions/` 为准）：0001_runtime → 0002_platform → 0003_model_gateway → 0004_tool_versions → 0005_service_identity → 0006_knowledge_jobs → 0007_vector_index → 0008_ticketing → 0009_ticket_settings → 0010_gateway_governance → 0011_agent_workspace → 0012_agent_deletion → 0013_agent_classification → 0014_agent_locale_codes → 0015_agent_creator → 0016_gateway_credentials → 0017_default_channels → 0018_global_channels → 0019_knowledge_workspace → 0020_knowledge_lifecycle → 0021_tool_credentials → 0022_tool_workspace → 0023_semantic_chunk_cache → 0024_chunk_preview_tasks → 0025_open_platform → 0026_open_integrations → 0027_enterprise_identity → 0028_local_admin → 0029_default_admin。
+
+本文件仅详述部分重点迁移（0008、0009、0011–0013）；其余版本的设计说明见对应迁移文件与各模块 README。
 
 ## 新增 0008_ticketing
 

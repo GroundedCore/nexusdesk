@@ -4,7 +4,7 @@
 
 ## 启动服务
 
-依赖：Python 3.11+、uv、PostgreSQL 16+，以及 Node.js 22.12+ 和 npm。已有 .env 请合并配置，不要覆盖。如需测试“查询演示”的 HTTP 工具，按 [Runtime 文档](runtime.md) 启动 mock_business 服务。
+依赖：Python 3.11+、uv、PostgreSQL 17（根 compose、quickstart 与 CI 均使用 17），以及 Node.js 22.12+ 和 npm。已有 .env 请合并配置，不要覆盖。如需测试“查询演示”的 HTTP 工具，按 [Runtime 文档](runtime.md) 启动 mock_business 服务。
 
 先启动 PostgreSQL（已有数据库可直接配置连接）：
 

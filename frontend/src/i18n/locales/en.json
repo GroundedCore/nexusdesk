@@ -731,6 +731,7 @@
   "转接、分配、交接与恢复自动服务": "Transfers, assignments, handovers and resuming automated service",
   "运行观测与审计": "Observability and audit",
   "运行轨迹、延迟、Token 用量与操作审计": "Execution traces, latency, token usage and operation audits",
+  "企业应用与 API 密钥、对外公共 API、Webhook 出站、企业 SSO 与知识同步开放": "Enterprise applications and API keys, public-facing APIs, outbound webhooks, enterprise SSO, and open knowledge sync",
   "用例、模拟工具、断言与版本化评测报告": "Test cases, mock tools, assertions and versioned evaluation reports",
   "工单已被修改，请加载最新版本后重试": "This ticket has changed. Load the latest version and try again.",
   "你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。": "You are a professional, friendly assistant. Understand the user’s needs and provide clear, reliable help.",

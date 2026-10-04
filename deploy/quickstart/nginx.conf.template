@@ -20,7 +20,11 @@ http {
      proxy_pass http://127.0.0.1:8000;
      proxy_http_version 1.1;
      proxy_set_header Host $host;
-     proxy_set_header Authorization $http_authorization;
+     set $nexusdesk_auth $http_authorization;
+     if ($nexusdesk_auth = "") {
+       set $nexusdesk_auth "Bearer __LOCAL_TOKEN__";
+     }
+     proxy_set_header Authorization $nexusdesk_auth;
      proxy_set_header Connection "";
      proxy_buffering off;
      proxy_cache off;

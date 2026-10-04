@@ -62,6 +62,12 @@ MODULES = [
         "status": "mvp",
     },
     {
+        "id": "open_platform",
+        "name": "开放平台",
+        "description": "企业应用与 API 密钥、对外公共 API、Webhook 出站、企业 SSO 与知识同步开放",
+        "status": "mvp",
+    },
+    {
         "id": "observability",
         "name": "运行观测与审计",
         "description": "运行轨迹、延迟、Token 用量与操作审计",

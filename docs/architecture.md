@@ -1,6 +1,6 @@
 # 模块架构与开发规划索引
 
-平台采用 Python 模块化单体、异步 LangGraph Runtime、PostgreSQL 与 React 管理台。现有 12 个领域模块已有 MVP 实现，新增第 13 个模块 platform_settings（已准备持久层迁移，业务服务待实现）；各 README 分别记录当前实现和后续规划，优先级不代表完成状态。
+平台采用 Python 模块化单体、异步 LangGraph Runtime、PostgreSQL 与 React 管理台。现有 13 个领域模块已有 MVP 实现（含开放平台 open_platform），另有 platform_settings 已准备持久层迁移、业务服务待实现；各 README 分别记录当前实现和后续规划，优先级不代表完成状态。
 
 ## 规划索引
 
@@ -18,6 +18,7 @@
 | observability | 运行观测与审计 | [详细规划](../backend/src/agent_platform/modules/observability/README.md) |
 | evaluation | 质量评测 | [详细规划](../backend/src/agent_platform/modules/evaluation/README.md) |
 | model_gateway | 模型网关 | [详细规划](../backend/src/agent_platform/modules/model_gateway/README.md) |
+| open_platform | 开放平台 | [详细说明](open-platform.md) |
 | platform_settings | 平台设置（规划中） | [详细规划](../backend/src/agent_platform/modules/platform_settings/README.md) |
 
 每个模块规划包含现状、功能优先级、数据归属、接口契约、依赖边界、设计约束、管理台、阶段与验收。模型网关保留详细配置层级设计。platform_settings 按当前范围仅保留配置层级与继承、工单模式与停用两节，不扩展为其他模块的配置中心。
