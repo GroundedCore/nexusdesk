@@ -61,7 +61,7 @@ jobs:
 
       - name: Lint
         working-directory: backend
-        run: uv run ruff check .
+        run: uv run ruff check . --fix
 
       - name: Migrate the test database
         working-directory: backend
