@@ -15,6 +15,6 @@ def test_module_catalog_contract():
     response = client.get("/api/v1/modules")
     assert response.status_code == 200
     modules = response.json()
-    assert len(modules) == 12
+    assert len(modules) == 13
     assert len({module["id"] for module in modules}) == len(modules)
     assert all(module["status"] == "mvp" for module in modules)

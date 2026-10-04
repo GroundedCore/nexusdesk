@@ -73,7 +73,7 @@ def query(url, sql, *params):
 def test_empty_upgrade_downgrade_upgrade(migration_database):
     url = migration_database
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0018_global_channels"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0029_default_admin"
     migrate(url, "base", "downgrade")
     assert not query(
         url,
@@ -124,7 +124,9 @@ def test_backfill_constraints_and_downgrade_guards(migration_database):
         "SELECT column_name FROM information_schema.columns WHERE table_name='tickets' AND column_name IN ('description','note')",
     )
     assert not query(url, "SELECT tgname FROM pg_trigger WHERE tgname LIKE 'ticket_legacy_%'")
-    with pytest.raises(asyncpg.RestrictViolationError):
+    # PostgreSQL reports FK enforcement failures as 23503 (foreign_key_violation)
+    # even for ON DELETE RESTRICT constraints; 23001 is never emitted here.
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
         query(url, "DELETE FROM runtime_conversations WHERE id=$1", cid)
     with pytest.raises(asyncpg.ForeignKeyViolationError):
         query(url, "UPDATE tickets_detail SET tenant_id='other' WHERE ticket_id=$1", tid)

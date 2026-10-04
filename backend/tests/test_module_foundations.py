@@ -1,10 +1,10 @@
 import pytest
-from test_platform_postgres import create_agent
-from test_platform_postgres import platform as _platform_fixture
 
 from agent_platform.modules.policy.contracts import ResourceFacts
 from agent_platform.modules.policy.service import ExecutionPolicy
 from agent_platform.platform.identity.context import ExecutionContext
+from test_platform_postgres import create_agent
+from test_platform_postgres import platform as _platform_fixture
 
 platform = _platform_fixture
 
@@ -59,14 +59,15 @@ async def test_tool_release_is_pinned_to_agent(platform):
 @pytest.mark.postgres
 async def test_agent_archive_conflict_and_diff(platform):
     client, _services, _settings = platform
-    body = {"name": "archive", "config": {"system_prompt": "first"}}
-    agent = (await client.post("/api/v1/agents", json=body)).json()
-    await client.post(f"/api/v1/agents/{agent['id']}/publish", json={"revision": 1})
+    # Publishing requires a model profile; the helper wires one up and publishes v1.
+    agent, body = await create_agent(client)
     body["config"]["system_prompt"] = "second"
-    await client.put(f"/api/v1/agents/{agent['id']}", json={**body, "revision": 1})
+    assert (
+        await client.put(f"/api/v1/agents/{agent['id']}", json={**body, "revision": 1})
+    ).status_code == 200
     diff = await client.get(f"/api/v1/agents/{agent['id']}/diff?version=1")
     assert diff.json()["changes"] == [
-        {"field": "system_prompt", "published": "first", "draft": "second"}
+        {"field": "system_prompt", "published": "依据知识回答。", "draft": "second"}
     ]
     assert (
         await client.patch(

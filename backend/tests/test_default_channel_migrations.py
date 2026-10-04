@@ -2,12 +2,12 @@ import json
 from uuid import uuid4
 
 import pytest
-from test_ticket_migrations import migrate, query
-from test_ticket_migrations import migration_database as _migration_database
 
 from agent_platform.modules.model_gateway.catalog import Catalog
 from agent_platform.modules.model_gateway.contracts import Connection
 from agent_platform.settings import Settings
+from test_ticket_migrations import migrate, query
+from test_ticket_migrations import migration_database as _migration_database
 
 pytestmark = pytest.mark.postgres
 migration_database = _migration_database
@@ -35,7 +35,15 @@ def test_default_channels_fresh_install_preserve_edits_and_archives(
         "GPT (OpenAI)",
         "Gemini (Google)",
     }
-    catalog = Catalog(None, Settings())
+    # Seed data must satisfy the built-in allowlist, not a local .env override.
+    catalog = Catalog(
+        None,
+        Settings(
+            model_gateway_allowed_hosts=Settings.model_fields[
+                "model_gateway_allowed_hosts"
+            ].default
+        ),
+    )
     for row in rows:
         spec = json.loads(row[2])
         assert not row[3] and spec["credential_ref"] is None and "api_key" not in spec

@@ -110,5 +110,8 @@ def test_deployment_topologies_and_no_secret_copy():
     assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text()
     quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()
     assert "proxy_set_header Authorization $http_authorization;" in quick_nginx
-    assert "__LOCAL_TOKEN__" not in quick_nginx
+    # Quickstart injects the local admin token only as a placeholder that the
+    # container bootstrap renders from AGENT_API_TOKEN; no real token is copied.
+    assert quick_nginx.count("__LOCAL_TOKEN__") == 1
+    assert 'set $nexusdesk_auth "Bearer __LOCAL_TOKEN__";' in quick_nginx
     assert "**/*.key" in (ROOT / ".dockerignore").read_text()

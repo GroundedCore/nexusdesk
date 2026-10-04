@@ -28,6 +28,9 @@ async def platform():
         api_token=SecretStr("platform-admin"),
         operator_api_token=SecretStr("platform-operator"),
         viewer_api_token=SecretStr("platform-viewer"),
+        # Keep tests hermetic: a local .env may narrow the outbound allowlist,
+        # which would break tests that rely on the built-in defaults.
+        model_gateway_allowed_hosts=Settings.model_fields["model_gateway_allowed_hosts"].default,
     )
     app = create_app(settings)
     async with app.router.lifespan_context(app):  # noqa: SIM117

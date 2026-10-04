@@ -1,7 +1,7 @@
 import pytest
-from test_platform_postgres import platform as _platform_fixture
 
 from agent_platform.platform.persistence.store import DomainError
+from test_platform_postgres import platform as _platform_fixture
 
 platform = _platform_fixture
 ROOT = "/api/v1/knowledge-workspace"
@@ -35,6 +35,7 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
 
     assert (await document())["embedded_chunk_count"] == 0
     original = services.platform.vector_index.request
+    original_milvus_url = services.platform.vector_index.settings.milvus_url
     batches = 0
     fail = False
 
@@ -50,6 +51,9 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         return {}
 
     services.platform.vector_index.request = milvus
+    # VectorIndex.build guards on milvus_url before issuing any request, so the
+    # fully mocked adapter still needs a dummy URL to reach the upsert path.
+    services.platform.vector_index.settings.milvus_url = "http://milvus.invalid"
     try:
         await client.post(ROOT + f"/libraries/{kid}/publish")
         assert (await document())["embedded_chunk_count"] == 0
@@ -72,3 +76,4 @@ async def test_document_embedding_counts_follow_successful_batches(platform):
         assert doc["published_version"] == 1
     finally:
         services.platform.vector_index.request = original
+        services.platform.vector_index.settings.milvus_url = original_milvus_url

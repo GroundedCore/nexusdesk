@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+
 from test_ticket_migrations import migrate, query
 from test_ticket_migrations import migration_database as _migration_database
 
@@ -64,4 +65,4 @@ def test_gateway_upgrade_preserves_resources_and_guards_downgrade(migration_data
         == "existing connection"
     )
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0018_global_channels"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0029_default_admin"
