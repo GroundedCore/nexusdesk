@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     tool_allowed_hosts: list[str] = ["127.0.0.1", "localhost"]
     tenant_id: str = "local"
     embedded_worker: bool = True
+    # Deployments seed the default administrator password and force a change on the
+    # first login. Development can set AGENT_REQUIRE_PASSWORD_CHANGE=false to skip
+    # that gate; leave it enabled for any shared or production deployment.
+    require_password_change: bool = True
     worker_concurrency: int = Field(default=8, ge=1, le=256)
     queue_capacity: int = Field(default=200, ge=1)
     tenant_capacity: int = Field(default=50, ge=1)

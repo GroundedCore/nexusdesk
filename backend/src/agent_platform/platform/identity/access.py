@@ -31,7 +31,7 @@ async def principal(request: Request, authorization: Annotated[str | None, Heade
         try:
             async with engine.connect() as c:
                 session = await LocalAdmin(engine, settings.tenant_id).session(c, authorization[7:])
-            if session["must_change_password"]:
+            if session["must_change_password"] and settings.require_password_change:
                 raise DomainError("default_password_change_required", 403)
             return Principal(settings.tenant_id, "admin", "enterprise:" + str(session["user_id"]))
         except DomainError as exc:
