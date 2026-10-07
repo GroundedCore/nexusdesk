@@ -16,6 +16,21 @@ export function loginError(code:string) {
   return t('登录服务暂不可用，请稍后重试');
 }
 
+// Development convenience: pre-fills the local administrator form so the default
+// deployment credentials do not need retyping (admin / nexusdesk, which force a
+// password change on first login and are already documented in deploy/README.md).
+//
+// Guarded by import.meta.env.DEV, which Vite replaces with `false` in a
+// production build, so the pre-fill cannot happen outside `npm run dev`. Anyone
+// who changes the default credentials can override both values through
+// frontend/.env.development (see .env.example) without editing this file.
+const devCredentials = import.meta.env.DEV
+  ? {
+      username:String(import.meta.env.VITE_DEV_LOGIN_USER||'admin'),
+      password:String(import.meta.env.VITE_DEV_LOGIN_PASSWORD||'nexusdesk'),
+    }
+  : {username:'',password:''};
+
 export function LoginPage({complete, expired=false}:{complete:()=>void;expired?:boolean}) {
   const [tab,setTab]=useState('local'),[busy,setBusy]=useState(''),[error,setError]=useState('');
   const [providers,setProviders]=useState<LoginProvider[]>([]),[loading,setLoading]=useState(true),[retry,setRetry]=useState(0);
@@ -46,7 +61,7 @@ export function LoginPage({complete, expired=false}:{complete:()=>void;expired?:
         <Tabs activeKey={tab} onChange={key=>{setTab(key);setError('');}} items={[{key:'local',label:t('账号登录')},{key:'enterprise',label:t('企业登录')}]}/>
         {expired&&<Alert className="login-notice" type="info" showIcon title={t('登录已过期，请重新登录')}/>}
         {error&&<Alert className="login-notice" type="error" showIcon title={error} action={<Button type="text" size="small" onClick={()=>setRetry(v=>v+1)}>{t('重试')}</Button>}/>}
-        {tab==='local'?<><Form form={form} layout="vertical" requiredMark={false} onFinish={local} disabled={!!busy}>
+        {tab==='local'?<><Form form={form} layout="vertical" requiredMark={false} initialValues={devCredentials} onFinish={local} disabled={!!busy}>
           <Form.Item name="username" label={t('账号')} rules={[{required:true,message:t('请输入账号')}]}><Input prefix={<UserOutlined/>} autoComplete="username" maxLength={64} placeholder={t('请输入账号')}/></Form.Item>
           <Form.Item name="password" label={t('密码')} rules={[{required:true,message:t('请输入密码')}]}><Input.Password prefix={<LockOutlined/>} autoComplete="current-password" maxLength={128} placeholder={t('请输入密码')}/></Form.Item>
           <Button className="login-submit" aria-label={t('登录')} type="primary" block htmlType="submit" loading={busy==='local'}>{t('登录')} <ArrowRightOutlined aria-hidden/></Button>
