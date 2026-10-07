@@ -86,6 +86,46 @@ test('login layout fits desktop and mobile with initialization guidance',async({
   await page.getByRole('tab',{name:'企业登录',exact:true}).click();await expect(page.getByText('暂未配置企业登录，请使用账号登录')).toBeVisible();
 });
 
+test('login layout keeps the primary action on screen across viewport sizes',async({page})=>{
+  // The layout used to break on short viewports because every breakpoint keyed off
+  // width only: 1024x600 overflowed by 149px and on 320x568 the login button sat
+  // 172px below the fold. A fixed 380px spacer on the brand panel caused the rest.
+  interface Size { width:number; height:number; label:string; scrolls?:boolean }
+  const sizes:Size[]=[
+    {width:1920,height:1080,label:'desktop-1080'},
+    {width:1440,height:900,label:'desktop-900'},
+    {width:1366,height:768,label:'laptop-768'},
+    {width:1280,height:720,label:'laptop-720'},
+    {width:1152,height:700,label:'laptop-700'},
+    {width:1024,height:768,label:'tablet-landscape'},
+    {width:1024,height:600,label:'tablet-short'},
+    {width:834,height:1112,label:'tablet-portrait'},
+    {width:768,height:1024,label:'tablet-tall'},
+    {width:414,height:896,label:'phone-large'},
+    {width:390,height:844,label:'phone'},
+    {width:360,height:640,label:'phone-small'},
+    {width:320,height:568,label:'phone-tiny'},
+    // A stacked phone layout on a narrow window may scroll a little; only the
+    // action staying visible is guaranteed there.
+    {width:700,height:800,label:'narrow-window',scrolls:true},
+  ];
+  await mock(page,{initialized:true});
+  for(const {width,height,label,scrolls} of sizes){
+    await page.setViewportSize({width,height});
+    await page.goto('/#/login');
+    await expect(page.locator('.login-form-inner')).toBeVisible();
+    const m=await page.evaluate(()=>{
+      const submit=document.querySelector('.login-submit')?.getBoundingClientRect();
+      return {hOverflow:document.documentElement.scrollWidth-window.innerWidth,
+        vOverflow:document.documentElement.scrollHeight-window.innerHeight,
+        submitBelowFold:submit?Math.round(submit.bottom-window.innerHeight):null};
+    });
+    expect(m.hOverflow,`${label}: horizontal overflow`).toBeLessThanOrEqual(0);
+    expect(m.submitBelowFold,`${label}: login button below the fold`).toBeLessThan(0);
+    if(!scrolls)expect(m.vOverflow,`${label}: vertical overflow`).toBeLessThanOrEqual(0);
+  }
+});
+
 test('deployment administrator must change password before workspace access',async({page})=>{
   let mustChange=true;
   await page.route('**/api/v1/**',async route=>{

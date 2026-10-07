@@ -1,15 +1,80 @@
 .login-page{min-height:100dvh;display:grid;grid-template-columns:56% 44%;background:#fff;color:#252936;font-family:Inter,"Microsoft YaHei",sans-serif}
 .login-brand-panel{position:relative;min-height:100dvh;overflow:hidden;color:white;background:#101936 url('/images/login-orbit.png') center center/cover no-repeat;padding:40px 48px;display:flex;flex-direction:column}
 .login-brand{font-size:36px;letter-spacing:-1.5px;font-weight:650;line-height:1.1}.login-brand span{font-weight:300}.login-brand small{display:block;font-size:12px;letter-spacing:5px;font-weight:400;margin-top:12px;color:#d1d5ed}
-.login-story{margin-top:88px;position:relative;z-index:1}.login-story h1{font-size:clamp(28px,3vw,48px);font-weight:500;line-height:1.45;letter-spacing:1px;margin:0 0 16px}.login-story p{font-size:clamp(14px,1.4vw,21px);color:#d1d5ed;line-height:1.7;margin:0;letter-spacing:1px}
-.login-brand-footer{margin-top:auto;padding-top:380px;font-size:13px;letter-spacing:2px;color:#c0c7e2}
-.login-form-panel{min-width:0;position:relative;display:flex;flex-direction:column;justify-content:center;padding:100px clamp(32px,6vw,104px) 88px}
+.login-story{margin-top:clamp(28px,8.8vh,88px);position:relative;z-index:1}.login-story h1{font-size:clamp(28px,3vw,48px);font-weight:500;line-height:1.45;letter-spacing:1px;margin:0 0 16px}.login-story p{font-size:clamp(14px,1.4vw,21px);color:#d1d5ed;line-height:1.7;margin:0;letter-spacing:1px}
+/* Pushed to the bottom by margin-top:auto. A fixed padding-top used to hold this
+   down instead, which forced the panel taller than short viewports. */
+.login-brand-footer{margin-top:auto;font-size:13px;letter-spacing:2px;color:#c0c7e2}
+.login-form-panel{min-width:0;position:relative;display:flex;flex-direction:column;justify-content:center;padding:clamp(40px,10vh,100px) clamp(32px,6vw,104px) clamp(28px,8.8vh,88px)}
 .login-language{position:absolute;right:30px;top:30px}.login-form-inner{width:100%;max-width:440px;margin:auto}.login-form-inner header h2{font-size:36px;line-height:1.3;margin:0 0 12px;font-weight:600;letter-spacing:-.6px}.login-form-inner header p{font-size:16px;line-height:1.7;color:#9297ab;margin:0 0 32px}
 .login-form-inner .ant-tabs-nav{margin-bottom:32px}.login-form-inner .ant-tabs-tab{min-width:112px;justify-content:center;padding-bottom:14px;font-size:15px}.login-form-inner .ant-form-item{margin-bottom:24px}.login-form-inner .ant-form-item-label>label{font-size:14px}.login-form-inner .ant-input-affix-wrapper{min-height:50px;border-radius:8px;padding:10px 16px}.login-form-inner .ant-input-prefix{margin-right:12px;color:#777f9c}.login-form-inner .ant-input{font-size:14px}.login-form-inner .login-submit{height:52px;border-radius:8px;font-size:16px;margin-top:4px;box-shadow:0 8px 24px #6562ff18}.login-submit .anticon{margin-left:12px}.login-help{font-size:12px;line-height:1.8;text-align:center;color:#9297ab;margin:18px 0 24px}
 .login-notice{margin-bottom:20px;font-size:12px}.login-providers{min-height:250px}.login-providers>p{color:#9297ab;line-height:1.8}.login-providers>.ant-btn{height:50px;margin:8px 0;text-align:left;justify-content:flex-start}.login-providers>.ant-btn .anticon:last-child{margin-left:auto}.login-service{margin-top:24px;color:#9297ab;font-size:12px}.login-service summary{cursor:pointer;text-align:center;margin-bottom:12px}.login-service>.ant-btn{margin-top:10px}.login-development{display:block;margin:12px auto 0;font-size:12px}.login-form-panel>footer{position:absolute;bottom:32px;right:40px;color:#9297ab;font-size:12px;letter-spacing:1px}
 .auth-loading{min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;background:#fafbff}.auth-loading .ant-alert{max-width:500px}
 @media(min-width:1800px){.login-form-inner{max-width:460px}.login-story{margin-top:120px}}
-@media(max-width:1000px){.login-page{grid-template-columns:46% 54%}.login-brand-panel{padding:32px 28px}.login-story{margin-top:76px}.login-story h1{font-size:30px}.login-form-panel{padding-left:36px;padding-right:36px}.login-brand-footer{padding-top:320px}}
-@media(max-width:700px){.login-page{display:block}.login-brand-panel{min-height:0;padding:28px 24px 34px;background-position:center 28%}.login-brand{font-size:28px}.login-brand small{font-size:10px;letter-spacing:3px}.login-story{margin-top:30px}.login-story h1{font-size:24px;margin-bottom:8px}.login-story p{font-size:12px}.login-brand-footer{display:none}.login-form-panel{min-height:calc(100dvh - 220px);padding:56px 24px 72px}.login-language{top:16px;right:16px}.login-form-inner header h2{font-size:28px}.login-form-inner header p{font-size:14px;margin-bottom:20px}.login-form-panel>footer{left:24px;right:24px;text-align:center;bottom:24px}}
+@media(max-width:1000px){.login-page{grid-template-columns:46% 54%}.login-brand-panel{padding:32px 28px}.login-story{margin-top:clamp(24px,7vh,76px)}.login-story h1{font-size:30px}.login-form-panel{padding-left:36px;padding-right:36px}}
+
+/* Short viewports: the split layout is width-based, so a 1024x600 window kept the
+   full-height paddings and overflowed. Compress vertical rhythm by height. */
+@media(max-height:760px){
+  .login-brand-panel{padding-top:28px;padding-bottom:28px}
+  .login-form-panel{padding-top:36px;padding-bottom:32px}
+  .login-form-inner header h2{font-size:30px}
+  .login-form-inner header p{margin-bottom:20px}
+  .login-form-inner .ant-tabs-nav{margin-bottom:20px}
+  .login-form-inner .ant-tabs-tab{padding-bottom:10px}
+  .login-form-inner .ant-form-item{margin-bottom:16px}
+  .login-form-inner .ant-input-affix-wrapper{min-height:44px}
+  .login-form-inner .login-submit{height:46px}
+  .login-help{margin:12px 0 16px}
+  .login-service{margin-top:16px}
+  .login-providers{min-height:0}
+  .login-form-panel>footer{position:static;margin-top:20px;text-align:right}
+}
+@media(max-height:620px){
+  .login-brand-panel{padding-top:22px;padding-bottom:22px}
+  .login-story{margin-top:22px}
+  .login-story h1{font-size:24px;margin-bottom:8px}
+  .login-story p{font-size:13px}
+  .login-form-panel{padding-top:28px;padding-bottom:24px}
+  .login-form-inner header h2{font-size:26px;margin-bottom:8px}
+  .login-form-inner header p{margin-bottom:16px}
+  .login-form-inner .ant-tabs-nav{margin-bottom:16px}
+  .login-form-inner .ant-form-item{margin-bottom:12px}
+  .login-form-inner .ant-input-affix-wrapper{min-height:40px}
+  .login-form-inner .login-submit{height:42px}
+  .login-form-panel>footer{margin-top:14px}
+}
+
+/* Stacked layout. Previously this relied on `min-height:calc(100dvh - 220px)`,
+   a magic number that under-estimated the brand block and pushed the login
+   button below the fold on small phones. */
+@media(max-width:700px){
+  .login-page{display:flex;flex-direction:column;min-height:100dvh}
+  .login-brand-panel{flex:0 0 auto;min-height:0;padding:22px 24px 26px;background-position:center 28%}
+  .login-brand{font-size:28px}.login-brand small{font-size:10px;letter-spacing:3px}
+  .login-story{margin-top:22px}.login-story h1{font-size:24px;margin-bottom:8px}.login-story p{font-size:12px}
+  .login-brand-footer{display:none}
+  .login-form-panel{flex:1 1 auto;min-height:0;justify-content:flex-start;padding:28px 24px 36px}
+  .login-language{top:16px;right:16px}
+  .login-form-inner header h2{font-size:28px}.login-form-inner header p{font-size:14px;margin-bottom:20px}
+  .login-form-panel>footer{position:static;margin-top:24px;text-align:center}
+}
+/* Small phones: the decorative tagline yields to the form so the primary action
+   stays on the first screen. */
+@media(max-width:700px) and (max-height:700px){
+  .login-brand-panel{padding:16px 20px 18px}
+  .login-brand{font-size:22px}
+  .login-story{display:none}
+  .login-form-panel{padding:20px 20px 28px}
+  .login-form-inner header h2{font-size:23px;margin-bottom:6px}
+  .login-form-inner header p{display:none}
+  .login-form-inner .ant-tabs-nav{margin-bottom:14px}
+  .login-form-inner .ant-form-item{margin-bottom:12px}
+  .login-form-inner .ant-input-affix-wrapper{min-height:42px}
+  .login-form-inner .login-submit{height:44px}
+  .login-help{margin:10px 0 12px}
+  .login-service{margin-top:12px}
+  .login-form-panel>footer{margin-top:16px}
+}
 
 .login-page{padding:0;margin:0;max-width:none;width:100%}.login-form-inner header{display:block;border:0;padding:0;margin:0;background:transparent;height:auto;min-height:0}
