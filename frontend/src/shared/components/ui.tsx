@@ -1,7 +1,24 @@
 import { t, dateTime, errorText } from '../../i18n/index';
+import { message } from 'antd';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, token } from '../api/client';
 export const Role = createContext('viewer');
+
+// Toasts are raised through one holder mounted at the app root, so callers that
+// are not React components (useAction's run, for example) can raise them too.
+let toastApi: ReturnType<typeof message.useMessage>[0] | null = null;
+
+/** Mount once inside the Ant Design App; enables toasts for non-component callers. */
+export function ToastHolder() {
+    const [api, holder] = message.useMessage();
+    useEffect(() => { toastApi = api; return () => { toastApi = null; }; }, [api]);
+    return holder;
+}
+
+export const toast = {
+    success: (text: string) => { toastApi?.success(text); },
+    error: (text: string) => { toastApi?.error(text); },
+};
 export function useAccess() { const role = useContext(Role); return { admin: role === 'admin', operator: role !== 'viewer', role }; }
 export function useResource<T>(path: string | null, interval = 0) {
     const [data, setData] = useState<T | null>(null);
@@ -59,9 +76,16 @@ export function useAction() {
         try {
             await action();
             setNotice(message);
+            // Raised alongside the inline notice: the toast surfaces the outcome
+            // immediately, the inline line stays on screen afterwards. An empty
+            // message means the caller reports its own way, so stay quiet.
+            if (message)
+                toast.success(message);
         }
         catch (e) {
-            setError(e instanceof Error ? e.message : t("操作失败"));
+            const raw = e instanceof Error ? e.message : t("操作失败");
+            setError(raw);
+            toast.error(errorText(raw));
         }
         finally {
             guard.current = false;

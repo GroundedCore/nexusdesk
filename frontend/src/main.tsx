@@ -9,10 +9,11 @@ import enUS from 'antd/locale/en_US';
 import hiIN from 'antd/locale/hi_IN';
 import { useTranslation } from 'react-i18next';
 import { locale } from './i18n';
+import { ToastHolder } from './shared/components/ui';
 import './styles/global.css';
 import './styles/console.css';
 import './styles/design-system.css';
 import {consoleTheme} from './styles/theme';
 
-function Root() { useTranslation(); return <ConfigProvider locale={{'zh-CN':zhCN,'zh-TW':zhTW,en:enUS,hi:hiIN}[locale()]} theme={consoleTheme}><AntApp>{location.pathname.startsWith('/embed/')?<EmbedChat/>:<App />}</AntApp></ConfigProvider>; }
+function Root() { useTranslation(); return <ConfigProvider locale={{'zh-CN':zhCN,'zh-TW':zhTW,en:enUS,hi:hiIN}[locale()]} theme={consoleTheme}><AntApp><ToastHolder/>{location.pathname.startsWith('/embed/')?<EmbedChat/>:<App />}</AntApp></ConfigProvider>; }
 createRoot(document.getElementById('root')!).render(<StrictMode><Root /></StrictMode>);
