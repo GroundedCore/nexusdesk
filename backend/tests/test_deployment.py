@@ -98,7 +98,8 @@ def test_deployment_topologies_and_no_secret_copy():
     quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text())
     prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text())
     assert set(quick["services"]) == {"postgres", "app"}
-    assert quick["services"]["app"]["ports"][0].startswith("127.0.0.1:")
+    # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
+    assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
     assert "ports" not in quick["services"]["postgres"]
     assert set(prod["services"]) == {"migrate", "api", "web", "runtime-worker", "knowledge-worker"}
     for name in ("api", "runtime-worker", "knowledge-worker"):

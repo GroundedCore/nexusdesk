@@ -30,6 +30,12 @@ jobs:
     env:
       # For workflow_run, build the exact commit CI validated.
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # Loopback-only by default in compose; the server deployment opts into a
+      # wider bind. Override with the NEXUSDESK_BIND repository variable.
+      # WARNING: quickstart injects an admin token for unauthenticated
+      # requests — firewall the port to trusted IPs when binding beyond
+      # 127.0.0.1.
+      NEXUSDESK_BIND: ${{ vars.NEXUSDESK_BIND || '0.0.0.0' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,7 +73,7 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: IMAGE_TAG,GHCR_NAMESPACE
+          envs: IMAGE_TAG,GHCR_NAMESPACE,NEXUSDESK_BIND
           # The default 10m is not enough for the first image pull on a
           # slow server-to-GHCR link plus the --wait healthcheck window.
           command_timeout: 30m
@@ -76,6 +82,7 @@ jobs:
             cd /home/nexus/nexusdesk
             export NEXUSDESK_VERSION="${IMAGE_TAG}"
             export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
+            export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
             docker compose -f deploy/quickstart/compose.yaml pull
             # Recreates the app container on the new image; the container
             # bootstrap runs migrations before serving traffic. --wait fails
