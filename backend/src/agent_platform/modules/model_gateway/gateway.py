@@ -60,7 +60,10 @@ class ModelGateway:
 
     async def probe(self, tenant, actor, identifier):
         async with self.engine.connect() as c:
-            row = await self.catalog.get(c, tenant, "connections", identifier, True)
+            # Probing is an explicit administrator diagnostic rather than routed
+            # traffic, so it also works on a disabled connection: the usual
+            # workflow is to verify a connection before enabling it.
+            row = await self.catalog.get(c, tenant, "connections", identifier)
         spec, started = row["spec"], time.monotonic()
         self.catalog.validate_address(spec)
         status, error = "available", None
