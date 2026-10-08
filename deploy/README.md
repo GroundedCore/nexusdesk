@@ -91,6 +91,36 @@ API 就绪检查为 `/api/v1/ready`；它不代表模型调用一定成功。Wor
 
 PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Milvus 内部推理/索引所需资源另行评估；生产 Compose 是部署拓扑，不等于高可用、SSO、监控、备份恢复等生产验收全部完成。
 
+## 自动部署（GitHub Actions CI/CD）
+
+`.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
+
+> **安全警告**：quickstart 模式会为未携带身份的请求注入 admin 角色的本地服务令牌，任何能访问该入口的人都拥有完整管理权限。服务器上保持默认的 `127.0.0.1` 绑定，仅通过 SSH 隧道（`ssh -L 8080:127.0.0.1:8080 user@server`）访问；不要把该端口暴露到公网或未经认证的反向代理之后。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
+
+### 服务器一次性准备
+
+```sh
+# 1. 检出仓库（构建发生在 Actions，服务器只需 compose 文件）
+git clone https://github.com/GroundedCore/nexusdesk.git /opt/nexusdesk
+
+# 2. GHCR 镜像包可见性独立于仓库：首次推送后 package 默认为私有（即使仓库
+#    是 public）。在 GitHub Packages 页面将 nexusdesk-quickstart 设为 public
+#    后可跳过本步（匿名即可拉取）；保持私有则需登录（PAT 需 read:packages 权限）
+docker login ghcr.io -u <github-username> -p <pat>
+
+# 3. 为 Actions 生成专用部署密钥（不要复用个人密钥）
+ssh-keygen -t ed25519 -f ~/.ssh/nexusdesk_deploy -N ""
+cat ~/.ssh/nexusdesk_deploy.pub >> ~/.ssh/authorized_keys
+```
+
+postgres 镜像仍从 Docker Hub 拉取；服务器访问 Docker Hub 受限时，设置 `POSTGRES_IMAGE` 指向可达镜像源（见下文“镜像与网络”）。
+
+### GitHub 仓库配置
+
+在 Settings → Secrets and variables → Actions 添加仓库级 secrets：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`（上面生成的私钥全文）。Actions 推送 GHCR 使用内置 `GITHUB_TOKEN`，无需额外配置。如需人工审批后再部署，可在 Settings → Environments 创建环境并在 workflow 的 job 上加 `environment:` 引用（引用不存在的环境会自动创建），将 secrets 迁移到环境作用域。
+
+回滚到历史版本：在服务器上执行 `NEXUSDESK_VERSION=<旧commit-sha> NEXUSDESK_IMAGE_REGISTRY=ghcr.io/<owner>/ docker compose -f deploy/quickstart/compose.yaml up -d`（注意数据库迁移不支持自动回滚；数据保存在 `postgres_data` 与 `app_data` 卷中，回滚镜像不会丢失数据）。
+
 ## 镜像与网络
 
 Dockerfile 的 `quickstart`、`backend`、`web` 为三个构建目标，前端由 Node 构建后交给 Nginx，不运行 Vite 开发服务器。Python 使用 `uv.lock`，前端使用 `package-lock.json`。`.dockerignore` 排除密钥、环境配置、数据库目录和本地依赖。

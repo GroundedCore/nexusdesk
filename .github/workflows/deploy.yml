@@ -1,0 +1,82 @@
+name: CD
+
+# Deploys the quickstart stack to the server after CI passes on main, or on
+# manual dispatch. The image is built here and pushed to GHCR; the server
+# only pulls it (postgres still comes from Docker Hub).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Never cancel an in-flight deploy; queue the next one instead.
+concurrency:
+  group: deploy-quickstart
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write # push images to GHCR with GITHUB_TOKEN
+
+jobs:
+  deploy:
+    name: Build, push, and deploy
+    runs-on: ubuntu-latest
+    # Repository-level secrets (Settings → Secrets and variables → Actions).
+    # Add `environment: production` here if you later want environment-scoped
+    # secrets or required-reviewer approval before deploys.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    env:
+      # For workflow_run, build the exact commit CI validated.
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Compute GHCR namespace
+        # GHCR requires a lowercase namespace.
+        run: echo "GHCR_NAMESPACE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push quickstart image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: quickstart
+          push: true
+          tags: |
+            ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:latest
+          cache-from: type=gha,scope=quickstart
+          cache-to: type=gha,mode=max,scope=quickstart
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_NAMESPACE
+          script: |
+            set -e
+            cd /opt/nexusdesk
+            export NEXUSDESK_VERSION="${IMAGE_TAG}"
+            export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
+            docker compose -f deploy/quickstart/compose.yaml pull
+            # Recreates the app container on the new image; the container
+            # bootstrap runs migrations before serving traffic. --wait fails
+            # the deploy if the healthcheck does not pass in time.
+            docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
+            docker compose -f deploy/quickstart/compose.yaml ps
+            docker image prune -f
