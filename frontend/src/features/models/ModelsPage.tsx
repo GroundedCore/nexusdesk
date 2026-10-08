@@ -230,6 +230,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
       {selected && admin && <div className="gateway-extra"><Popconfirm title={t("移除资源？被其他资源或发布版本引用时无法移除。")} onConfirm={() => action.run(async () => { await api(`${root}/resources/${kind}/${selected.id}?revision=${selected.revision}`, { method: 'DELETE' }); setEditorOpen(false); setSelected(null); refresh(); }, t("资源已移除"))}><button disabled={action.busy} className="secondary">{t("删除资源")}</button></Popconfirm></div>}
     </Drawer>
     {workspace === 'playground' && <Panel title={t("模型试用台")}>
+      <div className="gateway-playground">
       <form onSubmit={e => {
                 e.preventDefault();
                 void action.run(async () => {
@@ -269,7 +270,9 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
             body.pages = [{ source_id: 'page-1', media_id: media.id }]; setPayload(pretty(body)); }, t("媒体已上传")); }}/></Field>
           <button disabled={!profile}>{t("调用模型")}</button>
         </fieldset>
-      </form>{audio && <audio controls src={audio}/>}<pre>{result}</pre>
+      </form>
+      <div className="gateway-playground-output">{audio && <audio controls src={audio}/>}<pre>{result}</pre></div>
+      </div>
     </Panel>}
     {(workspace === 'logs' || workspace === 'monitor') && <GatewayReports key={workspace} mode={workspace}/>}
     {admin && (workspace === 'access_keys' || workspace === 'sensitive_words' || workspace === 'alert_rules' || workspace === 'quota') && <GatewayGovernance key={workspace} section={workspace} profiles={profiles.data || []}/>}

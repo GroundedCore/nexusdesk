@@ -76,3 +76,14 @@
 
 .gateway-extra{margin-top:28px;padding-top:20px;border-top:1px solid #e8eaf2}.gateway-date-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.gateway-date-toolbar .field{flex:1;max-width:240px}.gateway-date-toolbar button{margin-bottom:18px}.model-gateway .gateway-toolbar>input{max-width:420px;flex:1;min-width:180px}.model-gateway .ant-pagination{margin-top:20px}.gateway-editor select[multiple]{min-height:130px}.gateway-editor .gateway-extra .field{max-width:none}.model-gateway>.panel form{max-width:640px}
 
+/* 模型试用台：表单在左，调用结果在右，避免上下滚动对照。 */
+.gateway-playground{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:start}
+/* 上面的面板级 640px 限宽会把左栏压扁，这里放开。 */
+.model-gateway>.panel .gateway-playground form{max-width:none}
+/* 全局 .split 的列下限是 260px+360px，半宽容器里放不下就会溢出压住右栏。 */
+.gateway-playground form .split{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
+.gateway-playground-output{min-width:0;display:flex;flex-direction:column;gap:12px}
+.gateway-playground-output pre{margin:0;max-height:min(70vh,640px);overflow:auto;white-space:pre-wrap;word-break:break-word}
+.gateway-playground-output audio{width:100%}
+@media(max-width:1100px){.gateway-playground{grid-template-columns:minmax(0,1fr);gap:20px}}
+
