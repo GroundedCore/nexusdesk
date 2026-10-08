@@ -1,9 +1,9 @@
-import { t } from '../../i18n/index';
+import { t, errorText } from '../../i18n/index';
 import { useEffect, useState } from 'react';
 import { api, patch, post, put, token } from '../../shared/api/client';
 import { Alert, Empty, Field, Panel, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { AppstoreOutlined, SearchOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert as AntAlert, Drawer, Pagination, Popconfirm } from 'antd';
+import { Alert as AntAlert, Drawer, message, Pagination, Popconfirm } from 'antd';
 import { GatewayGovernance, ModelPolicyForm, type ManagementSection } from './GatewayGovernance';
 import { GatewayReports } from './GatewayReports';
 import { useCatalogOptions } from './useCatalogOptions';
@@ -48,13 +48,15 @@ function editorSpec(kind: Kind, spec: Record<string, unknown>) {
 const labels = (): Record<Workspace, string> => ({ connections: t("渠道管理"), models: t("模型广场"), profiles: t("配置方案"), playground: t("模型体验"), logs: t("调用日志"), monitor: t("监控概览"), access_keys: t("访问密钥"), sensitive_words: t("敏感词库"), alert_rules: t("告警管理"), quota: t("配额管理") });
 const resourceNames = (): Record<Kind, string> => ({ connections: t("渠道"), models: t("模型"), profiles: t("配置方案") });
 const operations = (): Record<string, string> => ({ chat: t("对话生成"), embed: t("文本向量"), rerank: t("重排序"), transcribe: t("语音识别"), synthesize: t("语音合成"), recognize: t("图像识别") });
-function ResourceTable({ rows, kind, admin, onSelect }: {
+function ResourceTable({ rows, kind, admin, onSelect, onProbe, onDelete }: {
     rows: ModelResource[];
     kind: Kind;
     admin: boolean;
     onSelect: (row: ModelResource) => void;
+    onProbe?: (row: ModelResource) => void;
+    onDelete?: (row: ModelResource) => void;
 }) {
-    return <div className="table-scroll"><table className="gateway-resource-table"><thead><tr><th>{kind === 'connections' ? t("渠道名称") : t("方案名称")}</th><th>{kind === 'connections' ? t("服务地址") : t("调用能力")}</th><th>{kind === 'connections' ? t("协议") : t("发布版本")}</th><th>{t("状态")}</th><th>{kind === 'connections' ? t("凭据") : t("主模型 ID")}</th><th>{t("修订")}</th><th>{t("操作")}</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><button className="text-button" onClick={() => onSelect(row)}>{row.name}</button></td><td className="gateway-url" title={String(row.spec.base_url || '')}>{kind === 'connections' ? String(row.spec.base_url || '—') : operations()[String(row.spec.operation)] || String(row.spec.operation)}</td><td>{kind === 'connections' ? String(row.spec.protocol) : row.published_version ? `v${row.published_version}` : t("未发布")}</td><td><span className={`gateway-state ${row.enabled ? 'enabled' : ''}`}>{row.enabled ? t("已启用") : t("已停用")}</span></td><td>{kind === 'connections' ? row.credential_configured == null ? '—' : row.credential_configured ? t("已配置") : t("待配置") : String(row.spec.model_id)}</td><td>r{row.revision}</td><td><button className="text-button" onClick={() => onSelect(row)}>{admin ? t("配置") : t("查看")}</button></td></tr>)}</tbody></table></div>;
+    return <div className="table-scroll"><table className="gateway-resource-table"><thead><tr><th>{kind === 'connections' ? t("渠道名称") : t("方案名称")}</th><th>{kind === 'connections' ? t("服务地址") : t("调用能力")}</th><th>{kind === 'connections' ? t("协议") : t("发布版本")}</th><th>{t("状态")}</th><th>{kind === 'connections' ? t("凭据") : t("主模型 ID")}</th><th>{t("修订")}</th><th>{t("操作")}</th></tr></thead><tbody>{rows.map(row => <tr key={row.id}><td><button className="text-button" onClick={() => onSelect(row)}>{row.name}</button></td><td className="gateway-url" title={String(row.spec.base_url || '')}>{kind === 'connections' ? String(row.spec.base_url || '—') : operations()[String(row.spec.operation)] || String(row.spec.operation)}</td><td>{kind === 'connections' ? String(row.spec.protocol) : row.published_version ? `v${row.published_version}` : t("未发布")}</td><td><span className={`gateway-state ${row.enabled ? 'enabled' : ''}`}>{row.enabled ? t("已启用") : t("已停用")}</span></td><td>{kind === 'connections' ? row.credential_configured == null ? '—' : row.credential_configured ? t("已配置") : t("待配置") : String(row.spec.model_id)}</td><td>r{row.revision}</td><td><button className="text-button" onClick={() => onSelect(row)}>{admin ? t("配置") : t("查看")}</button>{onProbe && <button className="text-button" onClick={() => onProbe(row)}>{t("检测连接")}</button>}{onDelete && <Popconfirm title={t("移除资源？被其他资源或发布版本引用时无法移除。")} onConfirm={() => onDelete(row)}><button className="text-button">{t("删除资源")}</button></Popconfirm>}</td></tr>)}</tbody></table></div>;
 }
 function ResourceFields({ kind, editor, onChange, connections, models }: {
     kind: Kind;
@@ -107,6 +109,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
 }) {
     const { admin, operator } = useAccess();
     const action = useAction();
+    const [messageApi, contextHolder] = message.useMessage();
     const [kind, setKind] = useState<Kind>(['connections', 'models', 'profiles'].includes(routeSection) ? routeSection as Kind : 'models');
     const [workspace, setWorkspace] = useState<Workspace>(routeSection);
     const [editorOpen, setEditorOpen] = useState(false);
@@ -117,7 +120,6 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     useEffect(() => { if (!editorOpen) { setApiKey(''); setClearKey(false); } }, [editorOpen]);
     const [connectionFilter, setConnectionFilter] = useState('all');
     const [page, setPage] = useState(1);
-    const [diagnostic, setDiagnostic] = useState('');
     const [query, setQuery] = useState('');
     const [status, setStatus] = useState('all');
     const [capability, setCapability] = useState('all');
@@ -171,6 +173,10 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
         setEditor(pretty(draft));
     }
     async function select(row: ModelResource) { setApiKey(''); setClearKey(false); setCredentialRef(String(row.spec.credential_ref || '')); setCredentialMode(row.spec.credential_ref ? 'environment' : 'direct'); setSelected(row); setEditor(pretty(editorSpec(kind, row.spec))); setEditorOpen(true); setVersions([]); setVersions(kind === 'profiles' ? await api(`${root}/profiles/${row.id}/versions`) : []); }
+    // Shared by the drawer button and the list action so both report identically.
+    async function probeConnection(row: ModelResource) { try { const result = await post<{ status: string; demo: boolean; duration_ms: number }>(`${root}/connections/${row.id}/probe`); if (result.status !== 'available') { messageApi.error(t("连接不可用，请检查地址、凭据与主机白名单")); return; } messageApi.success(result.demo ? t("连接可用（演示协议，未发起真实请求）· {{v0}} ms", { v0: result.duration_ms }) : t("连接可用 · {{v0}} ms", { v0: result.duration_ms })); } catch (error) { messageApi.error(errorText(error instanceof Error ? error.message : String(error))); } }
+    // Same endpoint the drawer uses; clears the editor only if it showed that row.
+    async function removeResource(row: ModelResource) { await api(`${root}/resources/${kind}/${row.id}?revision=${row.revision}`, { method: 'DELETE' }); if (selected?.id === row.id) { setEditorOpen(false); setSelected(null); } refresh(); }
     function navigate(next: Workspace) { onNavigate(next); }
     useEffect(() => { action.clear(); setWorkspace(routeSection); setEditorOpen(false); if (routeSection === 'connections' || routeSection === 'models' || routeSection === 'profiles')
         reset(routeSection); }, [routeSection]);
@@ -180,6 +186,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     const pageRows = visible;
     const managing = workspace === 'connections' || workspace === 'models' || workspace === 'profiles';
     return <div className="model-gateway">
+    {contextHolder}
     {profiles.data && !profiles.error && !profiles.data.some(row => row.enabled && row.published_version && row.spec.operation === 'chat') && <AntAlert showIcon type="info" style={{marginBottom: 16}} title={t('尚未配置可用的对话模型')} description={t('平台可以先启动。请添加供应商连接和 Chat 模型，发布配置方案后绑定到 Agent，即可开始对话。')} />}
     {!editorOpen && <Alert error={action.error || list.error || connections.error || models.error || profiles.error} notice={action.notice}/>}
     <div className="gateway-nav" aria-label={t("模型网关功能")}>{(['models', 'connections', 'profiles', 'playground', 'logs', 'monitor', ...(admin ? ['access_keys', 'sensitive_words', 'alert_rules', 'quota'] : [])] as Workspace[]).map(k => <button aria-pressed={workspace === k} className={workspace === k ? 'active' : ''} key={k} disabled={action.busy} onClick={() => navigate(k)}>{labels()[k]}</button>)}<button className="gateway-refresh" aria-label={t("刷新资源")} onClick={refresh}><ReloadOutlined /></button></div>
@@ -189,7 +196,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     <div className="gateway-toolbar"><label className="gateway-search"><SearchOutlined /><input aria-label={t("搜索资源")} placeholder={t("搜索名称、模型标识或资源 ID")} value={query} onChange={e => setQuery(e.target.value)}/></label><select aria-label={t("资源状态")} value={status} onChange={e => setStatus(e.target.value)}><option value="all">{t("全部状态")}</option><option value="enabled">{t("已启用")}</option><option value="disabled">{t("已停用")}</option></select><button disabled={!admin || action.busy} onClick={() => { reset(kind); setEditorOpen(true); }}><PlusOutlined aria-hidden="true"/>{t(" 新建")}{resourceNames()[kind]}</button></div>
     <div className="gateway-workspace"><Panel title={`${labels()[kind]} · ${visible?.length ?? 0}`}>
       {list.loading && <p className="empty">{t("正在加载资源\u2026")}</p>}
-      {kind !== 'models' ? <ResourceTable rows={pageRows || []} kind={kind} admin={admin} onSelect={row => void action.run(() => select(row), '')}/> : <div className="gateway-cards">{pageRows?.map(row => <button aria-pressed={selected?.id === row.id} className={`gateway-card ${selected?.id === row.id ? 'selected' : ''}`} key={row.id} onClick={() => void action.run(() => select(row), '')}><div className="gateway-card-top"><span className="gateway-resource-icon"><AppstoreOutlined /></span><span className={`gateway-state ${row.enabled ? 'enabled' : ''}`}>{row.enabled ? t("已启用") : t("已停用")}</span></div><strong>{row.name}</strong><p>{String(row.spec.model_name || row.spec.protocol || operations()[String(row.spec.operation)] || t("模型配置"))}</p><div className="gateway-tags">{(Array.isArray(row.spec.operations) ? row.spec.operations : []).map(value => <span key={String(value)}>{operations()[String(value)] || String(value)}</span>)}{row.spec.tool_calling === true && <span>{t("工具调用")}</span>}{row.credential_configured != null && <span>{row.credential_configured ? t("凭据已配置") : t("凭据待配置")}</span>}</div><div className="gateway-card-bottom"><span>{t("修订 r")}{row.revision}{row.published_version ? t(" \u00B7 发布 v{{v0}}", { v0: row.published_version }) : ''}</span><span>{admin ? t("配置 \u2192") : t("查看 \u2192")}</span></div></button>)}</div>}{visible?.length === 0 && <Empty>{query || status !== 'all' || capability !== 'all' ? t("没有匹配的资源，请调整筛选条件") : t("尚未添加{{v0}}，点击右上角添加第一个资源", { v0: labels()[kind] })}</Empty>}
+      {kind !== 'models' ? <ResourceTable rows={pageRows || []} kind={kind} admin={admin} onSelect={row => void action.run(() => select(row), '')} onProbe={kind === 'connections' && admin ? row => void action.run(() => probeConnection(row), '') : undefined} onDelete={kind === 'profiles' && admin ? row => void action.run(() => removeResource(row), t("资源已移除")) : undefined}/> : <div className="gateway-cards">{pageRows?.map(row => <button aria-pressed={selected?.id === row.id} className={`gateway-card ${selected?.id === row.id ? 'selected' : ''}`} key={row.id} onClick={() => void action.run(() => select(row), '')}><div className="gateway-card-top"><span className="gateway-resource-icon"><AppstoreOutlined /></span><span className={`gateway-state ${row.enabled ? 'enabled' : ''}`}>{row.enabled ? t("已启用") : t("已停用")}</span></div><strong>{row.name}</strong><p>{String(row.spec.model_name || row.spec.protocol || operations()[String(row.spec.operation)] || t("模型配置"))}</p><div className="gateway-tags">{(Array.isArray(row.spec.operations) ? row.spec.operations : []).map(value => <span key={String(value)}>{operations()[String(value)] || String(value)}</span>)}{row.spec.tool_calling === true && <span>{t("工具调用")}</span>}{row.credential_configured != null && <span>{row.credential_configured ? t("凭据已配置") : t("凭据待配置")}</span>}</div><div className="gateway-card-bottom"><span>{t("修订 r")}{row.revision}{row.published_version ? t(" \u00B7 发布 v{{v0}}", { v0: row.published_version }) : ''}</span><span>{admin ? t("配置 \u2192") : t("查看 \u2192")}</span></div></button>)}</div>}{visible?.length === 0 && <Empty>{query || status !== 'all' || capability !== 'all' ? t("没有匹配的资源，请调整筛选条件") : t("尚未添加{{v0}}，点击右上角添加第一个资源", { v0: labels()[kind] })}</Empty>}
     </Panel></div>
     <div className="gateway-pagination"><span>{t("共 ")}{list.data?.total ?? 0}{t(" 条资源")}</span><Pagination current={currentPage} pageSize={12} total={list.data?.total ?? 0} showSizeChanger={false} onChange={setPage} showTotal={total => t("筛选结果 {{v0}} 条", { v0: total })}/></div>
     </div></div>}
@@ -214,7 +221,7 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
           {kind === 'models' && <p className="hint">{t('温度、最大输出 Token、思考模式等调用参数在「配置方案」中设置；此处仅配置模型信息。')}</p>}
           <details open className="gateway-advanced"><summary>{t("高级配置 \u00B7 JSON")}</summary><Field label={t("配置 JSON")}><textarea rows={7} required value={editor} onChange={e => editJson(e.target.value)} spellCheck={false}/></Field></details>
           <p className="hint">{t("支持直接填写 API Key，也可使用环境变量。Embedding 模型需声明 embedding_dimension、vector_space；语音合成需声明 voices。")}</p>
-          <div className="actions"><button>{t("保存")}</button>{selected && <><button type="button" className="secondary" onClick={() => void action.run(async () => { await patch(`${root}/${kind}/${selected.id}`, { revision: selected.revision, enabled: !selected.enabled }); setSelected(null); setEditorOpen(false); refresh(); }, t("启停状态已更新"))}>{selected.enabled ? t("停用") : t("启用")}</button>{kind === 'connections' && <button type="button" className="secondary" onClick={() => void action.run(async () => setDiagnostic(pretty(await post(`${root}/connections/${selected.id}/probe`))), t("连接检测完成"))}>{t("检测连接")}</button>}{kind === 'profiles' && <button type="button" onClick={() => void action.run(async () => { await post(`${root}/profiles/${selected.id}/publish`, { revision: selected.revision }); setVersions(await api(`${root}/profiles/${selected.id}/versions`)); refresh(); }, t("已发布新版本"))}>{t("发布已保存方案")}</button>}</>}</div>
+          <div className="actions"><button>{t("保存")}</button>{selected && <><button type="button" className="secondary" onClick={() => void action.run(async () => { await patch(`${root}/${kind}/${selected.id}`, { revision: selected.revision, enabled: !selected.enabled }); setSelected(null); setEditorOpen(false); refresh(); }, t("启停状态已更新"))}>{selected.enabled ? t("停用") : t("启用")}</button>{kind === 'connections' && <button type="button" className="secondary" onClick={() => void action.run(() => probeConnection(selected), '')}>{t("检测连接")}</button>}{kind === 'profiles' && <button type="button" onClick={() => void action.run(async () => { await post(`${root}/profiles/${selected.id}/publish`, { revision: selected.revision }); setVersions(await api(`${root}/profiles/${selected.id}/versions`)); refresh(); }, t("已发布新版本"))}>{t("发布已保存方案")}</button>}</>}</div>
         </fieldset>
       </form>
       {versions.map(v => <div className="row" key={v.version}><span>{t("版本 ")}{v.version}</span><button disabled={!admin || action.busy} className="text-button" onClick={() => void action.run(async () => { await post(`${root}/profiles/${selected!.id}/rollback`, v); refresh(); }, t("发布指针已切换；已绑定的固定版本保持不变"))}>{t("切换发布版本")}</button></div>)}
@@ -266,6 +273,5 @@ export function ModelsPage({ routeSection = 'models', onNavigate }: {
     </Panel>}
     {(workspace === 'logs' || workspace === 'monitor') && <GatewayReports key={workspace} mode={workspace}/>}
     {admin && (workspace === 'access_keys' || workspace === 'sensitive_words' || workspace === 'alert_rules' || workspace === 'quota') && <GatewayGovernance key={workspace} section={workspace} profiles={profiles.data || []}/>}
-    <Drawer title={t("执行诊断")} open={!!diagnostic} onClose={() => setDiagnostic('')} size={640}><pre>{diagnostic}</pre></Drawer>
   </div>;
 }
