@@ -70,7 +70,7 @@ jobs:
           envs: IMAGE_TAG,GHCR_NAMESPACE
           script: |
             set -e
-            cd /opt/nexusdesk
+            cd /home/nexus/nexusdesk
             export NEXUSDESK_VERSION="${IMAGE_TAG}"
             export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
             docker compose -f deploy/quickstart/compose.yaml pull

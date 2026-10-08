@@ -101,7 +101,7 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 ```sh
 # 1. 检出仓库（构建发生在 Actions，服务器只需 compose 文件）
-git clone https://github.com/GroundedCore/nexusdesk.git /opt/nexusdesk
+git clone https://github.com/GroundedCore/nexusdesk.git /home/nexus/nexusdesk
 
 # 2. GHCR 镜像包可见性独立于仓库：首次推送后 package 默认为私有（即使仓库
 #    是 public）。在 GitHub Packages 页面将 nexusdesk-quickstart 设为 public
