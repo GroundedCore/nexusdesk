@@ -18,3 +18,7 @@ playwright-report/
 # Covers Playwright output directories (test-results-<name>/) and stray screenshots.
 test-results*
 backend/data/credentials/
+
+docs/onboarding/
+
+.claude/

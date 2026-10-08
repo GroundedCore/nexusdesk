@@ -15,7 +15,7 @@ services:
       timeout: 3s
       retries: 20
   app:
-    image: nexusdesk-quickstart:${NEXUSDESK_VERSION:-local}
+    image: ${NEXUSDESK_IMAGE_REGISTRY:-}nexusdesk-quickstart:${NEXUSDESK_VERSION:-local}
     build:
       context: ../..
       target: quickstart
