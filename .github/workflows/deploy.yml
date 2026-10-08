@@ -68,6 +68,9 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           envs: IMAGE_TAG,GHCR_NAMESPACE
+          # The default 10m is not enough for the first image pull on a
+          # slow server-to-GHCR link plus the --wait healthcheck window.
+          command_timeout: 30m
           script: |
             set -e
             cd /home/nexus/nexusdesk
