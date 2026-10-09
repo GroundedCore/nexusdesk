@@ -30,6 +30,7 @@ services:
       AGENT_DATABASE_URL: postgresql+asyncpg://nexusdesk:nexusdesk_local_only@postgres:5432/nexusdesk
       AGENT_ENVIRONMENT: production
       AGENT_QUICKSTART_MODE: "true"
+      AGENT_SEED_INDUSTRIES: "true"
       AGENT_MODEL_BACKEND: demo
       AGENT_TENANT_ID: local
       AGENT_EMBEDDED_WORKER: "true"

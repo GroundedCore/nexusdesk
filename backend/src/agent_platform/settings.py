@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # first login. Development can set AGENT_REQUIRE_PASSWORD_CHANGE=false to skip
     # that gate; leave it enabled for any shared or production deployment.
     require_password_change: bool = True
+    # Bootstrap loads the full industry demo case set when enabled. Off by default so
+    # production stays clean; deploy/quickstart enables it explicitly.
+    seed_industries: bool = False
     worker_concurrency: int = Field(default=8, ge=1, le=256)
     queue_capacity: int = Field(default=200, ge=1)
     tenant_capacity: int = Field(default=50, ge=1)

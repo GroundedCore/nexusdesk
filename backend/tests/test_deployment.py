@@ -59,6 +59,63 @@ def test_production_rejects_demo_and_placeholder_credentials():
         configuration(quickstart_mode=True)
 
 
+def test_seed_industries_defaults_off_and_is_env_overridable(monkeypatch):
+    # Production must stay clean unless the operator opts in explicitly.
+    assert configuration().seed_industries is False
+    monkeypatch.setenv("AGENT_SEED_INDUSTRIES", "true")
+    assert (
+        Settings(
+            _env_file=None,
+            database_url="postgresql+asyncpg://test:test@localhost/test",
+        ).seed_industries
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_published_chat_selection_rules():
+    from agent_platform.apps.seed_industries import resolve_published_chat
+
+    class Catalog:
+        def __init__(self, rows):
+            self.rows = rows
+
+        async def list(self, tenant, kind):
+            assert kind == "profiles"
+            return self.rows
+
+    def platform(rows):
+        return SimpleNamespace(gateway=SimpleNamespace(catalog=Catalog(rows)))
+
+    def row(identifier, name, operation, version, enabled=True):
+        return {
+            "id": identifier,
+            "name": name,
+            "spec": {"operation": operation},
+            "published_version": version,
+            "enabled": enabled,
+        }
+
+    assert await resolve_published_chat(platform([]), "t") == (None, None)
+    # Draft, non-chat, and disabled profiles are all skipped.
+    noise = [
+        row("draft", "草稿方案", "chat", None),
+        row("embed", "嵌入方案", "embedding", 3),
+        row("disabled", "停用方案", "chat", 1, enabled=False),
+    ]
+    assert await resolve_published_chat(platform(noise), "t") == (None, None)
+    # The demo profile seed.py publishes wins over newer published Chat profiles.
+    rows = [row("newer", "生产方案", "chat", 9), row("demo", "示例客服模型方案", "chat", 1)]
+    assert await resolve_published_chat(platform(rows), "t") == ("demo", 1)
+    # With no demo profile named, the newest published Chat profile is used.
+    assert await resolve_published_chat(
+        platform([row("only", "某个 Chat 方案", "chat", 4)]), "t"
+    ) == (
+        "only",
+        4,
+    )
+
+
 @pytest.mark.asyncio
 async def test_unconfigured_model_never_falls_back_to_demo():
     from agent_platform.modules.agent_runtime.schemas import RuntimeFault
@@ -109,6 +166,11 @@ def test_deployment_topologies_and_no_secret_copy():
             == "service_completed_successfully"
         )
     assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text()
+    # Quickstart loads the industry case set; production stays clean unless opted in.
+    assert quick["services"]["app"]["environment"]["AGENT_SEED_INDUSTRIES"] == "true"
+    for name in ("api", "runtime-worker", "knowledge-worker"):
+        assert "AGENT_SEED_INDUSTRIES" not in prod["services"][name]["environment"]
+    assert "AGENT_SEED_INDUSTRIES=false" in (ROOT / "deploy/production/.env.example").read_text()
     quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()
     assert "proxy_set_header Authorization $http_authorization;" in quick_nginx
     # Quickstart injects the local admin token only as a placeholder that the

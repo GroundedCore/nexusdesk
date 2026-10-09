@@ -5,7 +5,7 @@ import pytest
 from test_model_gateway import setup
 from test_platform_postgres import platform as _platform
 
-from agent_platform.apps.seed_industries import BATCH, seed
+from agent_platform.apps.seed_industries import BATCH, resolve_published_chat, seed
 from agent_platform.modules.knowledge.service import DocumentInput
 from agent_platform.platform.persistence.store import DomainError, execute, one
 
@@ -104,3 +104,19 @@ async def test_explicit_profile_binding_does_not_publish_or_call_model(platform)
             assert not agent["needs_model"]
             assert agent["published_version"] is None
     assert await runtime.platform.gateway.records(settings.tenant_id) == []
+
+
+async def test_resolve_published_chat_targets_the_published_profile(platform):
+    client, runtime, settings = platform
+    _, _, profile = await setup(client)
+    # Before publication there is nothing to bind, so quickstart leaves it empty.
+    assert await resolve_published_chat(runtime.platform, "no-such-tenant") == (None, None)
+
+    resolved = await resolve_published_chat(runtime.platform, settings.tenant_id)
+    assert resolved == (UUID(profile["id"]), 1)
+    # The bound profile lets the case agents report no missing model, still unpublished.
+    report = await seed(runtime.platform, settings.tenant_id, *resolved)
+    assert report["created"]["agents"] == 18
+    assert all(
+        not agent["needs_model"] for group in report["industries"] for agent in group["agents"]
+    )

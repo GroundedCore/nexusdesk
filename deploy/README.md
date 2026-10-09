@@ -18,7 +18,7 @@ Windows PowerShell：
 
 启动成功后访问 http://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。不要将体验入口通过代理、端口转发或修改绑定地址暴露给其他人：体验代理会为未携带身份的请求自动注入本地服务令牌（admin 角色），任何能访问该入口的人都拥有完整管理权限；确需放开绑定时，务必用安全组/防火墙将端口限制为可信 IP。
 
-应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据；再次启动保留数据。部署自动初始化本地管理员 admin / nexusdesk，首次登录必须改密。Nginx 对未携带 Authorization 头的请求注入首次启动生成的本地服务令牌（admin 角色），已携带身份的请求原样透传。该令牌持久化保存在数据卷中，不写入前端资源或启动输出。
+应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk，首次登录必须改密。Nginx 对未携带 Authorization 头的请求注入首次启动生成的本地服务令牌（admin 角色），已携带身份的请求原样透传。该令牌持久化保存在数据卷中，不写入前端资源或启动输出。
 
 进入“会话工作台”选择 `sample-support`：
 
@@ -51,7 +51,7 @@ sh nexusdesk deploy
 
 PowerShell 使用 `Copy-Item` 复制模板，再执行 `.\nexusdesk.ps1 deploy`。环境变量文件中的特殊字符按 Compose .env 规则引用；数据库 URL 的密码需要 URL 编码。不要把真实 .env、主密钥提交到代码仓库。
 
-包含 Web、API、Runtime Worker、Knowledge Worker 四个常驻容器，共用后端镜像；另有一次性 migrate 服务。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，不导入演示数据。
+包含 Web、API、Runtime Worker、Knowledge Worker 四个常驻容器，共用后端镜像；另有一次性 migrate 服务。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，默认不导入演示数据。如需在目标库预置行业案例，在 `.env` 设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
 
 - PostgreSQL 必需；配置 `AGENT_DATABASE_URL`。
 - 默认使用 `AGENT_MODEL_BACKEND=unconfigured`，无需模型密钥即可启动。界面提示添加供应商连接、Chat 模型和发布配置方案，再绑定到 Agent；未配置时对话明确返回配置提示，不降级 Demo。可选的旧版默认模型通过 `openai` 后端配置。

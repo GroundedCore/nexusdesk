@@ -22,3 +22,7 @@ backend/data/credentials/
 docs/onboarding/
 
 .claude/
+scripts/
+.run-logs/
+# Local agent artifacts (memory, plan drafts, probe scripts)
+.workbuddy/

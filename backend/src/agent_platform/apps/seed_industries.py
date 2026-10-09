@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -41,6 +42,27 @@ def agent_config(case, sample, kid, profile_id=None, profile_version=None):
         model_profile_id=profile_id,
         model_profile_version=profile_version,
     )
+
+
+async def resolve_published_chat(platform, tenant):
+    """Newest published Chat profile for the tenant as (id, version), else (None, None).
+
+    Used by quickstart so the case agents are immediately testable against the demo
+    profile that seed.py publishes. Never publishes or calls a model.
+    """
+    profiles = await platform.gateway.catalog.list(tenant, "profiles")
+    chat = [
+        row
+        for row in profiles
+        if row["spec"].get("operation") == "chat"
+        and row.get("published_version")
+        and row.get("enabled", True)
+    ]
+    if not chat:
+        return None, None
+    # Prefer the profile seed.py publishes, otherwise the newest published Chat profile.
+    preferred = next((row for row in chat if row["name"] == "示例客服模型方案"), chat[0])
+    return preferred["id"], preferred["published_version"]
 
 
 async def seed(platform, tenant, profile_id=None, profile_version=None):
@@ -207,9 +229,17 @@ async def seed(platform, tenant, profile_id=None, profile_version=None):
 async def main(args):
     settings = Settings()
     async with runtime_services(settings) as runtime:
-        report = await seed(
-            runtime.platform, settings.tenant_id, args.profile_id, args.profile_version
-        )
+        profile_id, profile_version = args.profile_id, args.profile_version
+        if profile_id is None and args.bind_published_chat:
+            profile_id, profile_version = await resolve_published_chat(
+                runtime.platform, settings.tenant_id
+            )
+            if profile_id is None:
+                print(
+                    "未找到已发布的 Chat 方案，案例 Agent 的模型绑定留空。",
+                    file=sys.stderr,
+                )
+        report = await seed(runtime.platform, settings.tenant_id, profile_id, profile_version)
     payload = json.dumps(report, ensure_ascii=False, indent=2)
     if args.report:
         args.report.write_text(payload + "\n", encoding="utf-8")
@@ -222,5 +252,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--profile-id", type=UUID, help="可选：显式绑定已发布 Chat 方案")
     parser.add_argument("--profile-version", type=int)
+    parser.add_argument(
+        "--bind-published-chat",
+        action="store_true",
+        help="自动绑定租户内已发布的 Chat 方案（quickstart 演示用）",
+    )
     parser.add_argument("--report", type=Path, help="将初始化清单写入指定 JSON 文件")
     asyncio.run(main(parser.parse_args()))

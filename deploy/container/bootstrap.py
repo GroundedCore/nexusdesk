@@ -106,6 +106,14 @@ async def initialize_administrator(settings):
         await engine.dispose()
 
 
+def seed_industry_cases(settings):
+    """Load the full industry demo case set. Idempotent; preserves manual edits."""
+    command = [sys.executable, "-m", "agent_platform.apps.seed_industries"]
+    if settings.quickstart_mode:
+        command.append("--bind-published-chat")
+    subprocess.run(command, check=True)
+
+
 async def check_storage(settings):
     if settings.milvus_url:
         import httpx
@@ -166,9 +174,13 @@ def main(mode):
     asyncio.run(initialize_key(settings))
     if mode == "migrate":
         asyncio.run(check_storage(settings))
+        if settings.seed_industries:
+            seed_industry_cases(settings)
         print("Migrations and configured storage checks completed.", flush=True)
         return
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed"], check=True)
+    if settings.seed_industries:
+        seed_industry_cases(settings)
     config = (
         Path("/app/deploy/nginx.conf.template")
         .read_text()

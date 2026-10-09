@@ -53,6 +53,8 @@ Open **http://localhost:8080**, then open `sample-support` in the conversation w
 - Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.
 - Enter `帮我创建工单` ("Help me create a ticket") to try the draft, confirm, and create flow.
 
+Nine industry case sets are also loaded: 9 knowledge bases, 18 agent drafts, and 36 documents. Every resource name carries the `[案例]` prefix, the agent list can be filtered with "examples only", and the case agents are pre-bound to the demo Chat profile so they are ready to chat.
+
 Only two containers (App + PostgreSQL) are started, and no model key is required. The preset scenario uses a mock model and the page shows a demo badge; it is for local evaluation only and does not represent real model answer quality.
 
 > **Keep the two demo inputs above in Chinese.** The mock model triggers on hard-coded Chinese phrases (`工单` selects the ticket tool), and the seeded demo documents are Chinese, so translated inputs will not exercise the same paths.
