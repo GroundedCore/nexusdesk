@@ -93,14 +93,22 @@ api 进程（每进程一条专用 LISTEN 连接，可监听多通道）
 
 ## 按面呈现（独白与思维链）
 
-| 面 | 端点 | 过程独白（中间轮文字） | 思维链 | 最终答案 |
+| 面 | 端点 | 过程轮（中间轮文字） | 思维链 | 最终答案 |
 |---|---|---|---|---|
-| 内部调试（`Trace`、可观测性、会话工作台） | 内部 SSE `/api/v1/runs/{id}/events` | 流式显示，标记为"过程" | 流式显示 | 流式显示 |
-| 公开 API（集成方、`EmbedChat`、集成调试台） | 公开 SSE `/open/v1/.../messages?stream=true` | 不发送 | 不发送 | `run.completed` 带完整 `view(final)`（照旧） |
+| 内部调试（`Trace`、可观测性、会话工作台） | 内部 SSE `/api/v1/runs/{id}/events` | 转发，前端标记为"过程" | 流式转发 | 流式 |
+| 公开 API（集成方、`EmbedChat`、集成调试台） | 公开 SSE `/openapi/v1/.../messages?stream=true` | 转发，但客户端按下方规则丢弃 | **不发送** | 流式，且 `run.completed` 带完整 `view(final)` |
 
-两个 SSE 端点是独立代码路径，公开端点本就有过滤注释。**delta 通知只接进内部端点**，公开端点不订阅 delta，独白天然出不去。
+**两个面都逐字，也都只展示最后一轮答复。** 差别只有思维链：它是内部调试信息，公开 API 不暴露。
 
-**公开 API 的固有限制**：多轮 ReAct 下，某轮流式输出时无法预知它末尾会不会补 tool_calls，一旦补了，已流出的文字就是独白、收不回来。因此 v1 让公开 API 保持现状不动。
+### 判定"哪一轮是答案"
+
+多轮 ReAct 下，某轮流式输出时**无法预知**它末尾会不会补 tool_calls（`engine.py` 里带工具调用的轮次其 `output` 会被丢弃）。所以两个面都按同一条规则判定：
+
+> **答案是最后一轮 `tool_calls == 0` 的轮次。** 以工具调用结束的轮次是模型的"过程话术"，客户端应丢弃其文本。
+
+公开 SSE 因此转发 `model.delta{round, text}`，并转发带 `round` 与 `tool_calls` 的 `model.completed`，让客户端可以在该轮结束时丢弃它。`run.completed` 仍携带完整 `view(final)` 作为权威结果。
+
+**已知代价**：某轮在结束前会被当作候选答案流式显示，若该轮最终以工具调用结束，客户端的文本会被清掉并换成真正的答案。这是在"要逐字"与"要零泄漏"之间必须二选一时选前者——结构性零泄漏只能靠缓冲整轮、从而丧失逐字效果。
 
 ---
 
@@ -115,7 +123,9 @@ api 进程（每进程一条专用 LISTEN 连接，可监听多通道）
 | 5 | `repository.py` `_event` | 加 `SELECT pg_notify(channel, pointer)`，所有持久事件自动带通知 |
 | 6 | 新增监听组件 | 每进程一条专用连接（asyncpg `add_listener`）、自动重连、`LISTEN`/`UNLISTEN` 生命周期 |
 | 7 | `runtime_routes.py` | 内部 SSE 循环改事件驱动 + 15s 安全网（`wait_for` + 兜底轮询） |
-| 8 | 前端 `Trace` / 会话视图 | 按轮渲染 `model.delta`（含思维链，折叠/灰化标记过程轮） |
+| 8 | `open_platform/routes.py` | 公开 SSE 订阅同一通知，转发 `model.delta`（**只带可见文本，不带思维链**），并给 `model.started`/`model.completed` 补 `round`/`tool_calls` |
+| 9 | 前端 `ui.tsx` | `useRunStream`：delta 累积到 ref、由 20ms 定时器定速放出，避免批处理把逐字压成大块跳跃；`answerRound` 选出最后一轮非工具调用轮 |
+| 10 | 前端消费方 | 试聊、会话工作台、集成调试台、`EmbedChat` 均按同一规则只渲染最后一轮 |
 
 ---
 

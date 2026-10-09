@@ -310,36 +310,75 @@ def view(row):
 def stream_response(request, identity, user, run_id, after=0):
     async def stream():
         cursor = after
-        yield (
-            "event: accepted\ndata: "
-            + json.dumps({"run_id": str(run_id), "request_id": str(request.state.open_request_id)})
-            + "\n\n"
-        )
-        ticks = 0
-        while not await request.is_disconnected():
-            try:
-                row = await service(request).run(identity, user, run_id)
-            except DomainError as exc:
-                yield "event: error\ndata: " + json.dumps({"code": exc.code}) + "\n\n"
-                return
-            events = await service(request).p.repository.events(run_id, identity.tenant, cursor)
-            for event in events:
-                cursor = event["seq"]
-                kind = event["type"]
-                # Public stream deliberately excludes tool inputs, retrieval chunks and internal gateway metadata.
-                data = {"run_id": str(run_id)}
-                if kind in {"run.completed", "run.failed", "run.cancelled"}:
-                    final = await service(request).run(identity, user, run_id)
-                    data.update(view(final))
-                yield f"id: {cursor}\nevent: {kind}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-            if row["status"] in TERMINAL and cursor >= row["event_seq"]:
-                return
-            if len(events) == 200:
-                continue
-            ticks += 1
-            if ticks % 30 == 0:
-                yield ": heartbeat\n\n"
-            await asyncio.sleep(0.5)
+        listener = request.app.state.runtime.listener
+        queue = await listener.subscribe(run_id)
+        try:
+            yield (
+                "event: accepted\ndata: "
+                + json.dumps(
+                    {"run_id": str(run_id), "request_id": str(request.state.open_request_id)}
+                )
+                + "\n\n"
+            )
+            ticks = 0
+            while not await request.is_disconnected():
+                # Token deltas arrive transiently. Only the visible text is exposed;
+                # reasoning and tool-call fragments stay internal.
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    message = None
+                while message is not None:
+                    payload = json.loads(message)
+                    if payload.get("k") != "delta":
+                        break
+                    if payload.get("text"):
+                        yield (
+                            "event: model.delta\ndata: "
+                            + json.dumps(
+                                {
+                                    "run_id": str(run_id),
+                                    "round": payload.get("round"),
+                                    "text": payload["text"],
+                                },
+                                ensure_ascii=False,
+                            )
+                            + "\n\n"
+                        )
+                    try:
+                        message = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        message = None
+                try:
+                    row = await service(request).run(identity, user, run_id)
+                except DomainError as exc:
+                    yield "event: error\ndata: " + json.dumps({"code": exc.code}) + "\n\n"
+                    return
+                events = await service(request).p.repository.events(run_id, identity.tenant, cursor)
+                for event in events:
+                    cursor = event["seq"]
+                    kind = event["type"]
+                    # Public stream deliberately excludes tool inputs, retrieval chunks and internal gateway metadata.
+                    data = {"run_id": str(run_id)}
+                    if kind in {"model.started", "model.completed"}:
+                        # Round boundaries let a client tell the answer from the preamble:
+                        # the answer is the last round that did not end in tool calls.
+                        data["round"] = event["data"].get("round")
+                        if kind == "model.completed":
+                            data["tool_calls"] = event["data"].get("tool_calls", 0)
+                    if kind in {"run.completed", "run.failed", "run.cancelled"}:
+                        final = await service(request).run(identity, user, run_id)
+                        data.update(view(final))
+                    yield f"id: {cursor}\nevent: {kind}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                if row["status"] in TERMINAL and cursor >= row["event_seq"]:
+                    return
+                if len(events) == 200:
+                    continue
+                ticks += 1
+                if ticks % 30 == 0:
+                    yield ": heartbeat\n\n"
+        finally:
+            await listener.unsubscribe(run_id, queue)
 
     return StreamingResponse(
         stream(),
