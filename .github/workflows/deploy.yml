@@ -32,9 +32,10 @@ jobs:
       IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
       # Loopback-only by default in compose; the server deployment opts into a
       # wider bind. Override with the NEXUSDESK_BIND repository variable.
-      # WARNING: quickstart injects an admin token for unauthenticated
-      # requests — firewall the port to trusted IPs when binding beyond
-      # 127.0.0.1.
+      # NOTE: quickstart no longer injects an identity, so unauthenticated API
+      # calls are rejected. Its sign-in password is still the public default, so
+      # put real authentication in front (basic auth or an IP allowlist) when
+      # binding beyond 127.0.0.1.
       NEXUSDESK_BIND: ${{ vars.NEXUSDESK_BIND || '0.0.0.0' }}
       # Addresses users actually type to reach the demo. The generated certificate
       # must cover them, otherwise a browser reports a name mismatch even after

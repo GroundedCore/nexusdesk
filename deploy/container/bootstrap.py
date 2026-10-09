@@ -61,6 +61,12 @@ def validate_production(settings):
             raise RuntimeError("Replace deployment placeholders before starting")
     if settings.model_backend == "demo":
         raise RuntimeError("Production deployment must not use the demo default model")
+    if not settings.require_password_change:
+        # Quickstart turns this off so its shared demo account signs straight in.
+        # Production must never inherit that, or the seeded default stays valid.
+        raise RuntimeError(
+            "Production must require the first-login password change"
+        )
 
 
 async def wait_database(settings):
@@ -156,7 +162,7 @@ async def check_storage(settings):
         await asyncio.to_thread(client.head_bucket, Bucket=settings.knowledge_s3_bucket)
 
 
-def render_nginx_config(settings, token):
+def render_nginx_config(settings):
     """Render the quickstart nginx config, including its TLS material.
 
     Quickstart serves HTTPS so that a browser reaching the demo over a LAN address
@@ -169,7 +175,6 @@ def render_nginx_config(settings, token):
     config = (
         Path("/app/deploy/nginx.conf.template")
         .read_text()
-        .replace("__LOCAL_TOKEN__", token)
         .replace("__TLS_CERTIFICATE__", str(certificate))
         .replace("__TLS_KEY__", str(key))
     )
@@ -181,6 +186,10 @@ def render_nginx_config(settings, token):
 
 def main(mode):
     if mode == "quickstart":
+        # Still generated even though nothing injects it any more: a configured
+        # service token switches off the anonymous development fallback in
+        # agent_platform.platform.identity.access, and it leaves an operator a
+        # break-glass credential for the login page's service-token field.
         os.environ["AGENT_API_TOKEN"] = local_token(
             Path("/data/credentials/local-access.token")
         )
@@ -205,7 +214,7 @@ def main(mode):
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed"], check=True)
     if settings.seed_industries:
         seed_industry_cases(settings)
-    authority = render_nginx_config(settings, os.environ["AGENT_API_TOKEN"])
+    authority = render_nginx_config(settings)
     print(
         "NexusDesk quickstart: https://localhost:8080 — local demonstration only\n"
         f"Self-signed certificate. Import {authority} as a trusted root to avoid the\n"

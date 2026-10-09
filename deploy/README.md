@@ -16,7 +16,7 @@ Windows PowerShell：
 .\nexusdesk.ps1 quickstart
 ```
 
-启动成功后访问 https://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。不要将体验入口通过代理、端口转发或修改绑定地址暴露给其他人：体验代理会为未携带身份的请求自动注入本地服务令牌（admin 角色），任何能访问该入口的人都拥有完整管理权限；确需放开绑定时，务必用安全组/防火墙将端口限制为可信 IP。
+启动成功后访问 https://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。用内置账号 admin / nexusdesk 登录即可进入（该环境不强制改密）。体验入口不注入任何身份，未携带凭据的请求会被 API 直接拒绝；但默认口令是公开的，放开绑定时仍请用安全组/防火墙把端口限制为可信 IP。
 
 ### 体验模式的 HTTPS
 
@@ -40,7 +40,7 @@ NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test sh nexusdesk quickstart
 
 如果此前在体验环境配置过企业身份或嵌入应用，数据库里保存的“平台公开地址”仍是 `http://`，登录时校验来源会不通过。把开放平台中登记的地址改成实际访问的 `https://` 地址即可。
 
-应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk，首次登录必须改密。Nginx 对未携带 Authorization 头的请求注入首次启动生成的本地服务令牌（admin 角色），已携带身份的请求原样透传。该令牌持久化保存在数据卷中，不写入前端资源或启动输出。
+应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk；体验模式不强制首次改密（`AGENT_REQUIRE_PASSWORD_CHANGE=false`），用该账号直接登录。Nginx 只原样透传 `Authorization` 头，不注入身份。启动时仍会生成一个本地服务令牌持久化在数据卷中，供运维用登录页的“服务令牌”入口应急登录，它不写入前端资源或启动输出。
 
 进入“会话工作台”选择 `sample-support`：
 
@@ -121,7 +121,7 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 自动部署默认把端口绑定到 `0.0.0.0`（`NEXUSDESK_BIND`）。这意味着体验入口会直接对公网开放，请先用安全组/防火墙把 8080 限制到可信 IP。
 
-> **安全警告**：quickstart 模式会为未携带身份的请求注入 admin 角色的本地服务令牌，任何能访问该入口的人都拥有完整管理权限。服务器上保持默认的 `127.0.0.1` 绑定，仅通过 SSH 隧道（`ssh -L 8080:127.0.0.1:8080 user@server`，本地用 `https://localhost:8080` 访问）访问；不要把该端口暴露到公网或未经认证的反向代理之后。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
+> **安全说明**：体验入口不再注入身份——未携带凭据的请求会被 API 以 401 拒绝，但登录口令 admin / nexusdesk 是公开写在仓库里的，因此这道防线只挡扫描器和误入者，不构成认证边界。服务器上建议保持默认的 `127.0.0.1` 绑定并只通过 SSH 隧道访问（`ssh -L 8080:127.0.0.1:8080 user@server`，本地用 `https://localhost:8080`）；确需对公网开放时，请在入口外加一层真正的认证（如 Nginx `auth_basic` 或 IP 白名单）。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
 
 ### 服务器一次性准备
 
