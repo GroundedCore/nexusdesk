@@ -36,6 +36,12 @@ jobs:
       # requests — firewall the port to trusted IPs when binding beyond
       # 127.0.0.1.
       NEXUSDESK_BIND: ${{ vars.NEXUSDESK_BIND || '0.0.0.0' }}
+      # Addresses users actually type to reach the demo. The generated certificate
+      # must cover them, otherwise a browser reports a name mismatch even after
+      # ca.crt has been imported. Defaults to the deploy host, which is how the
+      # server is reached; set the NEXUSDESK_TLS_HOSTS repository variable when the
+      # addresses differ, and use a comma-separated list for more than one.
+      NEXUSDESK_TLS_HOSTS: ${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -73,7 +79,7 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: IMAGE_TAG,GHCR_NAMESPACE,NEXUSDESK_BIND
+          envs: IMAGE_TAG,GHCR_NAMESPACE,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS
           # The default 10m is not enough for the first image pull on a
           # slow server-to-GHCR link plus the --wait healthcheck window.
           command_timeout: 30m
@@ -83,6 +89,7 @@ jobs:
             export NEXUSDESK_VERSION="${IMAGE_TAG}"
             export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
             export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
+            export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
             docker compose -f deploy/quickstart/compose.yaml pull
             # Recreates the app container on the new image; the container
             # bootstrap runs migrations before serving traffic. --wait fails

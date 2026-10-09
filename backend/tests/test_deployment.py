@@ -226,3 +226,19 @@ def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
     # A JSON array keeps working for anyone who already uses that form.
     monkeypatch.setenv("AGENT_TLS_HOSTS", '["10.0.0.7"]')
     assert Settings(**base).tls_hosts == ["10.0.0.7"]
+
+
+def test_deploy_workflow_forwards_the_tls_host_list():
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
+    deploy = workflow["jobs"]["deploy"]
+    # The server is reached by its public address, so the certificate has to cover
+    # it. Without this the SAN stays loopback-only and a browser reports a name
+    # mismatch even after ca.crt has been imported.
+    assert deploy["env"]["NEXUSDESK_TLS_HOSTS"] == (
+        "${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}"
+    )
+    step = next(s for s in deploy["steps"] if s.get("name") == "Deploy to server")
+    assert "NEXUSDESK_TLS_HOSTS" in step["with"]["envs"].split(",")
+    assert 'export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"' in step["with"]["script"]

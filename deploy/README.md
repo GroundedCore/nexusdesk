@@ -117,6 +117,10 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 `.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
 
+自动部署会顺带把访问地址交给证书：`NEXUSDESK_TLS_HOSTS` 默认取 `DEPLOY_HOST`，也就是服务器实际被访问的那个地址；两者不一致时，用仓库变量 `NEXUSDESK_TLS_HOSTS` 覆盖（多个地址用英文逗号分隔）。少了这一步，证书只覆盖回环地址，用公网地址访问时浏览器会提示名称不匹配——注意这和"证书不受信任"是两条不同的警告，导入 `ca.crt` 只能消除后者。
+
+自动部署默认把端口绑定到 `0.0.0.0`（`NEXUSDESK_BIND`）。这意味着体验入口会直接对公网开放，请先用安全组/防火墙把 8080 限制到可信 IP。
+
 > **安全警告**：quickstart 模式会为未携带身份的请求注入 admin 角色的本地服务令牌，任何能访问该入口的人都拥有完整管理权限。服务器上保持默认的 `127.0.0.1` 绑定，仅通过 SSH 隧道（`ssh -L 8080:127.0.0.1:8080 user@server`，本地用 `https://localhost:8080` 访问）访问；不要把该端口暴露到公网或未经认证的反向代理之后。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
 
 ### 服务器一次性准备
