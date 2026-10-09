@@ -3,7 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      # Docs-only changes skip CI. Since CD triggers on CI completion
+      # (workflow_run), skipping CI also skips deploys. Mixed commits
+      # (docs + code) still run CI — the workflow is skipped only when
+      # every changed file matches an ignore pattern.
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
