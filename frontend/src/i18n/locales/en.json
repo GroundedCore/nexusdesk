@@ -1177,5 +1177,6 @@
   "SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。": "SSE streams model output token by token (model.delta) and returns the complete answer in run.completed; only the last ReAct round is shown. Reconnect the event stream with Last-Event-ID after a drop.",
   "P50 首字延迟": "P50 time to first character",
   "首字延迟": "First character",
-  "未测量": "not measured"
+  "未测量": "not measured",
+  "正在查询资料…": "Looking this up…"
 }

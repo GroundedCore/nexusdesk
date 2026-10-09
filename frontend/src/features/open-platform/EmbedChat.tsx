@@ -12,10 +12,10 @@ interface Run {id:string;status:string;response?:string;output?:string;error_cod
 export function EmbedChat() {
   const appId=location.pathname.split('/')[2],parentOrigin=new URLSearchParams(location.search).get('parent_origin')||'';
   const [config,setConfig]=useState<Config|null>(null),[error,setError]=useState(''),[credential,setCredential]=useState(''),[ready,setReady]=useState(false);
-  const [agents,setAgents]=useState<{id:string;name:string}[]>([]),[agentId,setAgentId]=useState(''),[messages,setMessages]=useState<ChatMessage[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[loginBusy,setLoginBusy]=useState(false),[live,setLive]=usePacedText();
+  const [agents,setAgents]=useState<{id:string;name:string}[]>([]),[agentId,setAgentId]=useState(''),[messages,setMessages]=useState<ChatMessage[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[loginBusy,setLoginBusy]=useState(false),[live,setLive]=usePacedText(),[toolBusy,setToolBusy]=useState(false);
   const conversation=useRef(''),generation=useRef(0),bottom=useRef<HTMLDivElement>(null),credentialRef=useRef('');
   const pending=useRef<{text:string;key:string}|null>(null);
-  function reset(){generation.current++;conversation.current='';pending.current=null;setMessages([]);setLive('');setBusy(false);setError('');}
+  function reset(){generation.current++;conversation.current='';pending.current=null;setMessages([]);setLive('');setToolBusy(false);setBusy(false);setError('');}
   useEffect(()=>{
     if(window.parent===window||!/^https?:\/\//.test(parentOrigin)){setError(t('请通过企业页面中的嵌入组件打开聊天'));return;}
     let active=true;
@@ -73,6 +73,10 @@ export function EmbedChat() {
           if(type==='model.delta'){if(data.text){const cur=rounds.get(data.round)||{text:''};rounds.set(data.round,{...cur,text:cur.text+data.text});setLive(liveAnswer());}continue;}
           if(type==='model.completed'){const cur=rounds.get(data.round)||{text:''};rounds.set(data.round,{...cur,toolCalls:data.tool_calls||0});setLive(liveAnswer());continue;}
           if(type==='error')throw new Error(data.code);
+          // The tool boundary is a durable event, so the status a customer sees
+          // reflects what the agent is actually doing instead of a guess.
+          if(type==='tool.started')setToolBusy(true);
+          if(type==='tool.completed')setToolBusy(false);
           if(['run.completed','run.failed','run.cancelled'].includes(type))terminal=data;
         }
         if(stamp!==generation.current)return;
@@ -95,7 +99,7 @@ export function EmbedChat() {
     {error&&<Alert showIcon type="error" title={error} closable onClose={()=>setError('')}/>}
     {!config&&!error?<Spin/>:!ready?<div className="embed-empty">{t('正在连接企业页面')}</div>:!credential?<div className="embed-login"><RobotOutlined style={{fontSize:42,color:config?.color}}/><h2>{t('登录后开始对话')}</h2><p>{t('使用企业账号登录，继续你的专属会话。')}</p><Space direction="vertical" style={{width:'100%'}}>{config?.providers.map(p=><Button block key={p.id} disabled={loginBusy} onClick={async()=>{setLoginBusy(true);setError('');try{const session=await ssoLogin(p,appId,parentOrigin);reset();setCredential(session.access_token);}catch(e){setError((e as Error).message);}finally{setLoginBusy(false);}}}>{p.name}</Button>)}<Button block type="link" onClick={()=>window.parent.postMessage({type:'nexusdesk.refresh-token'},parentOrigin)}>{t('获取企业登录凭据')}</Button></Space></div>:<>
       <div className="embed-controls"><Select aria-label={t('选择 Agent')} value={agentId||undefined} disabled={busy||!!conversation.current} onChange={setAgentId} options={agents.map(a=>({value:a.id,label:a.name}))} style={{flex:1}}/><Button type="text" onClick={async()=>{await fetch('/api/v1/sso/logout',{method:'POST',headers:{Authorization:'Bearer '+credential}});reset();setCredential('');}}>{t('退出')}</Button></div>
-      <div className="embed-messages" aria-live="polite">{!messages.length&&!live&&<div className="embed-empty"><RobotOutlined/><p>{t('有什么可以帮你？')}</p></div>}{messages.map((m,i)=><div key={i} className={'embed-message '+m.role}>{m.role==='assistant'&&i===messages.length-1&&live?live:m.content}</div>)}{live&&messages[messages.length-1]?.role!=='assistant'&&<div className="embed-message assistant">{live}</div>}{busy&&!live&&<div className="embed-thinking"><Spin size="small"/> {t('正在思考…')}</div>}<div ref={bottom}/></div>
+      <div className="embed-messages" aria-live="polite">{!messages.length&&!live&&<div className="embed-empty"><RobotOutlined/><p>{t('有什么可以帮你？')}</p></div>}{messages.map((m,i)=><div key={i} className={'embed-message '+m.role}>{m.role==='assistant'&&i===messages.length-1&&live?live:m.content}</div>)}{live&&messages[messages.length-1]?.role!=='assistant'&&<div className="embed-message assistant">{live}</div>}{busy&&!live&&<div className="embed-thinking"><Spin size="small"/> {toolBusy?t('正在查询资料…'):t('正在思考…')}</div>}<div ref={bottom}/></div>
       <div className="embed-composer"><Input.TextArea aria-label={t('输入消息')} placeholder={t('输入消息')} value={input} maxLength={8000} autoSize={{minRows:1,maxRows:4}} disabled={busy} onChange={e=>setInput(e.target.value)} onPressEnter={e=>{if(!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><Button type="primary" icon={<SendOutlined/>} aria-label={t('发送')} loading={busy} disabled={!agentId||!input.trim()} onClick={()=>void send()}/></div>
       <footer>{t('AI 回答仅供参考，请核实重要信息。')}</footer></>}
   </div>;
