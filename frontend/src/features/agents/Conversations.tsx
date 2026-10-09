@@ -1,9 +1,9 @@
 import { t } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
-import { Avatar, Button, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
-import { PlusOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons';
+import { Avatar, Button, Empty, Input, Modal, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
+import { PlusOutlined, RobotOutlined, SendOutlined, ToolOutlined } from '@ant-design/icons';
 import { api, post, type Agent, type Conversation, type ConversationDetail, type Message } from '../../shared/api/client';
-import { Alert, Badge, answerRound, time, useAccess, useAction, useResource, useRunStream } from '../../shared/components/ui';
+import { Alert, Badge, answerRound, time, Trace, useAccess, useAction, useResource, useRunStream } from '../../shared/components/ui';
 import { type PageResult } from './AgentsPage';
 function Messages({ detail, follow = false, pending = '', reasoning = '' }: {
     detail: ConversationDetail;
@@ -38,11 +38,14 @@ export function AgentChat({ agent }: {
     const [cid, setCid] = useState('');
     const [input, setInput] = useState('');
     const [pendingRun, setPendingRun] = useState('');
+    const [traceRun, setTraceRun] = useState('');
     const action = useAction();
     const { operator } = useAccess();
     const detail = useResource<ConversationDetail>(cid ? `/conversations/${cid}` : null, 1500);
     const active = detail.data?.runs.find(r => ['queued', 'running'].includes(r.status));
     const currentRun = detail.data?.runs[0];
+    // The run the wrench inspects: the live one while it runs, otherwise the latest.
+    const traceRunId = active?.id || pendingRun || currentRun?.id || '';
     const available = !!agent?.published_version && !agent.archived && operator;
     useEffect(() => { if (pendingRun && detail.data?.runs.some(r => r.id === pendingRun && !['queued', 'running'].includes(r.status)))
         setPendingRun(''); }, [pendingRun, detail.data]);
@@ -74,6 +77,7 @@ export function AgentChat({ agent }: {
     {!cid ? <div className="agent-chat-welcome"><Avatar size={72} shape="square" icon={<RobotOutlined aria-hidden/>}/><h2>{agent?.name || t("你的 Agent")}</h2><p>{t("从一个问题开始，看看 Agent 如何回应。")}</p><div className="agent-chat-suggestions">{[t("介绍一下你能做什么"), t("我需要你的帮助")].map(text => <Button key={text} disabled={!available} onClick={() => setInput(text)}>{text}<span aria-hidden>↗</span></Button>)}</div></div> : detail.data ? <Messages key={cid} detail={detail.data} follow pending={live?.text || ''} reasoning={live?.reasoning || ''}/> : <div className="agent-chat-welcome"><Spin /></div>}
     {busy && <div className="agent-run-state"><Space><Spin size="small"/><span>{active?.status === 'queued' ? t("正在排队\u2026") : t("正在生成回答\u2026")}</span></Space><Button type="text" disabled={action.busy} onClick={() => void action.run(async () => { await post(`/runs/${active?.id || pendingRun}/cancel`); detail.refresh(); }, '')}>{t("停止生成")}</Button></div>}
     {currentRun?.status === 'failed' && <Alert error={t("运行失败：{{v0}}", { v0: currentRun.error_code || t("请重试") })}/>}{currentRun?.status === 'cancelled' && <p className="agent-muted">{t("本次运行已取消")}</p>}
+    {traceRunId && <div className="agent-run-trace"><Button type="text" size="small" icon={<ToolOutlined aria-hidden/>} aria-label={t("查看运行轨迹")} title={t("查看运行轨迹")} onClick={() => setTraceRun(traceRunId)}/></div>}
     {detail.data?.actions.filter(a => a.status === 'pending').map(a => <div className="agent-pending-action" key={a.id}><strong>{t("待确认工单：")}{a.payload.title}</strong><p>{a.payload.description}</p><Space><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: true }); detail.refresh(); }, '')}>{t("确认创建")}</Button><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: false }); detail.refresh(); }, '')}>{t("拒绝")}</Button></Space></div>)}
     {detail.data && detail.data.mode !== 'bot' && <p className="agent-chat-note">{t("当前会话为「")}<Badge value={detail.data.mode}/>{t("」，请在会话工作台继续处理，或新建试聊。")}</p>}
     <form className="agent-composer" onSubmit={e => { e.preventDefault(); if (canSend && input.trim())
@@ -82,6 +86,7 @@ export function AgentChat({ agent }: {
         if (canSend && input.trim())
             void action.run(send, '');
     } }}/><div><span>{t("Enter 发送 ")}<span className="agent-composer-divider">·</span>{t(" Shift + Enter 换行")}</span><Button type="primary" htmlType="submit" aria-label={t("发送试聊消息")} shape="circle" icon={<SendOutlined aria-hidden/>} disabled={!canSend || !input.trim()} loading={action.busy}/></div></form><p className="agent-chat-disclaimer">{t("试聊使用实际模型与工具，回答内容请核实。")}</p>
+    <Modal open={!!traceRun} width={920} title={t("运行详情")} onCancel={() => setTraceRun('')} footer={<Button onClick={() => setTraceRun('')}>{t("关闭")}</Button>}><Trace runId={traceRun}/></Modal>
   </div>;
 }
 export function AgentRecords({ agentId }: {

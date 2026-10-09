@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd';
+import { ToolOutlined } from '@ant-design/icons';
 import { t } from '../../i18n';
-import { roundAnswer, usePacedText } from '../../shared/components/ui';
+import { roundAnswer, Trace, usePacedText } from '../../shared/components/ui';
 import type { Application } from './OpenPlatformPage';
 
 export function IntegrationDocs({app}:{app:Application}) {
@@ -28,7 +29,7 @@ export function IntegrationDocs({app}:{app:Application}) {
 
 interface Run {id:string;status:string;output:string|null;error_code:string|null}
 export function Debugger({app,agents}:{app:Application;agents:{id:string;name:string}[]}) {
-  const [key,setKey]=useState('');const [user,setUser]=useState('debug-user');const [session,setSession]=useState<string>(()=>crypto.randomUUID());const [agent,setAgent]=useState(app.agent_ids[0]);const [text,setText]=useState('');const [stream,setStream]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [answer,setAnswer]=useState('');const [live,setLive]=usePacedText();const [progress,setProgress]=useState<string[]>([]);const [run,setRun]=useState<Run|null>(null);const [requestId,setRequestId]=useState('');
+  const [key,setKey]=useState('');const [user,setUser]=useState('debug-user');const [session,setSession]=useState<string>(()=>crypto.randomUUID());const [agent,setAgent]=useState(app.agent_ids[0]);const [text,setText]=useState('');const [stream,setStream]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [answer,setAnswer]=useState('');const [live,setLive]=usePacedText();const [traceRun,setTraceRun]=useState('');const [progress,setProgress]=useState<string[]>([]);const [run,setRun]=useState<Run|null>(null);const [requestId,setRequestId]=useState('');
   const controller=useRef<AbortController|null>(null);const active=useRef<{key:string;user:string}|null>(null);const pending=useRef<{hash:string;id:string}|null>(null);const runId=useRef('');
   // Per-round text from model.delta. A round that ends in tool calls was the model
   // thinking out loud, so it is marked and ignored: only the final answer round is
@@ -59,5 +60,5 @@ export function Debugger({app,agents}:{app:Application;agents:{id:string;name:st
     <div className="op-form-row"><Form.Item label={t('外部用户标识')} required><Input value={user} maxLength={128} disabled={busy} onChange={e=>setUser(e.target.value)}/></Form.Item><Form.Item label={t('外部会话标识')} required><Input value={session} maxLength={128} disabled={busy} onChange={e=>setSession(e.target.value)}/></Form.Item></div>
     <Form.Item label={t('消息')} htmlFor="op-debug-message" required><Input.TextArea id="op-debug-message" rows={4} value={text} maxLength={8000} disabled={busy} onChange={e=>setText(e.target.value)}/></Form.Item><Form.Item label={t('SSE 事件流')}><Switch checked={stream} onChange={setStream} disabled={busy}/></Form.Item>
     <Space wrap><Button type="primary" htmlType="submit" loading={busy} disabled={!app.enabled||!key.trim()||!agent||!user.trim()||!session.trim()||!text.trim()}>{t('发送消息')}</Button><Button disabled={!busy&&!runId.current} onClick={cancel}>{t('取消运行')}</Button><Button disabled={busy||!runId.current} onClick={refresh}>{t('查询运行结果')}</Button><Button disabled={busy} onClick={()=>{setSession(crypto.randomUUID());setRun(null);setAnswer('');runId.current='';pending.current=null;}}>{t('新会话')}</Button></Space>
-  </Form></Card><Card title={t('调试结果')}><p className="op-muted">{t('SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。')}</p>{error&&<Alert type="error" showIcon title={error}/>}<Space wrap>{progress.map((p,i)=><Tag key={i}>{p}</Tag>)}</Space>{requestId&&<Typography.Paragraph copyable>Request ID: {requestId}</Typography.Paragraph>}{(run?.id||runId.current)&&<Typography.Paragraph copyable>Run ID: {run?.id||runId.current}</Typography.Paragraph>}{run&&<Tag>{run.status}</Tag>}<pre className="op-answer">{live||answer}</pre></Card></div>;
+  </Form></Card><Card title={t('调试结果')}><p className="op-muted">{t('SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。')}</p>{error&&<Alert type="error" showIcon title={error}/>}<Space wrap>{progress.map((p,i)=><Tag key={i}>{p}</Tag>)}</Space>{requestId&&<Typography.Paragraph copyable>Request ID: {requestId}</Typography.Paragraph>}{(run?.id||runId.current)&&<Typography.Paragraph copyable>Run ID: {run?.id||runId.current}</Typography.Paragraph>}{run&&<Tag>{run.status}</Tag>}<pre className="op-answer">{live||answer}</pre>{(run?.id||runId.current)&&<div className="op-answer-trace"><Button type="text" size="small" icon={<ToolOutlined aria-hidden/>} aria-label={t('查看运行轨迹')} title={t('查看运行轨迹')} onClick={()=>setTraceRun(run?.id||runId.current)}/></div>}</Card><Modal open={!!traceRun} width={920} title={t('运行详情')} onCancel={()=>setTraceRun('')} footer={<Button onClick={()=>setTraceRun('')}>{t('关闭')}</Button>}><Trace runId={traceRun}/></Modal></div>;
 }
