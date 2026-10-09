@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     queue_timeout_seconds: int = Field(default=120, ge=1)
     run_timeout_seconds: int = Field(default=90, ge=1, le=600)
     model_timeout_seconds: float = Field(default=30, gt=0)
+    # Stream transient token deltas to the internal console over LISTEN/NOTIFY.
+    # Off by default so the runtime behaves exactly as before until a deployment
+    # opts in. Deltas are best-effort; the durable answer is unaffected.
+    stream_model_deltas: bool = False
     max_model_rounds: int = Field(default=6, ge=1, le=30)
     max_tool_calls: int = Field(default=12, ge=1, le=100)
     tool_concurrency: int = Field(default=8, ge=1, le=64)

@@ -519,17 +519,10 @@ class GatewayChatModel:
         )
         self.schemas, self.run_id = schemas, run_id
 
-    async def ainvoke(self, messages):
-        try:
-            result = await self.gateway.invoke(
-                self.tenant,
-                self.profile_id,
-                self.version,
-                ChatRequest(messages=from_messages(messages), tools=self.schemas),
-                self.run_id,
-            )
-        except DomainError as exc:
-            raise RuntimeFault(exc.code) from None
+    def _request(self, messages):
+        return ChatRequest(messages=from_messages(messages), tools=self.schemas)
+
+    def _to_aimessage(self, result):
         payload, usage = result["payload"], result["usage"] or {}
         metadata = None
         incoming, outgoing = (
@@ -554,3 +547,59 @@ class GatewayChatModel:
                 "model_name": result["model_name"],
             },
         )
+
+    async def ainvoke(self, messages):
+        try:
+            result = await self.gateway.invoke(
+                self.tenant,
+                self.profile_id,
+                self.version,
+                self._request(messages),
+                self.run_id,
+            )
+        except DomainError as exc:
+            raise RuntimeFault(exc.code) from None
+        return self._to_aimessage(result)
+
+    async def ainvoke_stream(self, messages, on_delta):
+        """Invoke with token streaming.
+
+        ``on_delta`` is an async callback receiving raw gateway deltas, which may
+        carry ``content``, ``reasoning_content`` and partial ``tool_calls``. The
+        complete message is returned exactly as ``ainvoke`` would produce it.
+
+        Falls back to ``ainvoke`` when the profile cannot stream, so callers never
+        need to branch on ``model_stream_not_supported``.
+        """
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def sink(delta):
+            await queue.put(delta)
+
+        task = asyncio.ensure_future(
+            self.gateway.invoke(
+                self.tenant,
+                self.profile_id,
+                self.version,
+                self._request(messages),
+                self.run_id,
+                emit=sink,
+            )
+        )
+        try:
+            while True:
+                while not queue.empty():
+                    await on_delta(queue.get_nowait())
+                if task.done():
+                    break
+                try:
+                    await on_delta(await asyncio.wait_for(queue.get(), timeout=0.1))
+                except asyncio.TimeoutError:
+                    continue
+            result = await task
+        except DomainError as exc:
+            task.cancel()
+            if exc.code == "model_stream_not_supported":
+                return await self.ainvoke(messages)
+            raise RuntimeFault(exc.code) from None
+        return self._to_aimessage(result)

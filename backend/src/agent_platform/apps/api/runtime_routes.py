@@ -96,27 +96,48 @@ async def stream_events(
             raise HTTPException(400, "invalid_last_event_id")
     if await repository.get(run_id, tenant) is None:
         raise HTTPException(404, "run_not_found")
+    listener = request.app.state.runtime.listener
 
     async def stream():
         cursor = after
-        heartbeat = 0
-        while not await request.is_disconnected():
-            # Read status first: terminal status and final event commit atomically.
-            run = await repository.get(run_id, tenant)
-            events = await repository.events(run_id, tenant, cursor)
-            for event in events:
-                cursor = event["seq"]
-                payload = json.dumps(event["data"], ensure_ascii=False)
-                yield f"id: {cursor}\nevent: {event['type']}\ndata: {payload}\n\n"
-            if run["status"] in TERMINAL and cursor >= run["event_seq"]:
-                return
-            if len(events) == 200:
-                continue
-            heartbeat += 1
-            if heartbeat >= 30:
-                yield ": heartbeat\n\n"
-                heartbeat = 0
-            await asyncio.sleep(0.5)
+        queue = await listener.subscribe(run_id)
+        try:
+            while not await request.is_disconnected():
+                # Durable events come from the log (replayable); deltas arrive
+                # transiently via LISTEN/NOTIFY and never touch the log.
+                run = await repository.get(run_id, tenant)
+                events = await repository.events(run_id, tenant, cursor)
+                for event in events:
+                    cursor = event["seq"]
+                    payload = json.dumps(event["data"], ensure_ascii=False)
+                    yield f"id: {cursor}\nevent: {event['type']}\ndata: {payload}\n\n"
+                if run["status"] in TERMINAL and cursor >= run["event_seq"]:
+                    return
+                if len(events) == 200:
+                    continue
+                # Wait for a notification. The timeout is both the safety net for a
+                # missed notification and the heartbeat cadence.
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+                    continue
+                payload = json.loads(message)
+                if payload.get("k") == "delta":
+                    yield f"event: model.delta\ndata: {json.dumps({'run_id': str(run_id), 'round': payload.get('round'), 'text': payload.get('text'), 'reasoning': payload.get('reasoning')}, ensure_ascii=False)}\n\n"
+                    # Drain queued deltas before re-reading the log.
+                    while True:
+                        try:
+                            nxt = queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        p = json.loads(nxt)
+                        if p.get("k") != "delta":
+                            break
+                        yield f"event: model.delta\ndata: {json.dumps({'run_id': str(run_id), 'round': p.get('round'), 'text': p.get('text'), 'reasoning': p.get('reasoning')}, ensure_ascii=False)}\n\n"
+                # A durable pointer just wakes us to re-read the log above.
+        finally:
+            await listener.unsubscribe(run_id, queue)
 
     return StreamingResponse(
         stream(),

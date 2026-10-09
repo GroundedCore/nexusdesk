@@ -7,6 +7,7 @@ import httpx
 
 from agent_platform.apps.api.platform_services import PlatformServices, RuntimeFactory
 from agent_platform.modules.agent_runtime.engine import RuntimeEngine
+from agent_platform.modules.agent_runtime.notify import Listener, Notifier
 from agent_platform.modules.agent_runtime.repository import RunRepository
 from agent_platform.modules.agent_runtime.worker import RuntimeWorker
 from agent_platform.modules.evaluation.service import EvaluationService
@@ -21,6 +22,8 @@ class RuntimeServices:
     worker: RuntimeWorker
     snapshot: dict
     platform: PlatformServices
+    listener: Listener
+    notifier: Notifier
 
 
 @asynccontextmanager
@@ -57,6 +60,9 @@ async def runtime_services(settings):
         "model_name": settings.model_name,
     }
     engine = create_engine(settings)
+    dsn = settings.database_url.get_secret_value()
+    listener = Listener(dsn)
+    notifier = Notifier(dsn)
     try:
         async with (
             httpx.AsyncClient(
@@ -78,9 +84,13 @@ async def runtime_services(settings):
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             yield RuntimeServices(
                 repository,
-                RuntimeWorker(repository, factory, settings, fingerprint),
+                RuntimeWorker(repository, factory, settings, fingerprint, notifier),
                 snapshot,
                 platform,
+                listener,
+                notifier,
             )
     finally:
         await engine.dispose()
+        await listener.close()
+        await notifier.close()

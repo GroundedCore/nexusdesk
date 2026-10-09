@@ -166,4 +166,10 @@ async def test_stream_preserves_reasoning_separately_from_visible_text():
             emit,
         )
     assert result["content"] == "answer" and result["reasoning_content"] == "trace-part"
-    assert events == [{"content": "answer"}]
+    # reasoning_content is emitted for live streaming in addition to being
+    # accumulated into the final result.
+    assert events == [
+        {"reasoning_content": "trace-"},
+        {"reasoning_content": "part"},
+        {"content": "answer"},
+    ]

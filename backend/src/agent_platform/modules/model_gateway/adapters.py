@@ -322,10 +322,12 @@ async def stream_chat_http(client, route, request, credential, parameters, max_b
                     if choice.get("index", 0) != 0:
                         continue
                     delta = choice.get("delta", {})
+                    reasoning_piece = None
                     if "reasoning_content" in delta:
                         fields = reasoning_fields(route, delta)
                         if fields:
-                            reasoning.append(fields["reasoning_content"])
+                            reasoning_piece = fields["reasoning_content"]
+                            reasoning.append(reasoning_piece)
                     if delta.get("content"):
                         content.append(delta["content"])
                     for item in delta.get("tool_calls", []):
@@ -336,8 +338,15 @@ async def stream_chat_http(client, route, request, credential, parameters, max_b
                         call["id"] += item.get("id", "")
                         call["name"] += item.get("function", {}).get("name", "")
                         call["arguments"] += item.get("function", {}).get("arguments", "")
-                    if delta.get("content") or delta.get("tool_calls"):
-                        await emit({k: delta[k] for k in ("content", "tool_calls") if k in delta})
+                    if delta.get("content") or delta.get("tool_calls") or reasoning_piece is not None:
+                        piece = {}
+                        if delta.get("content"):
+                            piece["content"] = delta["content"]
+                        if delta.get("tool_calls"):
+                            piece["tool_calls"] = delta["tool_calls"]
+                        if reasoning_piece is not None:
+                            piece["reasoning_content"] = reasoning_piece
+                        await emit(piece)
             if finished:
                 break
     if not finished:

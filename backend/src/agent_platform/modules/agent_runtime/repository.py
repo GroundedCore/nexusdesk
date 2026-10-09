@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from agent_platform.modules.agent_runtime.notify import channel
 from agent_platform.modules.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.modules.conversation.service import add_message
 from agent_platform.platform.persistence.store import DomainError, transaction
@@ -24,6 +25,15 @@ class RunRepository:
             text("""INSERT INTO runtime_events(run_id,seq,type,data)
             VALUES (:id,:seq,:type,CAST(:data AS jsonb))"""),
             {"id": run_id, "seq": seq, "type": kind, "data": json.dumps(data)},
+        )
+        # Wake the live console. pg_notify fires on commit, so a rolled-back
+        # transaction never produces a phantom notification.
+        await conn.execute(
+            text("SELECT pg_notify(:ch, :payload)"),
+            {
+                "ch": channel(run_id),
+                "payload": json.dumps({"k": "durable", "seq": seq, "type": kind}),
+            },
         )
 
     async def submit(

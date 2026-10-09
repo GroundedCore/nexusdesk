@@ -8,17 +8,23 @@ logger = logging.getLogger(__name__)
 
 
 class RuntimeWorker:
-    def __init__(self, repository, runtime, settings, fingerprint):
+    def __init__(self, repository, runtime, settings, fingerprint, notifier=None):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
         self.owner = uuid4()
         self.tasks = set()
         self.stopping = asyncio.Event()
+        self.notifier = notifier
 
     async def _execute(self, row):
         monitor_failure = False
 
         async def emit(kind, data):
+            if kind == "model.delta":
+                # Transient best-effort telemetry; never touches the durable log.
+                if self.notifier is not None:
+                    await self.notifier.send(row["id"], {"k": "delta", **data})
+                return
             await self.repository.append(row["id"], self.owner, kind, data)
 
         async def monitor(task):

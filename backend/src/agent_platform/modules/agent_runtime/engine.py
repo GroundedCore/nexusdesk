@@ -31,10 +31,27 @@ class RuntimeEngine:
         emit = config["configurable"]["emit"]
         if state["rounds"] >= self.settings.max_model_rounds:
             raise RuntimeFault("model_round_limit")
-        await emit("model.started", {"round": state["rounds"] + 1})
+        round_no = state["rounds"] + 1
+        await emit("model.started", {"round": round_no})
+
+        async def on_delta(delta):
+            # Forward only content and reasoning; tool_calls here are partial JSON
+            # arguments and arrive complete with model.completed instead.
+            piece = {}
+            if delta.get("content"):
+                piece["text"] = delta["content"]
+            if delta.get("reasoning_content"):
+                piece["reasoning"] = delta["reasoning_content"]
+            if piece:
+                await emit("model.delta", {"round": round_no, **piece})
+
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                reply = await self.model.ainvoke(state["messages"])
+                stream = getattr(self.model, "ainvoke_stream", None)
+                if self.settings.stream_model_deltas and stream is not None:
+                    reply = await stream(state["messages"], on_delta)
+                else:
+                    reply = await self.model.ainvoke(state["messages"])
         except TimeoutError as exc:
             raise RuntimeFault("model_timeout") from exc
         if not isinstance(reply, AIMessage) or reply.invalid_tool_calls:

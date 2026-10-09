@@ -202,6 +202,25 @@ async def test_runtime_binding_and_capability_validation(gateway_platform):
     ).status_code == 400
 
 
+async def test_ainvoke_stream_emits_deltas_and_returns_full_message(gateway_platform):
+    client, services, settings = gateway_platform
+    _, _, profile = await setup(client)
+    model = GatewayChatModel(services.platform.gateway, settings.tenant_id, profile["id"], 1, [])
+    deltas = []
+
+    async def on_delta(delta):
+        deltas.append(delta)
+
+    reply = await model.ainvoke_stream([HumanMessage(content="hello")], on_delta)
+
+    assert "演示" in reply.content
+    # The demo protocol emits the whole result as one chunk, so a single delta
+    # carries the complete text.
+    assert deltas, "expected at least one delta"
+    text = "".join(d.get("content", "") for d in deltas)
+    assert text == reply.content
+
+
 async def test_http_retry_redaction_and_usage(gateway_platform):
     client, services, _settings = gateway_platform
     _, _, profile = await setup(client, protocol="openai_compatible", profile_extra={"retries": 1})
