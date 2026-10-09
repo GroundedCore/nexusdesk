@@ -1,0 +1,155 @@
+# Phase 1 · 会话摘要记忆 — 技术落地文档
+
+## 改动总览
+
+| 层 | 文件 | 改动 |
+|---|---|---|
+| 迁移 | `backend/migrations/versions/0030_conversation_summary.py` | 新增：`runtime_conversations.summary` 列；`memory_tasks` 任务表 |
+| 新模块 | `backend/src/agent_platform/modules/memory/__init__.py` | 空包占位（后续阶段扩展） |
+| 新模块 | `backend/src/agent_platform/modules/memory/summary.py` | 摘要生成服务 |
+| 新模块 | `backend/src/agent_platform/modules/memory/worker.py` | 摘要任务认领循环 |
+| 运行时 | `modules/agent_runtime/engine.py` | 摘要注入消息序列 |
+| 运行时 | `modules/agent_runtime/repository.py` | `finish()` 投递摘要任务；`claim()` 读出 summary |
+| 接管 | `modules/human_handoff/service.py` | handoff summary 拼接逻辑 |
+| 配置 | `backend/src/agent_platform/settings.py` | 新增 3 个配置项 |
+| Agent 配置 | `modules/agent_config/service.py` | `AgentConfig` 增加 `summary_enabled` |
+
+## 数据模型
+
+### 迁移 `0030_conversation_summary.py`
+
+```sql
+-- 会话滚动摘要
+ALTER TABLE runtime_conversations ADD COLUMN summary TEXT;
+
+-- 通用记忆任务表（Phase 2 的抽取任务复用此表，kind 区分）
+CREATE TABLE memory_tasks (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id    UUID NOT NULL,
+    kind         VARCHAR(30) NOT NULL,          -- 'conversation_summary'（Phase 2 增加 'memory_extract'）
+    status       VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending/running/done/failed
+    payload      JSONB NOT NULL,                -- {conversation_id, dropped_messages, old_summary}
+    attempts     INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 2,
+    error        TEXT,
+    run_after    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX memory_tasks_claim ON memory_tasks (status, run_after) WHERE status = 'pending';
+```
+
+设计要点：
+- `memory_tasks` 仿照 `runtime_runs` / `knowledge_tasks` 的"任务表 + claim"模式，Phase 2/3/4 的所有异步记忆任务复用此表，避免重复造队列。
+- 摘要直接存会话行上，继承 `tenant_id` 隔离与行级生命周期（会话删除即摘要删除）。
+
+## 核心流程
+
+### 1. 任务投递（`RunRepository.finish()` 内）
+
+```
+finish() 写回截断后 history 时：
+  dropped = 本次被 history_turns 截掉的消息
+  if dropped 非空 且 agent.summary_enabled 且 settings.summary_enabled:
+      INSERT memory_tasks(kind='conversation_summary',
+          payload={conversation_id, dropped_messages: dropped[-40:], old_summary})
+```
+
+- `dropped_messages` 截取最近 40 条（`summary_max_input_messages`），超出部分依赖上一次摘要已覆盖；
+- 同一会话已有 pending/running 的摘要任务时**合并**：把新 dropped 追加到已有任务 payload，避免任务堆积（用 `SELECT ... FOR UPDATE` 在同事务内判断）。
+
+### 2. 摘要生成（`memory/summary.py`）
+
+```python
+class SummaryService:
+    def generate(self, task) -> None:
+        # 1. 组装 prompt：SUMMARY_PROMPT + old_summary + dropped_messages
+        # 2. 调用模型网关 Chat profile（复用该会话 Agent 绑定的 profile，
+        #    无绑定时回退租户默认 profile；demo 环境走 mock 模型）
+        # 3. 输出校验：非空、≤ 500 字（超出则取尾部并截断）
+        # 4. UPDATE runtime_conversations SET summary = ... WHERE id = ... 
+        #    （带 revision 检查，会话已关闭/删除则跳过）
+```
+
+摘要 prompt 要点（模板常量放 `summary.py`）：
+- 指令：将旧摘要与新对话片段合并为一份不超过 500 字的滚动摘要；
+- 必保留字段清单：客户身份/联系方式、诉求、关键事实与约束、已达成结论、待办与承诺；
+- 明确丢弃：寒暄、重复内容、工具调用细节；
+- 输出纯文本，不加任何前缀标记。
+
+### 3. Worker（`memory/worker.py`）
+
+```python
+class MemoryWorker:
+    # 复用 RuntimeWorker 的认领循环模式：
+    # UPDATE memory_tasks SET status='running' ... WHERE id = (
+    #   SELECT id FROM memory_tasks WHERE status='pending' AND run_after<=now()
+    #   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *
+```
+
+- 部署形态：Phase 1 直接作为 Runtime Worker 进程内的一个并发循环启动（`agent_runtime/bootstrap.py` 装配），不新增容器角色；生产拓扑的 Runtime Worker 副本数即并发度。
+- 失败处理：`attempts < max_attempts` 则 `run_after = now() + 指数退避` 重新 pending，否则置 `failed` 并记审计事件。
+- 优雅停机：跟随 Runtime Worker 的 shutdown 信号，running 任务重置为 pending。
+
+### 4. 注入（`engine.py`）
+
+现状消息序列：`SystemMessage(system_prompt)` + 截断 history + HumanMessage。
+
+改为：
+
+```
+SystemMessage(system_prompt)
++ SystemMessage(f"【此前对话摘要】\n{summary[:800 tokens]}")   # summary 非空时
++ 截断 history
++ HumanMessage
+```
+
+- `RunRepository.claim()` 查询时一并读出 `summary`，经 `runtime_runs` 行透传给 Worker → engine；
+- token 截断用简易估算（字符数 / 2 近似），不引入 tokenizer 依赖。
+
+### 5. 接管摘要（`human_handoff/service.py`）
+
+```python
+def _build_handoff_summary(conversation, recent_messages):
+    parts = []
+    if conversation["summary"]:
+        parts.append("【对话摘要】" + conversation["summary"])
+    parts.append("【最近消息】\n" + 现有拼接逻辑)
+    return "\n\n".join(parts)
+```
+
+### 6. 配置
+
+`settings.py` 新增：
+
+```python
+summary_enabled: bool = True
+summary_max_input_messages: int = 40
+summary_max_output_chars: int = 1000   # 500 中文字约 1000 字符上限
+```
+
+`AgentConfig` 新增 `summary_enabled: bool = True`，随 `agents.draft` JSONB 走既有草稿/发布/快照链路，无需改表。
+
+## 模型调用路径
+
+摘要调用走模型网关而非直连，复用：`GatewayChatModel`、用量落库（`gateway_calls`）、mock 模型（quickstart 演示环境零成本）。profile 选择顺序：
+
+1. 会话 Agent 快照绑定的 `model_profile_id/version`；
+2. 租户级默认 Chat profile（若无绑定）；
+3. 无可用 profile → 任务标记 failed（`error='no_chat_profile'`），功能降级。
+
+## 测试方案
+
+| 层 | 用例 |
+|---|---|
+| 单测 `test_summary.py` | prompt 组装、输出校验/截断、任务合并逻辑、失败重试与退避 |
+| 单测 engine | 有/无/超长摘要三种注入形态；`summary_enabled=False` 不注入 |
+| 集成 | 模拟 25 轮对话（mock 模型），断言：截断发生后产生任务 → worker 执行 → 会话 summary 更新 → 后续 run 注入摘要 |
+| 集成 handoff | 转人工后 handoff.summary 含摘要段落 |
+| 回归 | 现有 conversation / runtime / handoff 测试全绿（空 summary 时行为不变） |
+
+## 上线与回滚
+
+- 迁移只加列加表，可在线执行；
+- 全局 `summary_enabled=false` 即整体关闭（行为=现状）；
+- 回滚仅需关开关，无需回滚迁移。
