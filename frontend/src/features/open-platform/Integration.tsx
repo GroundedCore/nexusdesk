@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Form, Input, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd';
 import { t } from '../../i18n';
+import { roundAnswer, usePacedText } from '../../shared/components/ui';
 import type { Application } from './OpenPlatformPage';
 
 export function IntegrationDocs({app}:{app:Application}) {
@@ -27,15 +28,18 @@ export function IntegrationDocs({app}:{app:Application}) {
 
 interface Run {id:string;status:string;output:string|null;error_code:string|null}
 export function Debugger({app,agents}:{app:Application;agents:{id:string;name:string}[]}) {
-  const [key,setKey]=useState('');const [user,setUser]=useState('debug-user');const [session,setSession]=useState<string>(()=>crypto.randomUUID());const [agent,setAgent]=useState(app.agent_ids[0]);const [text,setText]=useState('');const [stream,setStream]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [answer,setAnswer]=useState('');const [live,setLive]=useState('');const [progress,setProgress]=useState<string[]>([]);const [run,setRun]=useState<Run|null>(null);const [requestId,setRequestId]=useState('');
+  const [key,setKey]=useState('');const [user,setUser]=useState('debug-user');const [session,setSession]=useState<string>(()=>crypto.randomUUID());const [agent,setAgent]=useState(app.agent_ids[0]);const [text,setText]=useState('');const [stream,setStream]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [answer,setAnswer]=useState('');const [live,setLive]=usePacedText();const [progress,setProgress]=useState<string[]>([]);const [run,setRun]=useState<Run|null>(null);const [requestId,setRequestId]=useState('');
   const controller=useRef<AbortController|null>(null);const active=useRef<{key:string;user:string}|null>(null);const pending=useRef<{hash:string;id:string}|null>(null);const runId=useRef('');
   // Per-round text from model.delta. A round that ends in tool calls was the model
-  // thinking out loud, so it is dropped: only the final answer round is shown.
-  const rounds=useRef<Map<number,string>>(new Map());
+  // thinking out loud, so it is marked and ignored: only the final answer round is
+  // shown. Rounds are marked rather than deleted because a delta can arrive after
+  // its round's boundary, and deleting would let it reappear.
+  const rounds=useRef<Map<number,{text:string;toolCalls?:number}>>(new Map());
+  const liveAnswer=()=>roundAnswer([...rounds.current.values()]);
   useEffect(()=>()=>{controller.current?.abort();},[]);
   function headers(identity={key,user}) {return {'Content-Type':'application/json',Authorization:'Bearer '+identity.key,'X-External-User-ID':identity.user};}
   async function checked(path:string,init:RequestInit) {const r=await fetch('/openapi/v1'+path,init);setRequestId(r.headers.get('X-Request-ID')||'');if(!r.ok){const data=await r.json();throw Error(`${r.status} · ${data.error?.code||'request_failed'}`);}return r;}
-  function completed(data:Run){setRun(data);setAnswer(data.output||'');setLive('');if(data.error_code)setError(data.error_code);}
+  function completed(data:Run){setRun(data);setAnswer(data.output||'');setLive(data.output||'');if(data.error_code)setError(data.error_code);}
   async function send(){if(busy)return;setBusy(true);setError('');setAnswer('');setLive('');rounds.current.clear();setProgress([]);setRun(null);runId.current='';active.current={key,user};const abort=new AbortController();controller.current=abort;
     try{const common={headers:headers(),signal:abort.signal};const c=await checked('/conversations',{...common,method:'POST',body:JSON.stringify({agent_id:agent,external_session_id:session})});const {conversation_id:cid}=await c.json();
       const hash=JSON.stringify([key,user,cid,text]);if(pending.current?.hash!==hash)pending.current={hash,id:crypto.randomUUID()};
@@ -43,7 +47,7 @@ export function Debugger({app,agents}:{app:Application;agents:{id:string;name:st
       if(!stream){const data=await r.json();runId.current=data.id;completed(data);if(['completed','failed','cancelled'].includes(data.status))pending.current=null;return;}
       const reader=r.body!.getReader();const decoder=new TextDecoder();let buffer='';
       while(true){const {done,value}=await reader.read();buffer+=decoder.decode(value,{stream:!done});let boundary:number;
-        while((boundary=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);const lines=block.split('\n');const type=lines.find(l=>l.startsWith('event:'))?.slice(6).trim();const raw=lines.filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!type||!raw)continue;const data=JSON.parse(raw);if(data.run_id)runId.current=data.run_id;if(type==='model.delta'){if(data.text){rounds.current.set(data.round,(rounds.current.get(data.round)||'')+data.text);setLive([...rounds.current.values()].join(''));}continue;}if(type==='model.completed'){if((data.tool_calls||0)>0)rounds.current.delete(data.round);setLive([...rounds.current.values()].join(''));continue;}setProgress(p=>[...p.slice(-49),type]);if(type==='error')throw Error(data.code);if(['run.completed','run.failed','run.cancelled'].includes(type)){completed(data);pending.current=null;}}
+        while((boundary=buffer.indexOf('\n\n'))>=0){const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2);const lines=block.split('\n');const type=lines.find(l=>l.startsWith('event:'))?.slice(6).trim();const raw=lines.filter(l=>l.startsWith('data:')).map(l=>l.slice(5).trimStart()).join('\n');if(!type||!raw)continue;const data=JSON.parse(raw);if(data.run_id)runId.current=data.run_id;if(type==='model.delta'){if(data.text){const cur=rounds.current.get(data.round)||{text:''};rounds.current.set(data.round,{...cur,text:cur.text+data.text});setLive(liveAnswer());}continue;}if(type==='model.completed'){const cur=rounds.current.get(data.round)||{text:''};rounds.current.set(data.round,{...cur,toolCalls:data.tool_calls||0});setLive(liveAnswer());continue;}setProgress(p=>[...p.slice(-49),type]);if(type==='error')throw Error(data.code);if(['run.completed','run.failed','run.cancelled'].includes(type)){completed(data);pending.current=null;}}
         if(done)break;
       }
     }catch(e){if(!(e instanceof DOMException&&e.name==='AbortError'))setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);controller.current=null;}}
@@ -55,5 +59,5 @@ export function Debugger({app,agents}:{app:Application;agents:{id:string;name:st
     <div className="op-form-row"><Form.Item label={t('外部用户标识')} required><Input value={user} maxLength={128} disabled={busy} onChange={e=>setUser(e.target.value)}/></Form.Item><Form.Item label={t('外部会话标识')} required><Input value={session} maxLength={128} disabled={busy} onChange={e=>setSession(e.target.value)}/></Form.Item></div>
     <Form.Item label={t('消息')} htmlFor="op-debug-message" required><Input.TextArea id="op-debug-message" rows={4} value={text} maxLength={8000} disabled={busy} onChange={e=>setText(e.target.value)}/></Form.Item><Form.Item label={t('SSE 事件流')}><Switch checked={stream} onChange={setStream} disabled={busy}/></Form.Item>
     <Space wrap><Button type="primary" htmlType="submit" loading={busy} disabled={!app.enabled||!key.trim()||!agent||!user.trim()||!session.trim()||!text.trim()}>{t('发送消息')}</Button><Button disabled={!busy&&!runId.current} onClick={cancel}>{t('取消运行')}</Button><Button disabled={busy||!runId.current} onClick={refresh}>{t('查询运行结果')}</Button><Button disabled={busy} onClick={()=>{setSession(crypto.randomUUID());setRun(null);setAnswer('');runId.current='';pending.current=null;}}>{t('新会话')}</Button></Space>
-  </Form></Card><Card title={t('调试结果')}><p className="op-muted">{t('SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。')}</p>{error&&<Alert type="error" showIcon title={error}/>}<Space wrap>{progress.map((p,i)=><Tag key={i}>{p}</Tag>)}</Space>{requestId&&<Typography.Paragraph copyable>Request ID: {requestId}</Typography.Paragraph>}{(run?.id||runId.current)&&<Typography.Paragraph copyable>Run ID: {run?.id||runId.current}</Typography.Paragraph>}{run&&<Tag>{run.status}</Tag>}<pre className="op-answer">{answer||live}</pre></Card></div>;
+  </Form></Card><Card title={t('调试结果')}><p className="op-muted">{t('SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。')}</p>{error&&<Alert type="error" showIcon title={error}/>}<Space wrap>{progress.map((p,i)=><Tag key={i}>{p}</Tag>)}</Space>{requestId&&<Typography.Paragraph copyable>Request ID: {requestId}</Typography.Paragraph>}{(run?.id||runId.current)&&<Typography.Paragraph copyable>Run ID: {run?.id||runId.current}</Typography.Paragraph>}{run&&<Tag>{run.status}</Tag>}<pre className="op-answer">{live||answer}</pre></Card></div>;
 }

@@ -272,6 +272,52 @@ export function answerRound(rounds: RunRound[]): RunRound | null {
     // keep the last text on screen rather than blanking the bubble.
     return rounds[rounds.length - 1] || null;
 }
+/**
+ * Same rule as answerRound, for callers that fold rounds into a map instead of
+ * state. Rounds must be marked, never deleted: deltas arrive over a transient
+ * channel while round boundaries arrive through the event log, so a late delta
+ * can land after its round completed and must not resurrect a discarded round.
+ */
+export function roundAnswer(rows: { text: string; toolCalls?: number }[]): string {
+    const settled = rows.filter(r => r.toolCalls === 0);
+    if (settled.length)
+        return settled[settled.length - 1].text;
+    const streaming = rows.filter(r => r.toolCalls === undefined);
+    if (streaming.length)
+        return streaming[streaming.length - 1].text;
+    // No answer yet and no round producing text: stay empty rather than leaving a
+    // discarded round's text on screen, which the public API must not expose.
+    return '';
+}
+/**
+ * Reveals text gradually. Feed it the newest target; it returns the slice to render.
+ *
+ * Rendering straight from the network would paint whatever lumps arrive: a reader
+ * drains every already buffered chunk inside one macrotask, and React batches those
+ * updates into a single render, so a burst of token frames lands as one jump. The
+ * first characters still appear on the next tick.
+ */
+export function usePacedText(): [string, (value: string) => void] {
+    const target = useRef('');
+    const [shown, setShown] = useState('');
+    useEffect(() => {
+        const timer = setInterval(() => {
+            setShown(prev => {
+                const want = target.current;
+                if (prev === want)
+                    return prev;
+                // The text was replaced rather than extended (a round gave way to the
+                // answer): restart so the new text is revealed from its own beginning.
+                if (!want.startsWith(prev))
+                    return '';
+                const backlog = want.length - prev.length;
+                return want.slice(0, prev.length + Math.max(4, Math.ceil(backlog / 8)));
+            });
+        }, 20);
+        return () => clearInterval(timer);
+    }, []);
+    return [shown, useCallback((value: string) => { target.current = value; }, [])];
+}
 export function Trace({ runId }: {
     runId: string | null;
 }) {

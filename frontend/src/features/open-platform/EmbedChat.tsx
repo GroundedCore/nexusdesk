@@ -2,16 +2,17 @@ import {useEffect,useRef,useState} from 'react';
 import {Alert,Button,Input,Select,Space,Spin} from 'antd';
 import {SendOutlined,RobotOutlined,PlusOutlined} from '@ant-design/icons';
 import {t} from '../../i18n';
+import {roundAnswer,usePacedText} from '../../shared/components/ui';
 import {ssoLogin,type LoginProvider} from './SsoLogin';
 import './embed-chat.css';
 
 interface Config {title:string;color:string;providers:LoginProvider[]}
 interface ChatMessage {role:string;content:string}
-interface Run {id:string;status:string;response?:string;error_code?:string}
+interface Run {id:string;status:string;response?:string;output?:string;error_code?:string}
 export function EmbedChat() {
   const appId=location.pathname.split('/')[2],parentOrigin=new URLSearchParams(location.search).get('parent_origin')||'';
   const [config,setConfig]=useState<Config|null>(null),[error,setError]=useState(''),[credential,setCredential]=useState(''),[ready,setReady]=useState(false);
-  const [agents,setAgents]=useState<{id:string;name:string}[]>([]),[agentId,setAgentId]=useState(''),[messages,setMessages]=useState<ChatMessage[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[loginBusy,setLoginBusy]=useState(false),[live,setLive]=useState('');
+  const [agents,setAgents]=useState<{id:string;name:string}[]>([]),[agentId,setAgentId]=useState(''),[messages,setMessages]=useState<ChatMessage[]>([]),[input,setInput]=useState(''),[busy,setBusy]=useState(false),[loginBusy,setLoginBusy]=useState(false),[live,setLive]=usePacedText();
   const conversation=useRef(''),generation=useRef(0),bottom=useRef<HTMLDivElement>(null),credentialRef=useRef('');
   const pending=useRef<{text:string;key:string}|null>(null);
   function reset(){generation.current++;conversation.current='';pending.current=null;setMessages([]);setLive('');setBusy(false);setError('');}
@@ -44,15 +45,18 @@ export function EmbedChat() {
     setBusy(true);setError('');
     try{
       if(!conversation.current){const session=await api<{conversation_id:string}>('/conversations',{agent_id:agentId,external_session_id:attempt.key});if(stamp!==generation.current)return;conversation.current=session.conversation_id;}
-      setMessages(old=>[...old,{role:'user',content:text}]);setInput('');
+      setMessages(old=>[...old,{role:'user',content:text}]);setInput('');setLive('');
       // Stream the answer so it appears as it is produced. Rounds that end in tool
-      // calls were the model thinking out loud, so they are dropped and only the
+      // calls were the model thinking out loud, so they are marked and only the
       // final ReAct round is shown.
       const response=await fetch(`/openapi/v1/conversations/${conversation.current}/messages`,{method:'POST',headers:{Authorization:'Bearer '+credentialRef.current,'Content-Type':'application/json','Idempotency-Key':attempt.key},body:JSON.stringify({message:text,stream:true})});
       if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===401){setCredential('');reset();}throw new Error(data.error?.code||data.detail||'request_failed');}
       if(!response.body)throw new Error('stream_unavailable');
       const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';let runId='';let terminal:Run|null=null;
-      const rounds=new Map<number,string>();
+      // Rounds are marked, never deleted: a delta can arrive after its round's
+      // boundary came through the event log, and deleting would let it reappear.
+      const rounds=new Map<number,{text:string;toolCalls?:number}>();
+      const liveAnswer=()=>roundAnswer([...rounds.values()]);
       while(true){
         const {done,value}=await reader.read();
         if(done)break;
@@ -66,8 +70,8 @@ export function EmbedChat() {
           if(!type||!raw)continue;
           const data=JSON.parse(raw);
           if(data.run_id)runId=data.run_id;
-          if(type==='model.delta'){if(data.text){rounds.set(data.round,(rounds.get(data.round)||'')+data.text);setLive([...rounds.values()].join(''));}continue;}
-          if(type==='model.completed'){if((data.tool_calls||0)>0)rounds.delete(data.round);setLive([...rounds.values()].join(''));continue;}
+          if(type==='model.delta'){if(data.text){const cur=rounds.get(data.round)||{text:''};rounds.set(data.round,{...cur,text:cur.text+data.text});setLive(liveAnswer());}continue;}
+          if(type==='model.completed'){const cur=rounds.get(data.round)||{text:''};rounds.set(data.round,{...cur,toolCalls:data.tool_calls||0});setLive(liveAnswer());continue;}
           if(type==='error')throw new Error(data.code);
           if(['run.completed','run.failed','run.cancelled'].includes(type))terminal=data;
         }
@@ -76,7 +80,9 @@ export function EmbedChat() {
       if(stamp!==generation.current)return;
       if(!terminal&&runId)terminal=await api<Run>('/runs/'+runId);
       if(stamp!==generation.current)return;
-      setLive('');
+      // Point the reveal at the authoritative answer so it finishes smoothly
+      // instead of being cut short by the message list replacing it.
+      setLive(terminal?.output||'');
       const history=await api<{items:ChatMessage[]}>(`/conversations/${conversation.current}/messages?limit=200`);
       if(stamp!==generation.current)return;
       setMessages(history.items.filter(m=>m.role==='user'||m.role==='assistant'));
@@ -89,7 +95,7 @@ export function EmbedChat() {
     {error&&<Alert showIcon type="error" title={error} closable onClose={()=>setError('')}/>}
     {!config&&!error?<Spin/>:!ready?<div className="embed-empty">{t('正在连接企业页面')}</div>:!credential?<div className="embed-login"><RobotOutlined style={{fontSize:42,color:config?.color}}/><h2>{t('登录后开始对话')}</h2><p>{t('使用企业账号登录，继续你的专属会话。')}</p><Space direction="vertical" style={{width:'100%'}}>{config?.providers.map(p=><Button block key={p.id} disabled={loginBusy} onClick={async()=>{setLoginBusy(true);setError('');try{const session=await ssoLogin(p,appId,parentOrigin);reset();setCredential(session.access_token);}catch(e){setError((e as Error).message);}finally{setLoginBusy(false);}}}>{p.name}</Button>)}<Button block type="link" onClick={()=>window.parent.postMessage({type:'nexusdesk.refresh-token'},parentOrigin)}>{t('获取企业登录凭据')}</Button></Space></div>:<>
       <div className="embed-controls"><Select aria-label={t('选择 Agent')} value={agentId||undefined} disabled={busy||!!conversation.current} onChange={setAgentId} options={agents.map(a=>({value:a.id,label:a.name}))} style={{flex:1}}/><Button type="text" onClick={async()=>{await fetch('/api/v1/sso/logout',{method:'POST',headers:{Authorization:'Bearer '+credential}});reset();setCredential('');}}>{t('退出')}</Button></div>
-      <div className="embed-messages" aria-live="polite">{!messages.length&&!live&&<div className="embed-empty"><RobotOutlined/><p>{t('有什么可以帮你？')}</p></div>}{messages.map((m,i)=><div key={i} className={'embed-message '+m.role}>{m.content}</div>)}{live&&<div className="embed-message assistant">{live}</div>}{busy&&!live&&<div className="embed-thinking"><Spin size="small"/> {t('正在思考…')}</div>}<div ref={bottom}/></div>
+      <div className="embed-messages" aria-live="polite">{!messages.length&&!live&&<div className="embed-empty"><RobotOutlined/><p>{t('有什么可以帮你？')}</p></div>}{messages.map((m,i)=><div key={i} className={'embed-message '+m.role}>{m.role==='assistant'&&i===messages.length-1&&live?live:m.content}</div>)}{live&&messages[messages.length-1]?.role!=='assistant'&&<div className="embed-message assistant">{live}</div>}{busy&&!live&&<div className="embed-thinking"><Spin size="small"/> {t('正在思考…')}</div>}<div ref={bottom}/></div>
       <div className="embed-composer"><Input.TextArea aria-label={t('输入消息')} placeholder={t('输入消息')} value={input} maxLength={8000} autoSize={{minRows:1,maxRows:4}} disabled={busy} onChange={e=>setInput(e.target.value)} onPressEnter={e=>{if(!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void send();}}}/><Button type="primary" icon={<SendOutlined/>} aria-label={t('发送')} loading={busy} disabled={!agentId||!input.trim()} onClick={()=>void send()}/></div>
       <footer>{t('AI 回答仅供参考，请核实重要信息。')}</footer></>}
   </div>;
