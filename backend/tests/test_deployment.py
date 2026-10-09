@@ -212,6 +212,9 @@ def test_healthcheck_matches_the_quickstart_scheme():
     # The generated certificate is self-signed, so the probe cannot verify it.
     assert "verify_mode = ssl.CERT_NONE" in healthcheck
     assert 'url = "http://127.0.0.1:8000/api/v1/ready"' in healthcheck
+    # The API rejects anonymous callers and the entry point injects no identity,
+    # so the probe must authenticate with the bootstrap-minted local token.
+    assert "local-access.token" in healthcheck
 
 
 def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
