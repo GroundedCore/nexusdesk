@@ -128,6 +128,7 @@ flowchart LR
 | 接入模型服务 | [模型网关协议](backend/src/agent_platform/modules/model_gateway/PROTOCOL.md) |
 | 接入业务应用 | [API 说明](docs/api.md) · [开放平台](docs/open-platform.md) |
 | 管理数据库变更 | [迁移指南](docs/database-migrations.md) |
+| 查看版本更新 | [更新日志](CHANGELOG.md) |
 
 ## 后续方向
 

@@ -132,6 +132,7 @@ The documents listed below are currently written in Simplified Chinese.
 | Integrate model services | [Model gateway protocol](backend/src/agent_platform/modules/model_gateway/PROTOCOL.md) |
 | Integrate business applications | [API reference](docs/api.md) · [Open platform](docs/open-platform.md) |
 | Manage database changes | [Migration guide](docs/database-migrations.md) |
+| See what changed in a release | [Changelog](CHANGELOG.en.md) |
 
 ## Roadmap
 
