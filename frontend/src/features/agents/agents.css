@@ -22,4 +22,7 @@
   .agents-shell .console-header>.ant-btn { min-width:0; max-width:42%; overflow:hidden; }
   .agents-shell .console-header>.ant-btn>span:not(.ant-avatar) { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 }
-.agent-run-trace { display:flex; justify-content:flex-end; margin:-6px 0 2px; }
+.agent-message-trace { display:flex; justify-content:flex-end; margin-top:2px; }
+.agent-message-trace .ant-btn, .message-trace .ant-btn { color:#9aa4ad; }
+.agent-message-trace .ant-btn:hover, .message-trace .ant-btn:hover { color:#276752; background:transparent; }
+.message-trace { display:flex; justify-content:flex-end; margin-top:2px; }

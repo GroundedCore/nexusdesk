@@ -5,7 +5,7 @@ export interface KnowledgeBase { id: string; name: string; document_count: numbe
 export interface Tool { revision?: number; published_version?: number; id: string; name: string; enabled: boolean; source: string; spec: Record<string, unknown> }
 export interface Conversation { deleted_agent?: { id: string; name: string; published_version: number | null } | null; source?: "business" | "playground"; last_message?: string | null; revision?: number; id: string; external_id: string; mode: string; agent_id: string | null; assigned_to: string | null; updated_at: string }
 export interface Run { id: string; conversation_id: string; status: string; error_code: string | null; created_at: string; output?: string; ttfc_ms?: number | null }
-export interface Message { id: string; seq: number; role: string; content: string; created_at: string }
+export interface Message { id: string; seq: number; role: string; content: string; created_at: string; run_id?: string | null }
 export interface Action { id: string; status: string; payload: { title: string; description: string }; expires_at: string }
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
