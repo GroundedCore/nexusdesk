@@ -132,9 +132,11 @@ export function Trace({ runId }: {
     runId: string | null;
 }) {
     const [events, setEvents] = useState<StreamEvent[]>([]);
+    const [rounds, setRounds] = useState<{ round: number; text: string; reasoning: string }[]>([]);
     const [error, setError] = useState('');
     useEffect(() => {
         setEvents([]);
+        setRounds([]);
         setError('');
         if (!runId)
             return;
@@ -165,6 +167,26 @@ export function Trace({ runId }: {
                         const id = Number(lines.find(l => l.startsWith('id: '))?.slice(4));
                         const kind = lines.find(l => l.startsWith('event: '))?.slice(7);
                         const data = lines.find(l => l.startsWith('data: '))?.slice(6);
+                        if (kind === 'model.delta' && data) {
+                            // Transient delta: accumulate per round, never advance cursor.
+                            const p = JSON.parse(data) as { round?: number; text?: string; reasoning?: string };
+                            const round = p.round ?? 0;
+                            setRounds(old => {
+                                const next = old.slice();
+                                const i = next.findIndex(r => r.round === round);
+                                const merged = {
+                                    round,
+                                    text: (i >= 0 ? next[i].text : '') + (p.text || ''),
+                                    reasoning: (i >= 0 ? next[i].reasoning : '') + (p.reasoning || ''),
+                                };
+                                if (i >= 0)
+                                    next[i] = merged;
+                                else
+                                    next.push(merged);
+                                return next;
+                            });
+                            continue;
+                        }
                         if (kind && data && id > cursor) {
                             cursor = id;
                             setEvents(old => [...old, { id, type: kind, data: JSON.parse(data) as Record<string, unknown> }].slice(-150));
@@ -188,5 +210,5 @@ export function Trace({ runId }: {
     }, [runId]);
     if (!runId)
         return <Empty>{t("选择一次运行查看事件")}</Empty>;
-    return <div className="trace"><Alert error={error}/>{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}{events.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
+    return <div className="trace"><Alert error={error}/>{rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}{events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
 }
