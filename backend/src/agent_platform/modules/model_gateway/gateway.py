@@ -594,7 +594,7 @@ class GatewayChatModel:
                     break
                 try:
                     await on_delta(await asyncio.wait_for(queue.get(), timeout=0.1))
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
             result = await task
         except DomainError as exc:

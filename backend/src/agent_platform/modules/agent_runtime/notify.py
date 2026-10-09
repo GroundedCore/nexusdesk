@@ -52,7 +52,7 @@ class Notifier:
                 if self.conn is not None:
                     try:
                         await self.conn.close()
-                    except Exception:  # noqa: BLE001 - close is best-effort
+                    except Exception:  # noqa: BLE001, S110 - close is best-effort
                         pass
                 self.conn = None
 

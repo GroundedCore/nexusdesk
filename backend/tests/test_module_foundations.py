@@ -1,10 +1,10 @@
 import pytest
+from test_platform_postgres import create_agent
+from test_platform_postgres import platform as _platform_fixture
 
 from agent_platform.modules.policy.contracts import ResourceFacts
 from agent_platform.modules.policy.service import ExecutionPolicy
 from agent_platform.platform.identity.context import ExecutionContext
-from test_platform_postgres import create_agent
-from test_platform_postgres import platform as _platform_fixture
 
 platform = _platform_fixture
 

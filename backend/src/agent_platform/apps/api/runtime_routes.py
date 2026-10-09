@@ -119,7 +119,7 @@ async def stream_events(
                 # missed notification and the heartbeat cadence.
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=15)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": heartbeat\n\n"
                     continue
                 payload = json.loads(message)

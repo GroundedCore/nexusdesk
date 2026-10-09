@@ -1,7 +1,6 @@
 from uuid import uuid4
 
 import pytest
-
 from test_ticket_migrations import migrate, query
 from test_ticket_migrations import migration_database as _migration_database
 

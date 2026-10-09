@@ -124,7 +124,7 @@ class RuntimeWorker:
                     asyncio.ensure_future(wake.wait()),
                     asyncio.ensure_future(self.stopping.wait()),
                 }
-                done, waiting = await asyncio.wait(
+                _done, waiting = await asyncio.wait(
                     pending, timeout=0.5, return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in waiting:

@@ -1,7 +1,7 @@
 import pytest
+from test_platform_postgres import platform as _platform_fixture
 
 from agent_platform.platform.persistence.store import DomainError
-from test_platform_postgres import platform as _platform_fixture
 
 platform = _platform_fixture
 ROOT = "/api/v1/knowledge-workspace"

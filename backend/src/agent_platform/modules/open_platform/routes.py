@@ -326,7 +326,7 @@ def stream_response(request, identity, user, run_id, after=0):
                 # reasoning and tool-call fragments stay internal.
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=0.5)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     message = None
                 while message is not None:
                     payload = json.loads(message)
