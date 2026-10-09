@@ -2,19 +2,21 @@ import asyncio
 import logging
 from uuid import uuid4
 
+from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
 
 logger = logging.getLogger(__name__)
 
 
 class RuntimeWorker:
-    def __init__(self, repository, runtime, settings, fingerprint, notifier=None):
+    def __init__(self, repository, runtime, settings, fingerprint, notifier=None, listener=None):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
         self.owner = uuid4()
         self.tasks = set()
         self.stopping = asyncio.Event()
         self.notifier = notifier
+        self.listener = listener
 
     async def _execute(self, row):
         monitor_failure = False
@@ -88,8 +90,21 @@ class RuntimeWorker:
             logger.error("Worker could not persist final state; lease reaper will recover it")
 
     async def serve(self):
+        # A submitted run is claimed as soon as it is queued rather than at the next
+        # poll, which removes most of the queue wait a customer sits through. The
+        # timeout stays as the safety net for a missed notification.
+        wake = asyncio.Event()
+
+        def notified(_payload):
+            wake.set()
+
+        if self.listener is not None:
+            await self.listener.on(QUEUE_CHANNEL, notified)
         try:
             while not self.stopping.is_set():
+                # Cleared before claiming so a run queued while we are claiming still
+                # wakes the wait below.
+                wake.clear()
                 try:
                     await self.repository.reap(self.settings.tenant_id)
                     while len(self.tasks) < self.settings.worker_concurrency:
@@ -103,11 +118,21 @@ class RuntimeWorker:
                         task.add_done_callback(self._done)
                 except Exception:  # noqa: BLE001 - isolate failures at the worker boundary
                     logger.error("Runtime database unavailable; retrying dispatcher")
-                try:
-                    await asyncio.wait_for(self.stopping.wait(), timeout=0.5)
-                except TimeoutError:
-                    pass
+                # Wake on a queue notification, on stop, or after the safety-net
+                # timeout. Cancelling an Event waiter is safe: the set flag persists.
+                pending = {
+                    asyncio.ensure_future(wake.wait()),
+                    asyncio.ensure_future(self.stopping.wait()),
+                }
+                done, waiting = await asyncio.wait(
+                    pending, timeout=0.5, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in waiting:
+                    task.cancel()
+                await asyncio.gather(*waiting, return_exceptions=True)
         finally:
+            if self.listener is not None:
+                await self.listener.off(QUEUE_CHANNEL, notified)
             tasks = list(self.tasks)
             for task in tasks:
                 task.cancel()

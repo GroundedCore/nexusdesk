@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from agent_platform.modules.agent_runtime.notify import channel
+from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.modules.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.modules.conversation.service import add_message
 from agent_platform.platform.persistence.store import DomainError, transaction
@@ -35,6 +35,12 @@ class RunRepository:
                 "payload": json.dumps({"k": "durable", "seq": seq, "type": kind}),
             },
         )
+        if kind == "run.queued":
+            # Wake an idle worker so the run does not wait for its next poll. Same
+            # transaction, so it fires exactly when the run becomes claimable.
+            await conn.execute(
+                text("SELECT pg_notify(:ch, '')"), {"ch": QUEUE_CHANNEL}
+            )
 
     async def submit(
         self, tenant, request, config, capacity, tenant_capacity, queue_timeout, connection=None
