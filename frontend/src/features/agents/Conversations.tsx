@@ -3,11 +3,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Avatar, Button, Empty, Input, Pagination, Select, Space, Spin, Table, Tag } from 'antd';
 import { PlusOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons';
 import { api, post, type Agent, type Conversation, type ConversationDetail, type Message } from '../../shared/api/client';
-import { Alert, Badge, time, useAccess, useAction, useResource } from '../../shared/components/ui';
+import { Alert, Badge, answerRound, time, useAccess, useAction, useResource, useRunStream } from '../../shared/components/ui';
 import { type PageResult } from './AgentsPage';
-function Messages({ detail, follow = false }: {
+function Messages({ detail, follow = false, pending = '', reasoning = '' }: {
     detail: ConversationDetail;
     follow?: boolean;
+    pending?: string;
+    reasoning?: string;
 }) {
     const [older, setOlder] = useState<Message[]>([]);
     const [more, setMore] = useState(true);
@@ -16,7 +18,7 @@ function Messages({ detail, follow = false }: {
     const scroller = useRef<HTMLDivElement>(null);
     const messages = [...new Map([...older, ...detail.messages].map(m => [m.seq, m])).values()].sort((a, b) => a.seq - b.seq);
     useEffect(() => { if (follow)
-        bottom.current?.scrollIntoView({ block: 'nearest' }); }, [detail.messages.at(-1)?.seq, follow]);
+        bottom.current?.scrollIntoView({ block: 'nearest' }); }, [detail.messages.at(-1)?.seq, pending, follow]);
     async function loadOlder() {
         const row = await api<{
             items: Message[];
@@ -28,7 +30,7 @@ function Messages({ detail, follow = false }: {
         requestAnimationFrame(() => { if (scroller.current)
             scroller.current.scrollTop += scroller.current.scrollHeight - height; });
     }
-    return <div className="agent-messages" ref={scroller}><Alert error={action.error}/>{more && messages.length > 0 && <Button className="agent-load-history" type="text" loading={action.busy} onClick={() => void action.run(loadOlder, '')}>{t("加载更早消息")}</Button>}{messages.length === 0 && <Empty description={t("暂无消息")}/>}{messages.map(message => <div key={message.id} className={`agent-message ${message.role}`}><div className="agent-message-meta">{{ user: t("用户"), assistant: 'Agent', human: t("人工客服"), system: t("系统") }[message.role]} · {time(message.created_at)}</div><div className="agent-message-bubble">{message.content}</div></div>)}<div ref={bottom}/></div>;
+    return <div className="agent-messages" ref={scroller}><Alert error={action.error}/>{more && messages.length > 0 && <Button className="agent-load-history" type="text" loading={action.busy} onClick={() => void action.run(loadOlder, '')}>{t("加载更早消息")}</Button>}{messages.length === 0 && !pending && <Empty description={t("暂无消息")}/>}{messages.map(message => <div key={message.id} className={`agent-message ${message.role}`}><div className="agent-message-meta">{{ user: t("用户"), assistant: 'Agent', human: t("人工客服"), system: t("系统") }[message.role]} · {time(message.created_at)}</div><div className="agent-message-bubble">{message.content}</div></div>)}{pending ? <div className="agent-message assistant"><div className="agent-message-meta">Agent · {t("正在生成回答\u2026")}</div>{reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{reasoning}</pre></details> : null}<div className="agent-message-bubble">{pending}</div></div> : null}<div ref={bottom}/></div>;
 }
 export function AgentChat({ agent }: {
     agent: Agent | null;
@@ -45,6 +47,11 @@ export function AgentChat({ agent }: {
     useEffect(() => { if (pendingRun && detail.data?.runs.some(r => r.id === pendingRun && !['queued', 'running'].includes(r.status)))
         setPendingRun(''); }, [pendingRun, detail.data]);
     const busy = !!active || !!pendingRun;
+    // Watch the in-flight run so the answer types out instead of appearing at once.
+    // Once the run settles the polled message carries the same text, so the live
+    // bubble steps aside in the same refresh and nothing is duplicated.
+    const stream = useRunStream(busy ? (active?.id || pendingRun) : null);
+    const live = answerRound(stream.rounds);
     const canSend = available && !action.busy && !busy && !detail.loading && !detail.error && (!detail.data || detail.data.mode === 'bot');
     async function send() {
         let conversationId = cid;
@@ -64,7 +71,7 @@ export function AgentChat({ agent }: {
     }
     return <div className="agent-chat"><div className="agent-chat-heading"><div><strong>{t("试聊")}<span className="agent-preview-label">PREVIEW</span></strong><p>{agent?.published_version ? t("当前使用发布版本 v{{v0}} \u00B7 草稿修改不影响本次试聊", { v0: agent.published_version }) : t("发布后即可开始试聊")}</p></div><Button type="text" icon={<PlusOutlined aria-hidden/>} disabled={busy || action.busy} onClick={() => { setCid(''); setPendingRun(''); setInput(''); action.clear(); }}>{t("新会话")}</Button></div>
     <Alert error={action.error.includes('agent_model_required') ? t("已发布版本尚未配置模型，请在 Agent 配置中选择模型方案并重新发布。") : action.error || detail.error}/>{detail.error && <Button onClick={detail.refresh}>{t("重试加载")}</Button>}
-    {!cid ? <div className="agent-chat-welcome"><Avatar size={72} shape="square" icon={<RobotOutlined aria-hidden/>}/><h2>{agent?.name || t("你的 Agent")}</h2><p>{t("从一个问题开始，看看 Agent 如何回应。")}</p><div className="agent-chat-suggestions">{[t("介绍一下你能做什么"), t("我需要你的帮助")].map(text => <Button key={text} disabled={!available} onClick={() => setInput(text)}>{text}<span aria-hidden>↗</span></Button>)}</div></div> : detail.data ? <Messages key={cid} detail={detail.data} follow/> : <div className="agent-chat-welcome"><Spin /></div>}
+    {!cid ? <div className="agent-chat-welcome"><Avatar size={72} shape="square" icon={<RobotOutlined aria-hidden/>}/><h2>{agent?.name || t("你的 Agent")}</h2><p>{t("从一个问题开始，看看 Agent 如何回应。")}</p><div className="agent-chat-suggestions">{[t("介绍一下你能做什么"), t("我需要你的帮助")].map(text => <Button key={text} disabled={!available} onClick={() => setInput(text)}>{text}<span aria-hidden>↗</span></Button>)}</div></div> : detail.data ? <Messages key={cid} detail={detail.data} follow pending={live?.text || ''} reasoning={live?.reasoning || ''}/> : <div className="agent-chat-welcome"><Spin /></div>}
     {busy && <div className="agent-run-state"><Space><Spin size="small"/><span>{active?.status === 'queued' ? t("正在排队\u2026") : t("正在生成回答\u2026")}</span></Space><Button type="text" disabled={action.busy} onClick={() => void action.run(async () => { await post(`/runs/${active?.id || pendingRun}/cancel`); detail.refresh(); }, '')}>{t("停止生成")}</Button></div>}
     {currentRun?.status === 'failed' && <Alert error={t("运行失败：{{v0}}", { v0: currentRun.error_code || t("请重试") })}/>}{currentRun?.status === 'cancelled' && <p className="agent-muted">{t("本次运行已取消")}</p>}
     {detail.data?.actions.filter(a => a.status === 'pending').map(a => <div className="agent-pending-action" key={a.id}><strong>{t("待确认工单：")}{a.payload.title}</strong><p>{a.payload.description}</p><Space><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: true }); detail.refresh(); }, '')}>{t("确认创建")}</Button><Button disabled={!operator || busy || action.busy} onClick={() => void action.run(async () => { await post(`/actions/${a.id}/decision`, { approve: false }); detail.refresh(); }, '')}>{t("拒绝")}</Button></Space></div>)}

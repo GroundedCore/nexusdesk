@@ -128,16 +128,28 @@ interface StreamEvent {
     type: string;
     data: Record<string, unknown>;
 }
-export function Trace({ runId }: {
-    runId: string | null;
-}) {
+export interface RunRound {
+    round: number;
+    text: string;
+    reasoning: string;
+    /** Set once model.completed for this round arrives; >0 means the round only produced tool calls. */
+    toolCalls?: number;
+}
+/**
+ * Subscribe to a run's event stream. Durable events come from the log and carry a
+ * seq cursor; token deltas arrive live and are transient, so they are accumulated
+ * per round and never advance the cursor.
+ */
+export function useRunStream(runId: string | null) {
     const [events, setEvents] = useState<StreamEvent[]>([]);
-    const [rounds, setRounds] = useState<{ round: number; text: string; reasoning: string }[]>([]);
+    const [rounds, setRounds] = useState<RunRound[]>([]);
     const [error, setError] = useState('');
+    const [finished, setFinished] = useState(false);
     useEffect(() => {
         setEvents([]);
         setRounds([]);
         setError('');
+        setFinished(false);
         if (!runId)
             return;
         const controller = new AbortController();
@@ -153,10 +165,10 @@ export function Trace({ runId }: {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
-                let finished = false;
+                let done = false;
                 while (true) {
-                    const { done, value } = await reader.read();
-                    if (done)
+                    const { done: end, value } = await reader.read();
+                    if (end)
                         break;
                     buffer += decoder.decode(value, { stream: true });
                     let boundary: number;
@@ -168,21 +180,15 @@ export function Trace({ runId }: {
                         const kind = lines.find(l => l.startsWith('event: '))?.slice(7);
                         const data = lines.find(l => l.startsWith('data: '))?.slice(6);
                         if (kind === 'model.delta' && data) {
-                            // Transient delta: accumulate per round, never advance cursor.
                             const p = JSON.parse(data) as { round?: number; text?: string; reasoning?: string };
                             const round = p.round ?? 0;
                             setRounds(old => {
                                 const next = old.slice();
                                 const i = next.findIndex(r => r.round === round);
-                                const merged = {
-                                    round,
-                                    text: (i >= 0 ? next[i].text : '') + (p.text || ''),
-                                    reasoning: (i >= 0 ? next[i].reasoning : '') + (p.reasoning || ''),
-                                };
                                 if (i >= 0)
-                                    next[i] = merged;
+                                    next[i] = { ...next[i], text: next[i].text + (p.text || ''), reasoning: next[i].reasoning + (p.reasoning || '') };
                                 else
-                                    next.push(merged);
+                                    next.push({ round, text: p.text || '', reasoning: p.reasoning || '' });
                                 return next;
                             });
                             continue;
@@ -190,12 +196,19 @@ export function Trace({ runId }: {
                         if (kind && data && id > cursor) {
                             cursor = id;
                             setEvents(old => [...old, { id, type: kind, data: JSON.parse(data) as Record<string, unknown> }].slice(-150));
+                            if (kind === 'model.completed') {
+                                const p = JSON.parse(data) as { round?: number; tool_calls?: number };
+                                if (typeof p.round === 'number')
+                                    setRounds(old => old.map(r => (r.round === p.round ? { ...r, toolCalls: p.tool_calls ?? 0 } : r)));
+                            }
                         }
                         if (kind && ['run.completed', 'run.failed', 'run.cancelled'].includes(kind))
-                            finished = true;
+                            done = true;
                     }
                 }
-                if (!finished && !controller.signal.aborted)
+                if (done)
+                    setFinished(true);
+                else if (!controller.signal.aborted)
                     timer = setTimeout(connect, 1500);
             }
             catch (e) {
@@ -208,7 +221,28 @@ export function Trace({ runId }: {
         void connect();
         return () => { controller.abort(); clearTimeout(timer); };
     }, [runId]);
+    return { events, rounds, error, finished };
+}
+/**
+ * The round a reader should watch: the newest one that did not end in tool calls.
+ * While the loop is still running, rounds with no model.completed yet are candidates.
+ */
+export function answerRound(rounds: RunRound[]): RunRound | null {
+    const settled = rounds.filter(r => r.toolCalls === 0);
+    if (settled.length)
+        return settled[settled.length - 1];
+    const streaming = rounds.filter(r => r.toolCalls === undefined);
+    if (streaming.length)
+        return streaming[streaming.length - 1];
+    // Between rounds (a tool call is running, or the next round has not started):
+    // keep the last text on screen rather than blanking the bubble.
+    return rounds[rounds.length - 1] || null;
+}
+export function Trace({ runId }: {
+    runId: string | null;
+}) {
+    const { events, rounds, error } = useRunStream(runId);
     if (!runId)
         return <Empty>{t("选择一次运行查看事件")}</Empty>;
-    return <div className="trace"><Alert error={error}/>{rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}{events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
+    return <div className="trace"><Alert error={error}/>{rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}{r.toolCalls ? t("（过程）") : ''}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}{events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
 }
