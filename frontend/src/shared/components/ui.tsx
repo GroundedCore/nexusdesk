@@ -134,6 +134,19 @@ export interface RunRound {
     reasoning: string;
     /** Set once model.completed for this round arrives; >0 means the round only produced tool calls. */
     toolCalls?: number;
+    /** Model call duration for this round, from model.completed. */
+    durationMs?: number;
+    /** Time from the round's model.started to its first visible character. */
+    firstTokenMs?: number | null;
+    tokens?: number;
+}
+/** A tool call, summarised from tool.started/tool.completed for the trace view. */
+export interface RunTool {
+    callId: string;
+    name: string;
+    ok?: boolean;
+    error?: string | null;
+    durationMs?: number;
 }
 /**
  * Subscribe to a run's event stream. Durable events come from the log and carry a
@@ -143,6 +156,7 @@ export interface RunRound {
 export function useRunStream(runId: string | null) {
     const [events, setEvents] = useState<StreamEvent[]>([]);
     const [rounds, setRounds] = useState<RunRound[]>([]);
+    const [tools, setTools] = useState<RunTool[]>([]);
     const [error, setError] = useState('');
     const [finished, setFinished] = useState(false);
     // Deltas are accumulated here and revealed on a timer. Rendering straight from
@@ -172,9 +186,9 @@ export function useRunStream(runId: string | null) {
                     };
                     const text = take(shownText, row.text.length) ? row.text.slice(0, shownText + take(shownText, row.text.length)) : row.text;
                     const reasoning = take(shownReason, row.reasoning.length) ? row.reasoning.slice(0, shownReason + take(shownReason, row.reasoning.length)) : row.reasoning;
-                    if (!same || text !== shown.text || reasoning !== shown.reasoning || row.toolCalls !== shown.toolCalls)
+                    if (!same || text !== shown.text || reasoning !== shown.reasoning || row.toolCalls !== shown.toolCalls || row.durationMs !== shown.durationMs)
                         changed = true;
-                    return { round: row.round, text, reasoning, toolCalls: row.toolCalls };
+                    return { round: row.round, text, reasoning, toolCalls: row.toolCalls, durationMs: row.durationMs, firstTokenMs: row.firstTokenMs, tokens: row.tokens };
                 });
                 return changed ? next : prev;
             });
@@ -185,6 +199,7 @@ export function useRunStream(runId: string | null) {
         target.current = [];
         setEvents([]);
         setRounds([]);
+        setTools([]);
         setError('');
         setFinished(false);
         if (!runId)
@@ -229,11 +244,30 @@ export function useRunStream(runId: string | null) {
                         }
                         if (kind && data && id > cursor) {
                             cursor = id;
-                            setEvents(old => [...old, { id, type: kind, data: JSON.parse(data) as Record<string, unknown> }].slice(-150));
+                            const parsed = JSON.parse(data) as Record<string, unknown>;
+                            setEvents(old => [...old, { id, type: kind, data: parsed }].slice(-150));
                             if (kind === 'model.completed') {
-                                const p = JSON.parse(data) as { round?: number; tool_calls?: number };
-                                if (typeof p.round === 'number')
-                                    target.current = target.current.map(r => (r.round === p.round ? { ...r, toolCalls: p.tool_calls ?? 0 } : r));
+                                const p = parsed as {
+                                    round?: number;
+                                    tool_calls?: number;
+                                    duration_ms?: number;
+                                    first_token_ms?: number | null;
+                                    usage?: { total_tokens?: number };
+                                };
+                                if (typeof p.round === 'number') {
+                                    // A finished run has no deltas, so nothing created its
+                                    // rounds yet: the durable boundary has to do it, or the
+                                    // trace would show no rounds at all for a past run.
+                                    const rows = target.current;
+                                    const patch = { toolCalls: p.tool_calls ?? 0, durationMs: p.duration_ms, firstTokenMs: p.first_token_ms, tokens: p.usage?.total_tokens };
+                                    target.current = (rows.some(r => r.round === p.round)
+                                        ? rows.map(r => (r.round === p.round ? { ...r, ...patch } : r))
+                                        : [...rows, { round: p.round, text: '', reasoning: '', ...patch }]).sort((a, b) => a.round - b.round);
+                                }
+                            }
+                            if (kind === 'tool.completed') {
+                                const p = parsed as { name?: string; call_id?: string; ok?: boolean; error?: string | null; duration_ms?: number };
+                                setTools(old => [...old, { callId: p.call_id || '', name: p.name || '', ok: p.ok, error: p.error, durationMs: p.duration_ms }]);
                             }
                         }
                         if (kind && ['run.completed', 'run.failed', 'run.cancelled'].includes(kind))
@@ -255,7 +289,7 @@ export function useRunStream(runId: string | null) {
         void connect();
         return () => { controller.abort(); clearTimeout(timer); };
     }, [runId]);
-    return { events, rounds, error, finished };
+    return { events, rounds, tools, error, finished };
 }
 /**
  * The round a reader should watch: the newest one that did not end in tool calls.
@@ -318,11 +352,25 @@ export function usePacedText(): [string, (value: string) => void] {
     }, []);
     return [shown, useCallback((value: string) => { target.current = value; }, [])];
 }
+/** Seconds with two decimals, or an em dash when the value was never measured. */
+function seconds(ms?: number | null): string {
+    return ms == null ? '\u2014' : `${(ms / 1000).toFixed(2)}s`;
+}
 export function Trace({ runId }: {
     runId: string | null;
 }) {
-    const { events, rounds, error } = useRunStream(runId);
+    const { events, rounds, tools, error } = useRunStream(runId);
     if (!runId)
         return <Empty>{t("选择一次运行查看事件")}</Empty>;
-    return <div className="trace"><Alert error={error}/>{rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}{r.toolCalls ? t("（过程）") : ''}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}{events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
+    const modelMs = rounds.reduce((sum, r) => sum + (r.durationMs || 0), 0);
+    const toolMs = tools.reduce((sum, x) => sum + (x.durationMs || 0), 0);
+    const tokens = rounds.reduce((sum, r) => sum + (r.tokens || 0), 0);
+    return <div className="trace"><Alert error={error}/>
+    {(rounds.length > 0 || tools.length > 0) && <div className="trace-summary"><div className="trace-totals"><span>{t("共 {{v0}} 轮", { v0: rounds.length })}</span><span className="mono">{t("模型 {{v0}}", { v0: seconds(modelMs) })}</span><span className="mono">{t("工具 {{v0}}", { v0: seconds(toolMs) })}</span>{tokens > 0 && <span className="mono">{tokens.toLocaleString()} tokens</span>}</div>
+    {rounds.map(r => <div key={r.round} className={`trace-verdict ${r.toolCalls ? 'is-preamble' : 'is-answer'}`}><strong>{t("第 {{v0}} 轮", { v0: r.round })}</strong><Badge value={r.toolCalls ? t("过程") : t("最终回答")}/><span className="mono muted">{seconds(r.durationMs)}</span>{r.firstTokenMs != null && <span className="mono muted">{t("首字 {{v0}}", { v0: `${r.firstTokenMs}ms` })}</span>}{r.toolCalls ? <span className="muted">{t("调用 {{v0}} 个工具", { v0: r.toolCalls })}</span> : null}{r.tokens ? <span className="mono muted">{r.tokens.toLocaleString()} tokens</span> : null}</div>)}
+    {tools.map((x, i) => <div key={`${x.callId}-${i}`} className="trace-verdict"><Badge value={x.ok ? t("成功") : t("失败")}/><span className="mono">{x.name}</span><span className="mono muted">{seconds(x.durationMs)}</span>{x.error && <small className="error-text">{x.error}</small>}</div>)}
+    </div>}
+    {rounds.map(r => <div key={r.round} className="trace-round"><small className="mono muted">{t("第 {{v0}} 轮", { v0: r.round })}{r.toolCalls ? t("（过程）") : ''}</small>{r.reasoning ? <details open><summary>{t("思维链")}</summary><pre className="mono">{r.reasoning}</pre></details> : null}{r.text ? <pre className="mono">{r.text}</pre> : null}</div>)}
+    {events.length > 0 && <details className="trace-raw"><summary>{t("原始事件（{{v0}}）", { v0: events.length })}</summary>{events.map(event => <details key={event.id}><summary><span className="mono">{String(event.id).padStart(2, '0')}</span> {event.type}</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details>)}</details>}
+    {events.length === 0 && rounds.length === 0 && <Empty>{t("等待执行事件\u2026")}</Empty>}</div>;
 }

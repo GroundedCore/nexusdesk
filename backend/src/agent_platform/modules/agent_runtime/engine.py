@@ -92,6 +92,7 @@ class RuntimeEngine:
                 # Milliseconds from model.started to the first visible character, or
                 # null when the round produced no text at all (a pure tool call).
                 "first_token_ms": first_token_ms,
+                "duration_ms": int((time.monotonic() - started) * 1000),
             },
         )
         return {
@@ -115,6 +116,7 @@ class RuntimeEngine:
 
         async def invoke(call):
             await emit("tool.started", {"name": call["name"], "call_id": call["id"]})
+            tool_started = time.monotonic()
             result = await self.tools.execute(call["name"], call["args"])
             await emit(
                 "tool.completed",
@@ -126,6 +128,7 @@ class RuntimeEngine:
                     "gateway_call_id": result.get("call_id"),
                     "execution_status": result.get("execution_status"),
                     "tool_version": result.get("tool_version"),
+                    "duration_ms": int((time.monotonic() - tool_started) * 1000),
                 },
             )
             return ToolMessage(

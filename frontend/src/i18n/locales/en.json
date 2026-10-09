@@ -1179,5 +1179,13 @@
   "首字延迟": "First character",
   "未测量": "not measured",
   "正在查询资料…": "Looking this up…",
-  "查看运行轨迹": "View run trace"
+  "查看运行轨迹": "View run trace",
+  "共 {{v0}} 轮": "{{v0}} round(s)",
+  "模型 {{v0}}": "Model {{v0}}",
+  "工具 {{v0}}": "Tools {{v0}}",
+  "过程": "preamble",
+  "最终回答": "final answer",
+  "首字 {{v0}}": "first char {{v0}}",
+  "调用 {{v0}} 个工具": "{{v0}} tool call(s)",
+  "原始事件（{{v0}}）": "Raw events ({{v0}})"
 }
