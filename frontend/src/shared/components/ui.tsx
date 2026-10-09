@@ -145,7 +145,44 @@ export function useRunStream(runId: string | null) {
     const [rounds, setRounds] = useState<RunRound[]>([]);
     const [error, setError] = useState('');
     const [finished, setFinished] = useState(false);
+    // Deltas are accumulated here and revealed on a timer. Rendering straight from
+    // the stream would paint them in whatever lumps arrive: the reader drains every
+    // buffered chunk inside one macrotask, and React batches those updates into a
+    // single render, so a burst of token frames lands as one jump of text.
+    const target = useRef<RunRound[]>([]);
     useEffect(() => {
+        const timer = setInterval(() => {
+            setRounds(prev => {
+                const rows = target.current;
+                if (!rows.length)
+                    return prev;
+                let changed = false;
+                const next = rows.map((row, i) => {
+                    const shown = prev[i];
+                    const same = shown && shown.round === row.round;
+                    const shownText = same ? shown.text.length : 0;
+                    const shownReason = same ? shown.reasoning.length : 0;
+                    // Reveal a few characters per tick so the answer looks typed, but
+                    // catch up proportionally when a burst left a large backlog.
+                    const take = (have: number, want: number) => {
+                        const backlog = want - have;
+                        if (backlog <= 0)
+                            return 0;
+                        return Math.min(backlog, Math.max(4, Math.ceil(backlog / 8)));
+                    };
+                    const text = take(shownText, row.text.length) ? row.text.slice(0, shownText + take(shownText, row.text.length)) : row.text;
+                    const reasoning = take(shownReason, row.reasoning.length) ? row.reasoning.slice(0, shownReason + take(shownReason, row.reasoning.length)) : row.reasoning;
+                    if (!same || text !== shown.text || reasoning !== shown.reasoning || row.toolCalls !== shown.toolCalls)
+                        changed = true;
+                    return { round: row.round, text, reasoning, toolCalls: row.toolCalls };
+                });
+                return changed ? next : prev;
+            });
+        }, 20);
+        return () => clearInterval(timer);
+    }, []);
+    useEffect(() => {
+        target.current = [];
         setEvents([]);
         setRounds([]);
         setError('');
@@ -182,15 +219,12 @@ export function useRunStream(runId: string | null) {
                         if (kind === 'model.delta' && data) {
                             const p = JSON.parse(data) as { round?: number; text?: string; reasoning?: string };
                             const round = p.round ?? 0;
-                            setRounds(old => {
-                                const next = old.slice();
-                                const i = next.findIndex(r => r.round === round);
-                                if (i >= 0)
-                                    next[i] = { ...next[i], text: next[i].text + (p.text || ''), reasoning: next[i].reasoning + (p.reasoning || '') };
-                                else
-                                    next.push({ round, text: p.text || '', reasoning: p.reasoning || '' });
-                                return next;
-                            });
+                            const rows = target.current;
+                            const i = rows.findIndex(r => r.round === round);
+                            if (i >= 0)
+                                target.current[i] = { ...rows[i], text: rows[i].text + (p.text || ''), reasoning: rows[i].reasoning + (p.reasoning || '') };
+                            else
+                                target.current = [...rows, { round, text: p.text || '', reasoning: p.reasoning || '' }];
                             continue;
                         }
                         if (kind && data && id > cursor) {
@@ -199,7 +233,7 @@ export function useRunStream(runId: string | null) {
                             if (kind === 'model.completed') {
                                 const p = JSON.parse(data) as { round?: number; tool_calls?: number };
                                 if (typeof p.round === 'number')
-                                    setRounds(old => old.map(r => (r.round === p.round ? { ...r, toolCalls: p.tool_calls ?? 0 } : r)));
+                                    target.current = target.current.map(r => (r.round === p.round ? { ...r, toolCalls: p.tool_calls ?? 0 } : r));
                             }
                         }
                         if (kind && ['run.completed', 'run.failed', 'run.cancelled'].includes(kind))
