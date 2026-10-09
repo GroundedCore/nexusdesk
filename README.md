@@ -48,10 +48,12 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
-打开 **http://localhost:8080**，进入会话工作台的 `sample-support`：
+打开 **https://localhost:8080**，进入会话工作台的 `sample-support`：
 
 - 输入“发货需要多久？”体验知识问答。
 - 输入“帮我创建工单”体验拟定、确认与创建流程。
+
+体验模式自带一套自签证书，因此通过局域网 IP 或内网域名访问时同样是安全上下文，浏览器的安全上下文限制（如 `crypto.randomUUID`、剪贴板）不会成为障碍。首次访问会提示证书不受信任，导入容器内 `/data/tls/ca.crt` 后即可消除；用局域网地址访问时通过 `NEXUSDESK_TLS_HOSTS` 让证书覆盖该地址，详见 [部署手册](deploy/README.md#体验模式的-https)。
 
 同时预置 9 个行业案例：9 个知识库、18 个 Agent 草稿和 36 篇文档，资源名均带 `[案例]` 前缀，可在 Agent 管理页用“仅看案例”筛选；案例 Agent 已自动绑定演示 Chat 方案，可直接试聊。
 

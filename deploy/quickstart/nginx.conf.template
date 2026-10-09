@@ -12,10 +12,18 @@ http {
  uwsgi_temp_path /tmp/nginx-uwsgi;
  scgi_temp_path /tmp/nginx-scgi;
  server {
-   listen 8080;
+   listen 8080 ssl;
    server_name _;
    root /app/web;
    client_max_body_size 100m;
+   # Self-signed material generated at container start so the demo is a secure
+   # context even when it is reached over a LAN address instead of loopback.
+   # Deliberately no HSTS: it would make falling back to plain HTTP awkward.
+   ssl_certificate __TLS_CERTIFICATE__;
+   ssl_certificate_key __TLS_KEY__;
+   ssl_protocols TLSv1.2 TLSv1.3;
+   ssl_session_cache shared:nexusdesk:1m;
+   ssl_prefer_server_ciphers off;
    location /api/ {
      proxy_pass http://127.0.0.1:8000;
      proxy_http_version 1.1;

@@ -6,7 +6,8 @@ docker compose version >/dev/null
 case "${1:-}" in
  quickstart)
    docker compose -f "$ROOT/deploy/quickstart/compose.yaml" up -d --build --wait --wait-timeout 300
-   echo "NexusDesk demo: http://localhost:${NEXUSDESK_PORT:-8080}"
+   echo "NexusDesk demo: https://localhost:${NEXUSDESK_PORT:-8080}"
+   echo "Self-signed certificate; import the generated ca.crt as a trusted root to silence the browser warning."
    ;;
  deploy)
    ENV_FILE="$ROOT/deploy/production/.env"

@@ -48,10 +48,12 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
-Open **http://localhost:8080**, then open `sample-support` in the conversation workbench:
+Open **https://localhost:8080**, then open `sample-support` in the conversation workbench:
 
 - Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.
 - Enter `帮我创建工单` ("Help me create a ticket") to try the draft, confirm, and create flow.
+
+The demo ships its own self-signed certificate, so reaching it over a LAN IP or an internal hostname is still a secure context and the browser secure-context restrictions (`crypto.randomUUID`, clipboard access) stay out of the way. The first visit warns about the untrusted certificate; importing `/data/tls/ca.crt` from the container removes that. When using a LAN address, set `NEXUSDESK_TLS_HOSTS` so the certificate covers it — see the [deployment guide](deploy/README.md).
 
 Nine industry case sets are also loaded: 9 knowledge bases, 18 agent drafts, and 36 documents. Every resource name carries the `[案例]` prefix, the agent list can be filtered with "examples only", and the case agents are pre-bound to the demo Chat profile so they are ready to chat.
 

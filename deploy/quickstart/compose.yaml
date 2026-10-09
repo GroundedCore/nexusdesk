@@ -33,6 +33,10 @@ services:
       AGENT_SEED_INDUSTRIES: "true"
       AGENT_MODEL_BACKEND: demo
       AGENT_TENANT_ID: local
+      # Extra names and IP addresses for the self-signed certificate, so a browser
+      # reaching the demo over a LAN address gets a name match. Comma-separated,
+      # for example NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test
+      AGENT_TLS_HOSTS: ${NEXUSDESK_TLS_HOSTS:-}
       AGENT_EMBEDDED_WORKER: "true"
       AGENT_WORKER_CONCURRENCY: "2"
       AGENT_DATABASE_POOL_SIZE: "5"

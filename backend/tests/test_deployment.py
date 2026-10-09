@@ -178,3 +178,51 @@ def test_deployment_topologies_and_no_secret_copy():
     assert quick_nginx.count("__LOCAL_TOKEN__") == 1
     assert 'set $nexusdesk_auth "Bearer __LOCAL_TOKEN__";' in quick_nginx
     assert "**/*.key" in (ROOT / ".dockerignore").read_text()
+
+
+def test_quickstart_serves_https_and_production_leaves_tls_outside():
+    import yaml
+
+    quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text())
+    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()
+
+    # Quickstart terminates TLS itself so a LAN address is still a secure context.
+    assert "listen 8080 ssl;" in quick_nginx
+    assert "ssl_certificate __TLS_CERTIFICATE__;" in quick_nginx
+    assert "ssl_certificate_key __TLS_KEY__;" in quick_nginx
+    # HSTS would make falling back to plain HTTP on the same host impractical.
+    assert "Strict-Transport-Security" not in quick_nginx
+    # The host list reaches the container so the certificate can cover a LAN address.
+    assert "AGENT_TLS_HOSTS" in quick["services"]["app"]["environment"]
+
+    # Production must stay untouched: TLS belongs to the host or an ingress proxy.
+    production_nginx = (ROOT / "deploy/production/nginx.conf").read_text()
+    assert "ssl" not in production_nginx
+    prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text())
+    for name in ("api", "web"):
+        assert "AGENT_TLS_HOSTS" not in prod["services"][name].get("environment", {})
+
+    assert "https://localhost:${NEXUSDESK_PORT:-8080}" in (ROOT / "nexusdesk").read_text()
+    assert "https://localhost:$port" in (ROOT / "nexusdesk.ps1").read_text()
+
+
+def test_healthcheck_matches_the_quickstart_scheme():
+    healthcheck = (ROOT / "deploy/container/healthcheck.py").read_text()
+    assert 'url = "https://127.0.0.1:8080/api/v1/ready"' in healthcheck
+    # The generated certificate is self-signed, so the probe cannot verify it.
+    assert "verify_mode = ssl.CERT_NONE" in healthcheck
+    assert 'url = "http://127.0.0.1:8000/api/v1/ready"' in healthcheck
+
+
+def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
+    from agent_platform.settings import Settings
+
+    base = {"_env_file": None, "database_url": "postgresql+asyncpg://test:test@localhost/test"}
+    monkeypatch.setenv("AGENT_TLS_HOSTS", "192.168.1.50, nexusdesk.test")
+    assert Settings(**base).tls_hosts == ["192.168.1.50", "nexusdesk.test"]
+    # Compose passes an empty value when the operator sets nothing.
+    monkeypatch.setenv("AGENT_TLS_HOSTS", "")
+    assert Settings(**base).tls_hosts == []
+    # A JSON array keeps working for anyone who already uses that form.
+    monkeypatch.setenv("AGENT_TLS_HOSTS", '["10.0.0.7"]')
+    assert Settings(**base).tls_hosts == ["10.0.0.7"]

@@ -16,7 +16,29 @@ Windows PowerShell：
 .\nexusdesk.ps1 quickstart
 ```
 
-启动成功后访问 http://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。不要将体验入口通过代理、端口转发或修改绑定地址暴露给其他人：体验代理会为未携带身份的请求自动注入本地服务令牌（admin 角色），任何能访问该入口的人都拥有完整管理权限；确需放开绑定时，务必用安全组/防火墙将端口限制为可信 IP。
+启动成功后访问 https://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。不要将体验入口通过代理、端口转发或修改绑定地址暴露给其他人：体验代理会为未携带身份的请求自动注入本地服务令牌（admin 角色），任何能访问该入口的人都拥有完整管理权限；确需放开绑定时，务必用安全组/防火墙将端口限制为可信 IP。
+
+### 体验模式的 HTTPS
+
+体验模式以 HTTPS 提供页面，证书在容器启动时生成，放在数据卷的 `/data/tls`：一套私有 CA（`ca.crt`）加一张由它签发的服务器证书。这样即使通过局域网地址访问，页面也处于安全上下文；`localhost` 与 `127.0.0.1` 本身已满足该条件，HTTPS 主要解决的是 IP 或内网域名访问的场景。
+
+证书是自签的，首次访问浏览器会提示不受信任。把 `ca.crt` 导入系统或浏览器信任库后提示即消失：
+
+```sh
+docker compose -f deploy/quickstart/compose.yaml cp app:/data/tls/ca.crt ./ca.crt
+```
+
+用局域网 IP 或内网域名访问时，还要让证书覆盖该地址，否则导入 CA 之后仍会提示名称不匹配：
+
+```sh
+NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test sh nexusdesk quickstart
+```
+
+主机列表变化、或服务器证书临近过期时，服务器证书会自动重签，CA 保持不变，已导入的 `ca.crt` 无需重新导入。只有 CA 本身缺失或过期才会重新生成，那时需要重新导入一次。不建议配置 HSTS：同一主机上退回明文 HTTP 会变得麻烦。这套证书只用于体验与验证，生产请按下一节在外层终止 TLS。
+
+体验入口从 HTTP 改为 HTTPS 后，测试嵌入聊天时承载它的页面也必须是 HTTPS，否则浏览器会按混合内容拦截 iframe。本地直接用 `https://localhost:8080/embed/<appId>` 打开不受影响。
+
+如果此前在体验环境配置过企业身份或嵌入应用，数据库里保存的“平台公开地址”仍是 `http://`，登录时校验来源会不通过。把开放平台中登记的地址改成实际访问的 `https://` 地址即可。
 
 应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk，首次登录必须改密。Nginx 对未携带 Authorization 头的请求注入首次启动生成的本地服务令牌（admin 角色），已携带身份的请求原样透传。该令牌持久化保存在数据卷中，不写入前端资源或启动输出。
 
@@ -58,7 +80,7 @@ PowerShell 使用 `Copy-Item` 复制模板，再执行 `.\nexusdesk.ps1 deploy`�
 - 向量检索配置 Milvus 地址和凭据；仅关键词场景可以删除模板中的 Milvus 配置。
 - 对象存储配置 S3 Endpoint、已有 Bucket、Access Key、Secret Key。迁移流程执行只读 `head_bucket` 检查，不自动创建或清空存储桶。不使用对象归档时删除整组 S3 配置。
 - 扫描件 / 特殊格式解析服务通过 `AGENT_KNOWLEDGE_PARSER_URL` 按需配置。
-- 后端不映射宿主机端口，Web 默认仍绑定 `127.0.0.1:8080`。由宿主机/已有入口代理终止 HTTPS；确认网络访问控制后再设置 `NEXUSDESK_BIND`。
+- 生产拓扑只提供明文 HTTP，不生成也不挂载任何证书：Web 默认绑定 `127.0.0.1:8080`，由宿主机或已有入口代理（Nginx、Caddy、云负载均衡等）终止 TLS，容器本身不参与证书管理。确认网络访问控制后再设置 `NEXUSDESK_BIND`。这一条与体验模式不同——体验模式为方便局域网访问自带自签证书，生产请始终用受信任的证书对外服务。
 - 生产不自动注入身份。全新部署使用 admin / nexusdesk 登录并首次改密；已有管理员不会被覆盖。服务令牌可通过登录页折叠入口使用，角色 Token 必须不同。企业 SSO 在开放平台配置。
 - 模型、业务 API 域名必须列入相应白名单。API 与 Worker 读取相同的 .env，`AGENT_EMBEDDED_WORKER=false`。
 
@@ -95,7 +117,7 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 `.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
 
-> **安全警告**：quickstart 模式会为未携带身份的请求注入 admin 角色的本地服务令牌，任何能访问该入口的人都拥有完整管理权限。服务器上保持默认的 `127.0.0.1` 绑定，仅通过 SSH 隧道（`ssh -L 8080:127.0.0.1:8080 user@server`）访问；不要把该端口暴露到公网或未经认证的反向代理之后。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
+> **安全警告**：quickstart 模式会为未携带身份的请求注入 admin 角色的本地服务令牌，任何能访问该入口的人都拥有完整管理权限。服务器上保持默认的 `127.0.0.1` 绑定，仅通过 SSH 隧道（`ssh -L 8080:127.0.0.1:8080 user@server`，本地用 `https://localhost:8080` 访问）访问；不要把该端口暴露到公网或未经认证的反向代理之后。quickstart 使用演示模型（`AGENT_MODEL_BACKEND=demo`）、容器内嵌 PostgreSQL，定位是体验与小规模验证，不适合多人生产使用。
 
 ### 服务器一次性准备
 

@@ -1,8 +1,9 @@
+import json
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -27,6 +28,13 @@ class Settings(BaseSettings):
     # Bootstrap loads the full industry demo case set when enabled. Off by default so
     # production stays clean; deploy/quickstart enables it explicitly.
     seed_industries: bool = False
+    # Extra hostnames and IP addresses to put in the quickstart TLS certificate, so a
+    # browser reaching the demo over a LAN address gets a name match. Accepts a
+    # comma-separated list for convenience. Quickstart only: production terminates TLS
+    # at the host or an existing ingress proxy and ignores this.
+    # NoDecode keeps pydantic-settings from JSON-decoding the value before the
+    # validator below sees it, so the plain "host,1.2.3.4" form works.
+    tls_hosts: Annotated[list[str], NoDecode] = []
     worker_concurrency: int = Field(default=8, ge=1, le=256)
     queue_capacity: int = Field(default=200, ge=1)
     tenant_capacity: int = Field(default=50, ge=1)
@@ -83,6 +91,24 @@ class Settings(BaseSettings):
         return bool(hostname) and (
             "*" in self.tool_allowed_hosts or hostname in self.tool_allowed_hosts
         )
+
+    @field_validator("tls_hosts", mode="before")
+    @classmethod
+    def split_tls_hosts(cls, value):
+        # Operators set this from a shell or a Compose .env, where quoting a JSON array
+        # is awkward, so a bare "host,1.2.3.4" is the documented form. A JSON array is
+        # still accepted for consistency with the other host lists in this file.
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                try:
+                    return json.loads(text)
+                except ValueError:
+                    raise ValueError(
+                        "tls_hosts must be a comma-separated list or a JSON array"
+                    ) from None
+            return [host.strip() for host in text.split(",") if host.strip()]
+        return value
 
     @model_validator(mode="after")
     def validate_runtime(self):

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from agent_platform.apps.local_tls import ensure_certificate
 from agent_platform.platform.identity.local_admin import seed_default_admin
 from agent_platform.platform.persistence.database import create_engine
 from agent_platform.platform.secrets.vault import CredentialVault
@@ -155,6 +156,29 @@ async def check_storage(settings):
         await asyncio.to_thread(client.head_bucket, Bucket=settings.knowledge_s3_bucket)
 
 
+def render_nginx_config(settings, token):
+    """Render the quickstart nginx config, including its TLS material.
+
+    Quickstart serves HTTPS so that a browser reaching the demo over a LAN address
+    gets a secure context; plain HTTP on a non-loopback host would not be one, and
+    the console relies on secure-only APIs. See agent_platform.apps.local_tls.
+    """
+    certificate, key, authority = ensure_certificate(
+        Path("/data/tls"), settings.tls_hosts
+    )
+    config = (
+        Path("/app/deploy/nginx.conf.template")
+        .read_text()
+        .replace("__LOCAL_TOKEN__", token)
+        .replace("__TLS_CERTIFICATE__", str(certificate))
+        .replace("__TLS_KEY__", str(key))
+    )
+    target = Path("/tmp/nexusdesk-nginx.conf")
+    target.write_text(config)
+    target.chmod(0o600)
+    return authority
+
+
 def main(mode):
     if mode == "quickstart":
         os.environ["AGENT_API_TOKEN"] = local_token(
@@ -181,16 +205,12 @@ def main(mode):
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed"], check=True)
     if settings.seed_industries:
         seed_industry_cases(settings)
-    config = (
-        Path("/app/deploy/nginx.conf.template")
-        .read_text()
-        .replace("__LOCAL_TOKEN__", os.environ["AGENT_API_TOKEN"])
-    )
-    target = Path("/tmp/nexusdesk-nginx.conf")
-    target.write_text(config)
-    target.chmod(0o600)
+    authority = render_nginx_config(settings, os.environ["AGENT_API_TOKEN"])
     print(
-        "NexusDesk quickstart: http://localhost:8080 — local demonstration only",
+        "NexusDesk quickstart: https://localhost:8080 — local demonstration only\n"
+        f"Self-signed certificate. Import {authority} as a trusted root to avoid the\n"
+        "browser warning. Reaching it over a LAN address needs that address in\n"
+        "AGENT_TLS_HOSTS, for example AGENT_TLS_HOSTS=192.168.1.50.",
         flush=True,
     )
     os.execvp("supervisord", ["supervisord", "-c", "/app/deploy/supervisord.conf"])

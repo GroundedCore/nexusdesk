@@ -9,7 +9,8 @@ if ($Mode -eq 'quickstart') {
     $script:ComposeArguments = @('-f', (Join-Path $PSScriptRoot 'deploy/quickstart/compose.yaml'))
     Invoke-Compose up -d --build --wait --wait-timeout 300
     $port = if ($env:NEXUSDESK_PORT) { $env:NEXUSDESK_PORT } else { '8080' }
-    Write-Host "NexusDesk demo: http://localhost:$port"
+    Write-Host "NexusDesk demo: https://localhost:$port"
+    Write-Host 'Self-signed certificate; import the generated ca.crt as a trusted root to silence the browser warning.'
 } else {
     $environmentFile = Join-Path $PSScriptRoot 'deploy/production/.env'
     if (-not (Test-Path -LiteralPath $environmentFile)) { throw 'Copy deploy/production/.env.example to .env and configure credentials first.' }
