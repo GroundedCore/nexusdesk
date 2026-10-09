@@ -1,5 +1,32 @@
 from agent_platform.platform.persistence.store import many, one, required
 
+# The answer round is the one that did not end in tool calls: the ReAct loop stops
+# there, so its text is what the customer sees. Its model.started marks when the
+# model call began, and the first_token_ms it records says how long that round ran
+# before the first visible character.
+ANSWER_ROUND = """SELECT
+  (SELECT min(s.created_at) FROM runtime_events s
+   WHERE s.run_id=c.run_id AND s.type='model.started'
+     AND (s.data->>'round')=(c.data->>'round')) AS answer_started_at,
+  CAST(c.data->>'first_token_ms' AS double precision) AS first_token_ms
+  FROM runtime_events c
+  WHERE c.run_id=r.id AND c.type='model.completed' AND (c.data->>'tool_calls')='0'
+  ORDER BY c.seq LIMIT 1"""
+
+# Time to the first character of the answer, in milliseconds, measured from when the
+# run was queued. NULL when it was not measured: a run whose answer round never
+# streamed (deltas disabled, or an older run predating first_token_ms) has no first
+# character to time, and reporting that as zero would understate the metric.
+TTFC_EXPRESSION = """CASE WHEN a.answer_started_at IS NULL OR a.first_token_ms IS NULL
+  THEN NULL
+  ELSE extract(epoch FROM (a.answer_started_at-r.created_at))*1000 + a.first_token_ms
+  END"""
+
+TTFC_ROWS = (
+    "SELECT r.created_at," + TTFC_EXPRESSION + " AS ttfc_ms FROM runtime_runs r "
+    "LEFT JOIN LATERAL (" + ANSWER_ROUND + ") a ON true WHERE r.tenant_id=:t"
+)
+
 
 class ObservabilityService:
     def __init__(self, engine):
@@ -38,14 +65,28 @@ class ObservabilityService:
                     t=tenant,
                 )
             )["n"]
+            # Time to the first character of the answer. Derived from the persisted
+            # round boundaries plus the first_token_ms each round records, so it needs
+            # no extra writes and no stored token text.
+            result["ttfc"] = await one(
+                c,
+                """SELECT percentile_cont(0.5) WITHIN GROUP(ORDER BY ttfc_ms) AS p50_ms,
+                percentile_cont(0.95) WITHIN GROUP(ORDER BY ttfc_ms) AS p95_ms,
+                count(*) AS samples
+                FROM (""" + TTFC_ROWS + """ AND r.created_at>now()-interval '24 hours') t
+                WHERE ttfc_ms IS NOT NULL""",
+                t=tenant,
+            )
             return result
 
     async def runs(self, tenant):
         async with self.engine.connect() as c:
             return await many(
                 c,
-                """SELECT id,conversation_id,status,error_code,created_at,started_at,finished_at
-                FROM runtime_runs WHERE tenant_id=:t ORDER BY created_at DESC LIMIT 100""",
+                """SELECT r.id,r.conversation_id,r.status,r.error_code,r.created_at,r.started_at,
+                r.finished_at,""" + TTFC_EXPRESSION + """ AS ttfc_ms
+                FROM runtime_runs r LEFT JOIN LATERAL (""" + ANSWER_ROUND + """) a ON true
+                WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT 100""",
                 t=tenant,
             )
 

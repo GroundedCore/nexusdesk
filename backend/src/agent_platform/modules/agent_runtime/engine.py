@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
@@ -32,9 +33,15 @@ class RuntimeEngine:
         if state["rounds"] >= self.settings.max_model_rounds:
             raise RuntimeFault("model_round_limit")
         round_no = state["rounds"] + 1
+        started = time.monotonic()
         await emit("model.started", {"round": round_no})
+        # Time to the first visible character of this round. Recorded so the console
+        # can report how long a customer waited for the answer to start, which is
+        # what the typewriter effect is really for.
+        first_token_ms = None
 
         async def on_delta(delta):
+            nonlocal first_token_ms
             # Forward only content and reasoning; tool_calls here are partial JSON
             # arguments and arrive complete with model.completed instead.
             piece = {}
@@ -43,6 +50,8 @@ class RuntimeEngine:
             if delta.get("reasoning_content"):
                 piece["reasoning"] = delta["reasoning_content"]
             if piece:
+                if first_token_ms is None:
+                    first_token_ms = int((time.monotonic() - started) * 1000)
                 await emit("model.delta", {"round": round_no, **piece})
 
         try:
@@ -80,6 +89,9 @@ class RuntimeEngine:
                 "tool_calls": len(reply.tool_calls),
                 "usage": reply.usage_metadata or {},
                 "gateway_call_id": reply.response_metadata.get("gateway_call_id"),
+                # Milliseconds from model.started to the first visible character, or
+                # null when the round produced no text at all (a pure tool call).
+                "first_token_ms": first_token_ms,
             },
         )
         return {

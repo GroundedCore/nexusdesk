@@ -1174,5 +1174,8 @@
   "思维链": "思维链",
   "第 {{v0}} 轮": "第 {{v0}} 轮",
   "（过程）": "（过程）",
-  "SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。": "SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。"
+  "SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。": "SSE 逐字推送模型输出（model.delta），并在 run.completed 中返回完整回答；只展示 ReAct 最后一轮的答复。断线后使用 Last-Event-ID 重连事件接口。",
+  "P50 首字延迟": "P50 首字延迟",
+  "首字延迟": "首字延迟",
+  "未测量": "未测量"
 }
