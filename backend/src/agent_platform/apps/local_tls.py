@@ -134,6 +134,12 @@ def ensure_ca(directory: Path) -> tuple[x509.Certificate, object]:
             critical=True,
         )
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        # A self-signed root should carry an AKI matching its own SKI; validators that
+        # look for it otherwise reject the whole chain.
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()),
+            critical=False,
+        )
         .sign(key, hashes.SHA256())
     )
     _write(key_path, _private_key_bytes(key), 0o600)
@@ -195,6 +201,14 @@ def ensure_certificate(directory: Path, hosts=None) -> tuple[Path, Path, Path]:
             ),
             critical=True,
         )
+        # OpenSSL refuses to build the chain without a matching AKI once the CA
+        # publishes an SKI, so a client that trusts only ca.crt rejects the leaf with
+        # "Missing Authority Key Identifier". Both key identifiers are mandatory here.
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()),
+            critical=False,
+        )
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .sign(ca_key, hashes.SHA256())
     )
     _write(key_path, _private_key_bytes(key), 0o600)

@@ -1,3 +1,6 @@
+import socket
+import ssl
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,6 +18,73 @@ def alternative_names(path: Path):
     certificate = load(path)
     extension = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName)
     return {str(value.value) for value in extension.value}
+
+
+def handshake(certificate: Path, key: Path, authority: Path, hostname="localhost"):
+    """Run a real TLS handshake, trusting only ``authority``. Returns an error or None.
+
+    This is the check that matters: a certificate can look fine field by field and
+    still be rejected by OpenSSL when the chain cannot be built. A socket pair keeps
+    it off the network stack, so no port is bound and nothing is flaky.
+    """
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(certfile=str(certificate), keyfile=str(key))
+    client_context = ssl.create_default_context(cafile=str(authority))
+
+    server_socket, client_socket = socket.socketpair()
+    # Bounded on both ends so a failed handshake surfaces as an exception instead of
+    # hanging the suite.
+    server_socket.settimeout(5)
+    client_socket.settimeout(5)
+    outcome = {}
+
+    def serve():
+        try:
+            with server_context.wrap_socket(server_socket, server_side=True) as connection:
+                connection.recv(1)
+                connection.send(b"y")
+        except Exception as exc:  # noqa: BLE001 -- reported back to the assertions
+            outcome["server"] = exc
+
+    worker = threading.Thread(target=serve, daemon=True)
+    worker.start()
+    try:
+        with client_context.wrap_socket(client_socket, server_hostname=hostname) as connection:
+            connection.send(b"x")
+            connection.recv(1)
+    except Exception as exc:  # noqa: BLE001 -- reported back to the assertions
+        outcome["client"] = exc
+        client_socket.close()
+    worker.join(timeout=5)
+    return outcome.get("client") or outcome.get("server")
+
+
+def test_trusting_the_ca_is_enough_for_a_real_handshake(tmp_path):
+    certificate, key, authority = local_tls.ensure_certificate(tmp_path, ["localhost"])
+    assert handshake(certificate, key, authority) is None
+
+
+def test_leaf_carries_the_key_identifiers_validators_require(tmp_path):
+    certificate, _, authority = local_tls.ensure_certificate(tmp_path, ["localhost"])
+    leaf, ca = load(certificate), load(authority)
+
+    # Without a matching AKI, OpenSSL rejects the chain with "Missing Authority Key
+    # Identifier" even though the CA is trusted, and the browser warning never goes
+    # away. Accepting only ca.crt must therefore be enough on its own.
+    leaf_aki = leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+    ca_ski = ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    assert leaf_aki.key_identifier == ca_ski.digest
+    assert leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+
+
+def test_an_untrusted_ca_is_still_rejected(tmp_path):
+    certificate, key, authority = local_tls.ensure_certificate(tmp_path, ["localhost"])
+    other = tmp_path / "other"
+    _, _, unrelated = local_tls.ensure_certificate(other, ["localhost"])
+
+    # The point of importing ca.crt is that nothing is trusted by accident.
+    assert handshake(certificate, key, unrelated) is not None
+    assert handshake(certificate, key, authority) is None
 
 
 def test_creates_ca_and_leaf_for_the_requested_hosts(tmp_path):
