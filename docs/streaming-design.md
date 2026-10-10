@@ -146,7 +146,7 @@ api 进程（每进程一条专用 LISTEN 连接，可监听多通道）
 | 流式是条件性的（非 `chat` / `gateway_http` → `model_stream_not_supported`） | `ainvoke` 回退，功能只增不减 |
 | PgBouncer 事务池会破坏 LISTEN | 目前直连没问题；写入部署约束 |
 | 工具执行期间无增量 | 前端显示 `tool.started`，不伪装成打字 |
-| 嵌入 Worker 模式 LISTEN 是纯开销 | 特性开关 `AGENT_STREAM_MODEL_DELTAS`（默认关） |
+| 嵌入 Worker 模式 LISTEN 是纯开销 | 特性开关 `AGENT_STREAM_MODEL_DELTAS`（默认开，可显式关闭） |
 | delta 即时投递 vs `_event` 提交时才投递 | 极小概率乱序；客户端按轮缓冲可容忍 |
 
 ---
@@ -161,4 +161,4 @@ api 进程（每进程一条专用 LISTEN 连接，可监听多通道）
 | P3 | 监听端 + SSE 端点改造 | 延迟 ~50ms；断开监听仍正确收敛 |
 | P4 | 前端按轮渲染 | 三轮 ReAct 不把过程独白当答案 |
 
-**特性开关**：`AGENT_STREAM_MODEL_DELTAS`，默认关，可一键回到今天的行为。
+**特性开关**：`AGENT_STREAM_MODEL_DELTAS`，默认开；设置为 `false` 可一键回到非流式行为。
