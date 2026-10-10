@@ -36,7 +36,9 @@ Typical flow: a user asks a question → the agent retrieves knowledge or calls 
 
 ## Quickstart
 
-Requires Docker and Docker Compose v2. Run these commands from the project root. On Docker Desktop, select Linux containers; the first build needs network access.
+Requires Docker and Docker Compose v2 (on Docker Desktop, select Linux containers). Pick either of the two ways to start.
+
+**Option 1: build locally.** Run this from the project root. The first run needs network access and compiles the frontend, which takes a few minutes.
 
 ```bash
 # Linux / macOS
@@ -48,14 +50,14 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
-The first build compiles the frontend, which is slow. To skip it, pull the prebuilt image instead:
+**Option 2: use the published image.** Skips the frontend build and starts from the prebuilt image. Run this from the project root.
 
 ```bash
 NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
   docker compose -f deploy/quickstart/compose.yaml up -d
 ```
 
-The image is published to both [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) and [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) with identical contents, so pick whichever your network prefers. GHCR public packages carry no per-IP pull quota; Docker Hub is easier to search and share but rate-limits anonymous pulls, which a shared egress IP (corporate NAT, shared CI runner) can exhaust.
+The image is published to both [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) and [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) with identical contents, so pick whichever your network prefers: Docker Hub rate-limits anonymous pulls, GHCR does not. `NEXUSDESK_VERSION` must be given explicitly — its default, `local`, only exists after a local build.
 
 Open **https://localhost:8080**, then open `sample-support` in the conversation workbench:
 

@@ -36,7 +36,9 @@ NexusDesk 将知识检索、业务工具调用、人工协同与工单处理连�
 
 ## 快速体验
 
-准备 Docker 与 Docker Compose v2，在项目根目录执行。Docker Desktop 请选择 Linux 容器模式；首次构建需要联网。
+需要 Docker 与 Docker Compose v2（Docker Desktop 请选择 Linux 容器模式），两种启动方式任选其一。
+
+**方式一：本地构建。** 在项目根目录执行，首次需要联网并编译前端，耗时几分钟。
 
 ```bash
 # Linux / macOS
@@ -48,14 +50,14 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
-首次构建要编译前端，较慢。不想本地构建可以直接拉预构建镜像：
+**方式二：用已发布的镜像。** 跳过前端编译，直接用预构建镜像启动，在项目根目录执行。
 
 ```bash
 NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
   docker compose -f deploy/quickstart/compose.yaml up -d
 ```
 
-镜像同时发布到 [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) 和 [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart)，内容一致，按你的网络选一个。GHCR 的公开包没有按 IP 的拉取配额；Docker Hub 更方便搜索和分享，但对匿名拉取有限速，共用出口 IP 的场景（公司 NAT、共享 CI runner）可能撞上限。
+镜像同时发布在 [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) 和 [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart)，内容一致，按网络任选：Docker Hub 对匿名拉取有速率限制，GHCR 没有。`NEXUSDESK_VERSION` 需要显式指定，默认值 `local` 只存在于本地构建。
 
 打开 **https://localhost:8080**，进入会话工作台的 `sample-support`：
 
