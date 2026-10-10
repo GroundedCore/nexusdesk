@@ -10,7 +10,10 @@ Multi-replica safety follows the knowledge worker precedent
 (``knowledge/ingestion.py``): claiming writes ``owner`` plus a 120-second lease
 (``lease_expires_at``), a heartbeat renews the lease while a task executes, and
 every claim pass first reaps running tasks whose lease expired, so a hard-killed
-replica's rows return to ``pending`` instead of sticking in ``running``.
+replica's rows return to ``pending`` instead of sticking in ``running``. Rows that
+already exhausted their attempts are reaped straight to ``failed`` (knowledge
+worker's ``attempts`` cap precedent), so a task that hard-kills every replica
+cannot be re-claimed forever.
 """
 
 import asyncio
@@ -47,9 +50,14 @@ class MemoryWorker:
         async with self.engine.begin() as c:
             # Reaper: a replica that died mid-execution lets its lease lapse;
             # those rows become claimable again instead of sticking in running.
+            # Past the attempts cap the row is failed outright (knowledge
+            # worker precedent: attempts>=3 -> failed, error_code set), so a
+            # task that hard-kills every replica cannot loop forever.
             await execute(
                 c,
-                """UPDATE memory_tasks SET status='pending',owner=NULL,
+                """UPDATE memory_tasks SET
+                status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'pending' END,
+                error='memory_worker_lost',owner=NULL,
                 lease_expires_at=NULL,updated_at=now()
                 WHERE status='running' AND lease_expires_at<now() AND tenant_id=:tenant""",
                 tenant=self.settings.tenant_id,

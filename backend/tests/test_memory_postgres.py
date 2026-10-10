@@ -704,3 +704,43 @@ async def test_p1_it_20_reaped_task_is_reclaimed_and_runs_to_done(platform):
     assert row["status"] == "done" and row["owner"] is None
     assert row["lease_expires_at"] is None
     assert await conversation_summary(engine, conv["id"]) == "复活摘要"
+
+
+async def test_p1_it_21_reaper_fails_task_past_attempts_cap(platform):
+    """A task that hard-kills every replica must reach failed, not loop forever."""
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    engine = services.repository.engine
+    async with engine.begin() as c:
+        poison_id = await enqueue_summary_task(
+            c, settings.tenant_id, uuid4(), [{"role": "user", "content": "毒"}], None, 40
+        )
+        retry_id = await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "新"}], None, 40
+        )
+        # Both rows belong to hard-killed replicas (lease expired); the poison
+        # row already exhausted its attempts (default max_attempts=2).
+        await c.execute(
+            text(
+                "UPDATE memory_tasks SET status='running',owner=gen_random_uuid(),"
+                "lease_expires_at=now()-interval '1 second',attempts=max_attempts "
+                "WHERE id=:id"
+            ),
+            {"id": poison_id},
+        )
+        await c.execute(
+            text(
+                "UPDATE memory_tasks SET status='running',owner=gen_random_uuid(),"
+                "lease_expires_at=now()-interval '1 second',attempts=1 WHERE id=:id"
+            ),
+            {"id": retry_id},
+        )
+    worker = make_worker(services, settings, RecordingGateway())
+    # The claim pass reaps first: the poison row is failed outright, while the
+    # retryable row returns to pending and is immediately re-claimed.
+    claimed = await worker.claim()
+    assert claimed["id"] == retry_id
+    poison = await task_row(engine, poison_id)
+    assert poison["status"] == "failed" and poison["error"] == "memory_worker_lost"
+    assert poison["owner"] is None and poison["lease_expires_at"] is None

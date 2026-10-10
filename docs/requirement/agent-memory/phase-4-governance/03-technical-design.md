@@ -85,8 +85,8 @@ def scan_overdue_tickets(tenant):
 **memory_tasks 租约与 reaper（承接 Phase 1 R3/L3，生产多副本前置项）**：
 
 - 背景：Phase 1 部署形态已修订为生产独立 `memory-worker` 容器且可多副本伸缩（见 `../phase-1-conversation-summary/03-technical-design.md` §核心流程3，2026-10-10 修订）；硬杀时 running 任务卡死的问题（Phase 1 测试报告 R3 / 验收报告 L3）在多副本下必须解决。
-- 设计：`memory_tasks` claim 引入租约——认领时写 `owner`（实例标识）与 `lease_expires_at = now() + 120s`，执行期间心跳续约；Worker 周期 reaper 将 `status='running' AND lease_expires_at < now()` 的任务重置为 `pending`。
-- 先例：直接借鉴知识库 Worker 的 SKIP LOCKED + 120 秒租约 + reap 模式（`docs/modules-delivery.md`），保持平台内 worker 语义一致。
+- 设计：`memory_tasks` claim 引入租约——认领时写 `owner`（实例标识）与 `lease_expires_at = now() + 120s`，执行期间心跳续约；Worker 周期 reaper 将 `status='running' AND lease_expires_at < now()` 的任务重置为 `pending`；其中 `attempts` 已达上限的任务直接置 `failed`（`error='memory_worker_lost'`），避免确定性硬杀（如 OOM）的任务被无限「重置→重认领→再硬杀」。
+- 先例：直接借鉴知识库 Worker 的 SKIP LOCKED + 120 秒租约 + reap 模式（`docs/modules-delivery.md`），保持平台内 worker 语义一致；reaper 的 attempts 上限兜底（知识库为 `attempts>=3 → failed`，error_code 记录 worker lost）一并沿用。
 - 排期：该项**随 memory-worker 独立容器落地提前实施**（生产多副本部署前置），不必等到 Phase 4 整体排期。
 
 ### 5. 客户删除（`governance.py`）

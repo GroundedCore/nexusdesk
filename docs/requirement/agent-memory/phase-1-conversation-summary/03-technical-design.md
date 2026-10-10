@@ -90,7 +90,8 @@ class MemoryWorker:
     #   lease_expires_at=now()+120s ... WHERE id = (
     #   SELECT id FROM memory_tasks WHERE status='pending' AND run_after<=now()
     #   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *
-    # 执行期间心跳续约；每次 claim 前置 reaper 将租约过期的 running 重置 pending。
+    # 执行期间心跳续约；每次 claim 前置 reaper 将租约过期的 running 重置 pending
+    # （attempts 已达上限者直接置 failed，error='memory_worker_lost'，同知识库先例）。
 ```
 
 - 部署形态：分两种形态，与 Runtime Worker 自身的部署模式对齐——
@@ -99,7 +100,7 @@ class MemoryWorker:
 - 失败处理：`attempts < max_attempts` 则 `run_after = now() + 指数退避` 重新 pending，否则置 `failed` 并记审计事件。
 - 优雅停机：跟随所属进程（quickstart：API 进程；生产：memory-worker 容器）的 shutdown 信号，running 任务重置为 pending。
 
-> 修订（2026-10-10）：部署形态由"Runtime Worker 进程内并发循环、不新增容器角色"修订为"quickstart 内嵌 API 进程 / 生产独立 memory-worker 容器"。compose 服务与独立入口（`apps/worker/memory.py`）已随本次代码对齐落地；多副本生产的 lease/reaper（claim 写 owner + `lease_expires_at=now()+120s`、执行期间心跳续约、claim 前置 reaper 重置过期 running）按 Phase 4 技术设计 §4 提前一并实施（承接测试报告 R3 / 验收报告 L3，先例为知识库 Worker 的 SKIP LOCKED + 120s 租约 + reap 模式）。
+> 修订（2026-10-10）：部署形态由"Runtime Worker 进程内并发循环、不新增容器角色"修订为"quickstart 内嵌 API 进程 / 生产独立 memory-worker 容器"。compose 服务与独立入口（`apps/worker/memory.py`）已随本次代码对齐落地；多副本生产的 lease/reaper（claim 写 owner + `lease_expires_at=now()+120s`、执行期间心跳续约、claim 前置 reaper 重置过期 running，attempts 达上限者置 failed）按 Phase 4 技术设计 §4 提前一并实施（承接测试报告 R3 / 验收报告 L3，先例为知识库 Worker 的 SKIP LOCKED + 120s 租约 + reap 模式，含 attempts 上限兜底）。
 
 ### 4. 注入（`engine.py`）
 
