@@ -245,3 +245,31 @@ def test_deploy_workflow_forwards_the_tls_host_list():
     step = next(s for s in deploy["steps"] if s.get("name") == "Deploy to server")
     assert "NEXUSDESK_TLS_HOSTS" in step["with"]["envs"].split(",")
     assert 'export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"' in step["with"]["script"]
+
+
+def test_docker_hub_mirror_cannot_fail_a_deploy():
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
+    mirror = workflow["jobs"]["mirror"]
+
+    # Separate job: an expired Docker Hub token or an outage there must not turn a
+    # successful deploy into a failed run.
+    assert mirror["needs"] == "deploy"
+    # The gate reads a repository variable, never a secret. A job-level `if` has no
+    # access to the secrets context, so gating on the token would silently never match.
+    assert "vars.DOCKERHUB_USERNAME" in mirror["if"]
+    assert "secrets." not in mirror["if"]
+
+    script = next(
+        step["run"]
+        for step in mirror["steps"]
+        if step.get("name") == "Copy the image between registries"
+    )
+    # Registry-to-registry copy: the GHCR index is reproduced rather than rebuilt
+    # from the runner's own platform.
+    assert "imagetools create" in script
+    assert "ghcr.io/" in script
+    # The destination comes from configuration so a fork can publish under its own
+    # account without editing the workflow.
+    assert "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart" in script

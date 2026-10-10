@@ -2,7 +2,8 @@ name: CD
 
 # Deploys the quickstart stack to the server after CI passes on main, or on
 # manual dispatch. The image is built here and pushed to GHCR; the server
-# only pulls it (postgres still comes from Docker Hub).
+# only pulls it (postgres still comes from Docker Hub). A separate job mirrors
+# the result to Docker Hub for discoverability — see the `mirror` job.
 on:
   workflow_run:
     workflows: [CI]
@@ -98,3 +99,47 @@ jobs:
             docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
             docker compose -f deploy/quickstart/compose.yaml ps
             docker image prune -f
+
+  mirror:
+    name: Mirror to Docker Hub
+    runs-on: ubuntu-latest
+    # Docker Hub is a mirror, not the critical path: an expired token or a registry
+    # outage there must not fail a deploy, so this is a separate job.
+    needs: deploy
+    # A job-level `if` cannot read secrets — only github, needs, vars and inputs —
+    # so the username lives in a repository variable and doubles as the on/off
+    # switch. Creating it is all it takes to start mirroring.
+    if: ${{ needs.deploy.result == 'success' && vars.DOCKERHUB_USERNAME != '' }}
+    env:
+      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # Normally the same as the login account. Set DOCKERHUB_NAMESPACE as well when
+      # the destination is an organisation whose name differs from the account that
+      # owns the token.
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
+    steps:
+      - name: Compute GHCR namespace
+        # GHCR requires a lowercase namespace.
+        run: echo "GHCR_NAMESPACE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Copy the image between registries
+        # imagetools works registry-to-registry, so nothing is pulled onto the
+        # runner. Layer digests survive and the GHCR index is reproduced as-is
+        # instead of being rebuilt from whichever platform this runner happens to be.
+        run: |
+          docker buildx imagetools create \
+            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}" \
+            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:latest" \
+            "ghcr.io/${GHCR_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}"
+
+      - name: Report the published image
+        # A wrong namespace fails in `create`, but printing the manifest makes a
+        # partial or unexpected result obvious in the run log.
+        run: docker buildx imagetools inspect "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}"
