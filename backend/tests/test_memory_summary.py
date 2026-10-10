@@ -202,3 +202,16 @@ async def test_engine_reports_no_dropped_messages_inside_window():
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
         _, final, dropped_messages = await engine.run("q", [], ignore_event)
     assert dropped_messages == [] and len(final) == 2
+
+
+@asyncio_mark
+async def test_demo_model_never_calls_tools_the_caller_did_not_offer():
+    # Regression: a summary prompt quoting an earlier demo reply (which mentions
+    # "查询演示") must get plain text back when the request carries no tools.
+    from agent_platform.modules.model_gateway.service import DemoModel
+
+    reply = await DemoModel([]).ainvoke([HumanMessage(content="此前回复提到查询演示链路")])
+    assert not reply.tool_calls and reply.content.strip()
+    offered = {"function": {"name": "demo_order_lookup", "parameters": {"type": "object"}}}
+    reply = await DemoModel([offered]).ainvoke([HumanMessage(content="查询演示")])
+    assert reply.tool_calls and reply.tool_calls[0]["name"] == "demo_order_lookup"
