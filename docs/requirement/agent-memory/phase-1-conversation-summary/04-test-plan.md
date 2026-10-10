@@ -6,7 +6,7 @@
 
 ## 1. 测试范围与原则
 
-**范围**：会话滚动摘要的生成、存储、注入；人工接管摘要改造；租户级/Agent 级开关；摘要任务表（`memory_tasks`）与 Memory Worker（含部署形态与租约/reaper，2026-10-10 修订后补充 P1-UT-12、P1-IT-15~19、P1-CM-05）。
+**范围**：会话滚动摘要的生成、存储、注入；人工接管摘要改造；租户级/Agent 级开关；摘要任务表（`memory_tasks`）与 Memory Worker（含部署形态与租约/reaper，2026-10-10 修订后补充 P1-UT-12、P1-IT-15~20、P1-CM-05）。
 
 **原则**：
 
@@ -68,6 +68,7 @@
 | P1-IT-17 | claim 写租约 | claim 后行含 owner 与 `lease_expires_at ≈ now()+120s` | Phase 4 设计 §4 租约/reaper（提前落地） |
 | P1-IT-18 | reaper 重置过期租约 | claim 前置 reaper：租约过期的 running 重置 pending（owner/lease 清空）；租约未过期的 running 不动 | Phase 4 设计 §4 租约/reaper（提前落地） |
 | P1-IT-19 | 心跳续约防误收割 | 执行期间心跳续约（租约前移）；另一副本的 reaper 不收割持有有效租约的 running 任务 | Phase 4 设计 §4 租约/reaper（提前落地） |
+| P1-IT-20 | 收割后重认领执行到 done | 硬杀副本的 running 任务（租约过期）被 reaper 重置后，由新副本重新认领并执行到 done（owner/lease 清空、摘要落库） | Phase 4 设计 §4 租约/reaper（提前落地） |
 
 ## 5. 通用核对项（本阶段适用）
 

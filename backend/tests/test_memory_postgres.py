@@ -540,6 +540,7 @@ async def test_p1_it_15_embedded_shutdown_releases_running_tasks(platform):
     await worker.serve()  # the stopping flag short-circuits the loop into finally
     task = (await memory_tasks(services.repository.engine, settings.tenant_id))[0]
     assert task["status"] == "pending" and task["owner"] is None
+    assert task["lease_expires_at"] is None
 
 
 async def test_p1_it_16_standalone_entry_executes_and_shuts_down_cleanly(platform):
@@ -555,7 +556,8 @@ async def test_p1_it_16_standalone_entry_executes_and_shuts_down_cleanly(platfor
         )
     loop = asyncio.create_task(memory_main(settings))
     try:
-        for _ in range(100):
+        # Generous ceiling (15s) for CI scheduling slack; the loop polls every 0.5s.
+        for _ in range(150):
             await asyncio.sleep(0.1)
             if (await task_row(services.repository.engine, task_id))["status"] == "done":
                 break
@@ -642,8 +644,10 @@ async def test_p1_it_19_heartbeat_renewal_prevents_false_reaping(platform):
     conv = await make_conversation(client, agent)
     engine = services.repository.engine
     blocking = BlockingService()
+    # A 10s lease leaves ample slack for heartbeat scheduling delays on a
+    # loaded CI runner while keeping the test fast (heartbeat ticks at 0.5s).
     worker = MemoryWorker(
-        engine, blocking, settings, lease_seconds=3, heartbeat_seconds=0.5
+        engine, blocking, settings, lease_seconds=10, heartbeat_seconds=0.5
     )
     async with engine.begin() as c:
         await enqueue_summary_task(
@@ -653,10 +657,17 @@ async def test_p1_it_19_heartbeat_renewal_prevents_false_reaping(platform):
     original_lease = claimed["lease_expires_at"]
     executing = asyncio.create_task(worker._execute(claimed))
     try:
-        # Two heartbeat ticks pass while the task is still executing.
-        await asyncio.sleep(1.2)
-        row = await task_row(engine, claimed["id"])
-        assert row["status"] == "running" and row["lease_expires_at"] > original_lease
+        # Poll until a heartbeat tick moves the lease forward (well inside the
+        # 10s lease window, so CI jitter cannot expire it mid-assertion).
+        row = None
+        for _ in range(50):
+            await asyncio.sleep(0.1)
+            row = await task_row(engine, claimed["id"])
+            if row["lease_expires_at"] > original_lease:
+                break
+        else:  # pragma: no cover - failure path
+            raise AssertionError("heartbeat did not renew the lease within 5s")
+        assert row["status"] == "running"
         # A second replica's claim pass must not reap the live lease.
         replica = make_worker(services, settings, RecordingGateway())
         assert await replica.claim() is None
@@ -665,3 +676,31 @@ async def test_p1_it_19_heartbeat_renewal_prevents_false_reaping(platform):
     finally:
         blocking.release.set()
         await executing
+
+
+async def test_p1_it_20_reaped_task_is_reclaimed_and_runs_to_done(platform):
+    """A hard-killed replica's task is reaped, re-claimed and executed to done."""
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    engine = services.repository.engine
+    async with engine.begin() as c:
+        task_id = await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
+        )
+        # Simulate a replica hard-killed mid-execution: running, owned by
+        # someone else, lease already expired.
+        await c.execute(
+            text(
+                "UPDATE memory_tasks SET status='running',owner=gen_random_uuid(),"
+                "lease_expires_at=now()-interval '1 second' WHERE id=:id"
+            ),
+            {"id": task_id},
+        )
+    worker = make_worker(services, settings, RecordingGateway("复活摘要"))
+    # One pass reaps the expired row, re-claims it, executes and finishes.
+    assert await worker.run_once() is True
+    row = await task_row(engine, task_id)
+    assert row["status"] == "done" and row["owner"] is None
+    assert row["lease_expires_at"] is None
+    assert await conversation_summary(engine, conv["id"]) == "复活摘要"

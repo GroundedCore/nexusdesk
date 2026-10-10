@@ -22,6 +22,7 @@ from agent_platform.modules.memory.summary import (
     require_binding,
     trim_dropped,
 )
+from agent_platform.modules.memory.worker import MemoryWorker
 from agent_platform.modules.tool_gateway.service import ToolGateway
 from agent_platform.settings import Settings
 
@@ -127,13 +128,16 @@ class _DummyServices:
 
 def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
     services = _DummyServices()
+    # All four embedded_worker × summary_enabled combinations.
+    both_off = Settings(_env_file=None, embedded_worker=False, summary_enabled=False)
+    assert embedded_memory_worker(services, both_off) is None
     # Production form: the API process never assembles the loop.
     assert embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=False)) is None
     # Feature switched off: nothing to run even in the embedded form.
     assert embedded_memory_worker(services, Settings(_env_file=None, summary_enabled=False)) is None
     # Quickstart/development form: embedded mode assembles the claim loop.
     worker = embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=True))
-    assert worker is not None and worker.stopping.is_set() is False
+    assert isinstance(worker, MemoryWorker) and worker.stopping.is_set() is False
 
 
 def test_p1_cm_02_summary_settings_defaults_and_env_override(monkeypatch):
