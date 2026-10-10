@@ -59,6 +59,16 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
 
 The image is published to both [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) and [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) with identical contents, so pick whichever your network prefers: Docker Hub rate-limits anonymous pulls, GHCR does not. `NEXUSDESK_VERSION` must be given explicitly — its default, `local`, only exists after a local build.
 
+Without cloning the repository, this one compose file is all you need. Run it from any directory:
+
+```bash
+curl -fsSLo compose.yaml \
+  https://raw.githubusercontent.com/GroundedCore/nexusdesk/main/deploy/quickstart/compose.yaml
+
+NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
+  docker compose -f compose.yaml up -d
+```
+
 Open **https://localhost:8080**, then open `sample-support` in the conversation workbench:
 
 - Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.

@@ -180,6 +180,15 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/<namespace>/ NEXUSDESK_VERSION=latest \
 
 注意 `NEXUSDESK_VERSION` **必须显式指定**：默认值是 `local`，那是本地构建用的标签，注册表上没有。
 
+也**不必克隆仓库**：compose 文件是唯一需要的仓库文件，可以单独取用。`name` 固定了项目名、卷全是具名卷，所以与当前目录无关。
+
+```sh
+curl -fsSLo compose.yaml https://raw.githubusercontent.com/<owner>/nexusdesk/main/deploy/quickstart/compose.yaml
+NEXUSDESK_IMAGE_REGISTRY=docker.io/<namespace>/ NEXUSDESK_VERSION=latest docker compose -f compose.yaml up -d
+```
+
+**排查提示**：compose 未声明 `pull_policy`，按 [Compose 规范](https://docs.docker.com/reference/compose-file/build/)的规则**先尝试拉取，拉不到才回退构建**。所以拉取一旦失败（标签写错、网络不通、撞限速），它会转去构建，而 `build.context`（`../..`）在单独取用的 compose 文件旁并不存在，最终报的是**构建上下文找不到**——看着像 compose 文件坏了，实际是拉取阶段就失败了。先用 `docker compose pull` 单独确认拉取是否通过，再判断问题出在哪一段。
+
 Dockerfile 的 `quickstart`、`backend`、`web` 为三个构建目标，前端由 Node 构建后交给 Nginx，不运行 Vite 开发服务器。Python 使用 `uv.lock`，前端使用 `package-lock.json`。`.dockerignore` 排除密钥、环境配置、数据库目录和本地依赖。
 
 通过 `NODE_IMAGE`、`PYTHON_IMAGE`、`NGINX_IMAGE`、`POSTGRES_IMAGE` 覆盖基础镜像来源，例如 `docker.m.daocloud.io/library/python:3.12-slim-bookworm`。生产变量写入 .env；快速体验通过当前 shell 环境设置。镜像代理不代替 npm、PyPI 和 Debian 软件源，构建机仍需访问这些依赖源。若主机禁用了 Docker 默认 bridge，可设置 `NEXUSDESK_BUILD_NETWORK=host` 后构建；该配置只改变构建网络，不改变容器运行网络。

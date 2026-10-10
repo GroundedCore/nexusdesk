@@ -59,6 +59,16 @@ NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
 
 镜像同时发布在 [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) 和 [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart)，内容一致，按网络任选：Docker Hub 对匿名拉取有速率限制，GHCR 没有。`NEXUSDESK_VERSION` 需要显式指定，默认值 `local` 只存在于本地构建。
 
+不想克隆仓库时，取这一个 compose 文件就够，在任意目录执行：
+
+```bash
+curl -fsSLo compose.yaml \
+  https://raw.githubusercontent.com/GroundedCore/nexusdesk/main/deploy/quickstart/compose.yaml
+
+NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
+  docker compose -f compose.yaml up -d
+```
+
 打开 **https://localhost:8080**，进入会话工作台的 `sample-support`：
 
 - 输入“发货需要多久？”体验知识问答。
