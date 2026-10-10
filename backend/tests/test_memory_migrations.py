@@ -38,6 +38,12 @@ def test_summary_migration_preserves_existing_conversations(migration_database):
     )
     task = query(url, "SELECT status,attempts,max_attempts FROM memory_tasks")[0]
     assert task[:] == ("pending", 0, 2)
+    # P1-CM-05: the claim lease column exists and starts empty.
+    assert query(
+        url,
+        "SELECT is_nullable FROM information_schema.columns WHERE table_name='memory_tasks' AND column_name='lease_expires_at'",
+    ) == [("YES",)]
+    assert query(url, "SELECT lease_expires_at FROM memory_tasks") == [(None,)]
     migrate(url, "0029_default_admin", "downgrade")
     assert not query(
         url,

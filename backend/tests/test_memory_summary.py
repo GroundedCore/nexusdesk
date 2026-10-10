@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from agent_platform.modules.agent_config.service import AgentConfig
 from agent_platform.modules.agent_runtime.engine import RuntimeEngine
+from agent_platform.modules.memory.bootstrap import embedded_memory_worker
 from agent_platform.modules.memory.summary import (
     INJECTION_HEADER,
     SummaryError,
@@ -112,6 +113,27 @@ def test_p1_ut_10_backoff_grows_exponentially_and_is_capped():
     assert backoff_seconds(2) == 60
     assert backoff_seconds(3) == 120
     assert backoff_seconds(99) == 300
+
+
+class _DummyServices:
+    """Assembly only stores engine/gateway; no database is touched."""
+
+    class repository:
+        engine = None
+
+    class platform:
+        gateway = None
+
+
+def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
+    services = _DummyServices()
+    # Production form: the API process never assembles the loop.
+    assert embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=False)) is None
+    # Feature switched off: nothing to run even in the embedded form.
+    assert embedded_memory_worker(services, Settings(_env_file=None, summary_enabled=False)) is None
+    # Quickstart/development form: embedded mode assembles the claim loop.
+    worker = embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=True))
+    assert worker is not None and worker.stopping.is_set() is False
 
 
 def test_p1_cm_02_summary_settings_defaults_and_env_override(monkeypatch):

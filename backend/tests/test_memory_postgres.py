@@ -14,6 +14,7 @@ from sqlalchemy import text
 from test_platform_postgres import create_agent, execute_next
 from test_platform_postgres import platform as _platform
 
+from agent_platform.modules.memory.bootstrap import embedded_memory_worker
 from agent_platform.modules.memory.summary import SUMMARY_KIND, SummaryService, enqueue_summary_task
 from agent_platform.modules.memory.worker import MemoryWorker
 from agent_platform.platform.persistence.store import DomainError
@@ -95,10 +96,11 @@ class RecordingGateway:
         }
 
 
-def stub_memory(services, settings, gateway):
-    service = SummaryService(services.repository.engine, gateway, settings)
-    services.memory_worker.service = service
-    return service
+def make_worker(services, settings, gateway=None, **kwargs):
+    """Assemble a worker the way the deployment entries do, with a stub gateway."""
+    engine = services.repository.engine
+    service = SummaryService(engine, gateway or services.platform.gateway, settings)
+    return MemoryWorker(engine, service, settings, **kwargs)
 
 
 async def force_claimable(engine, tenant):
@@ -128,7 +130,7 @@ async def test_p1_it_01_truncation_dispatches_task_and_summary_is_written(platfo
     events = await services.repository.events(final["id"], settings.tenant_id)
     assert "summary.queued" in [event["type"] for event in events]
     # The real gateway path (demo profile) writes the summary and usage.
-    assert await services.memory_worker.run_once() is True
+    assert await make_worker(services, settings).run_once() is True
     summary = await conversation_summary(services.repository.engine, conv["id"])
     assert summary and "演示模式" in summary
     tasks = await memory_tasks(services.repository.engine, settings.tenant_id)
@@ -171,13 +173,13 @@ async def test_p1_it_02_summary_rolls_forward_with_previous_summary(platform):
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
     gateway = RecordingGateway("摘要一", "摘要二")
-    stub_memory(services, settings, gateway)
+    worker = make_worker(services, settings, gateway)
     await send_and_run(client, services, settings, conv["id"], "第1轮 订单号 A123")
     await send_and_run(client, services, settings, conv["id"], "第2轮")
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
     assert await conversation_summary(services.repository.engine, conv["id"]) == "摘要一"
     await send_and_run(client, services, settings, conv["id"], "第3轮")
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
     assert await conversation_summary(services.repository.engine, conv["id"]) == "摘要二"
     # Second call merged the first summary with the newly dropped messages.
     second = gateway.requests[1]
@@ -190,10 +192,10 @@ async def test_p1_it_04_pending_summary_never_blocks_a_run(platform):
     settings.history_turns = 1
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
-    stub_memory(services, settings, RecordingGateway("旧摘要"))
+    worker = make_worker(services, settings, RecordingGateway("旧摘要"))
     await send_and_run(client, services, settings, conv["id"], "第1轮")
     await send_and_run(client, services, settings, conv["id"], "第2轮")
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
     assert await conversation_summary(services.repository.engine, conv["id"]) == "旧摘要"
     # Next truncation queues a task but the run after it still sees the old summary.
     final = await send_and_run(client, services, settings, conv["id"], "第3轮")
@@ -216,23 +218,23 @@ async def test_p1_it_05_model_failure_retries_then_fails_keeping_old_summary(pla
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
     gateway = RecordingGateway("保留摘要")
-    stub_memory(services, settings, gateway)
+    worker = make_worker(services, settings, gateway)
     await send_and_run(client, services, settings, conv["id"], "第1轮")
     await send_and_run(client, services, settings, conv["id"], "第2轮")
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
     assert await conversation_summary(services.repository.engine, conv["id"]) == "保留摘要"
     # Now the summary model breaks; the conversation itself keeps working (AC-4).
     gateway.error = DomainError("model_provider_unavailable", 502)
     await send_and_run(client, services, settings, conv["id"], "第3轮")
     with caplog.at_level(logging.WARNING):
         # P1-UT-10: first failure reschedules with backoff and attempts=1.
-        assert await services.memory_worker.run_once() is True
+        assert await worker.run_once() is True
         task = (await memory_tasks(services.repository.engine, settings.tenant_id))[-1]
         assert task["status"] == "pending" and task["attempts"] == 1
         assert task["run_after"].timestamp() > task["updated_at"].timestamp()
         # P1-UT-11: reaching max_attempts marks the task failed, no more retries.
         await force_claimable(services.repository.engine, settings.tenant_id)
-        assert await services.memory_worker.run_once() is True
+        assert await worker.run_once() is True
     task = (await memory_tasks(services.repository.engine, settings.tenant_id))[-1]
     assert task["status"] == "failed" and task["attempts"] == 2
     assert task["error"] == "model_provider_unavailable"
@@ -248,7 +250,7 @@ async def test_p1_it_05b_no_chat_profile_fails_without_retry(platform):
     client, services, settings = platform
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
-    stub_memory(services, settings, RecordingGateway())
+    worker = make_worker(services, settings, RecordingGateway())
     # A conversation whose agent binding vanished cannot pick a profile (P1-UT-09).
     async with services.repository.engine.begin() as c:
         await c.execute(
@@ -262,7 +264,7 @@ async def test_p1_it_05b_no_chat_profile_fails_without_retry(platform):
             None,
             40,
         )
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
     task = (await memory_tasks(services.repository.engine, settings.tenant_id))[-1]
     assert task["status"] == "failed" and task["error"] == "no_chat_profile"
     assert task["attempts"] == 1
@@ -275,7 +277,7 @@ async def test_p1_it_06_no_task_or_usage_before_first_truncation(platform):
     conv = await make_conversation(client, agent)
     await send_and_run(client, services, settings, conv["id"], "唯一一轮")
     assert await memory_tasks(services.repository.engine, settings.tenant_id) == []
-    assert await services.memory_worker.run_once() is False
+    assert await make_worker(services, settings).run_once() is False
     async with services.repository.engine.connect() as c:
         count = await c.scalar(
             text("SELECT count(*) FROM gateway_calls WHERE tenant_id=:t AND actor='memory'"),
@@ -365,7 +367,7 @@ async def test_p1_it_11_closed_or_deleted_conversation_is_skipped(platform):
     client, services, settings = platform
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
-    stub_memory(services, settings, RecordingGateway())
+    worker = make_worker(services, settings, RecordingGateway())
     async with services.repository.engine.begin() as c:
         await c.execute(
             text("UPDATE runtime_conversations SET mode='closed' WHERE id=:id"), {"id": conv["id"]}
@@ -376,8 +378,8 @@ async def test_p1_it_11_closed_or_deleted_conversation_is_skipped(platform):
         await enqueue_summary_task(
             c, settings.tenant_id, uuid4(), [{"role": "user", "content": "x"}], None, 40
         )
-    assert await services.memory_worker.run_once() is True
-    assert await services.memory_worker.run_once() is True
+    assert await worker.run_once() is True
+    assert await worker.run_once() is True
     tasks = await memory_tasks(services.repository.engine, settings.tenant_id)
     assert [task["status"] for task in tasks] == ["done", "done"]
     assert await conversation_summary(services.repository.engine, conv["id"]) is None
@@ -407,29 +409,32 @@ async def test_p1_it_13_concurrent_claim_runs_a_task_exactly_once(platform):
             c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
         )
     engine = services.repository.engine
-    worker_a = MemoryWorker(engine, services.memory_worker.service, settings)
-    worker_b = MemoryWorker(engine, services.memory_worker.service, settings)
+    worker_a = make_worker(services, settings)
+    worker_b = make_worker(services, settings)
     claimed = await asyncio.gather(worker_a.claim(), worker_b.claim())
     assert sum(row is not None for row in claimed) == 1
     assert sum(row is None for row in claimed) == 1
+    winner = worker_a if claimed[0] is not None else worker_b
+    task = (await memory_tasks(engine, settings.tenant_id))[0]
+    assert task["status"] == "running" and task["owner"] == winner.owner
 
 
 async def test_p1_it_14_graceful_shutdown_releases_running_tasks(platform):
     client, services, settings = platform
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
-    stub_memory(services, settings, RecordingGateway())
+    worker = make_worker(services, settings, RecordingGateway())
     async with services.repository.engine.begin() as c:
         await enqueue_summary_task(
             c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
         )
-    worker = services.memory_worker
     claimed = await worker.claim()
     assert claimed["status"] == "running" and claimed["owner"] == worker.owner
     worker.stop()
     await worker.serve()  # the stopping flag short-circuits the loop into finally
     task = (await memory_tasks(services.repository.engine, settings.tenant_id))[0]
     assert task["status"] == "pending" and task["owner"] is None
+    assert task["lease_expires_at"] is None
 
 
 async def test_p1_ut_05_pending_task_merges_new_dropped_messages(platform):
@@ -499,13 +504,164 @@ async def test_p1_cm_04_cross_tenant_summary_is_unreachable(platform):
         await enqueue_summary_task(
             c, "other-tenant", conv["id"], [{"role": "user", "content": "x"}], None, 40
         )
-    outsider = MemoryWorker(
-        engine,
-        services.memory_worker.service,
-        settings.model_copy(update={"tenant_id": "other-tenant"}),
+    outsider = make_worker(
+        services, settings.model_copy(update={"tenant_id": "other-tenant"})
     )
     assert await outsider.run_once() is True  # executes its own tenant's task, skips writes
     assert await conversation_summary(engine, conv["id"]) is None
     # This tenant's own task is untouched by the outsider.
     task = (await memory_tasks(engine, settings.tenant_id))[0]
     assert task["status"] == "pending"
+
+
+async def task_row(engine, task_id):
+    async with engine.connect() as c:
+        row = (
+            await c.execute(text("SELECT * FROM memory_tasks WHERE id=:id"), {"id": task_id})
+        ).mappings().one()
+        return dict(row)
+
+
+async def test_p1_it_15_embedded_shutdown_releases_running_tasks(platform):
+    """The API-embedded form resets running rows on shutdown, like the standalone one."""
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    embedded = settings.model_copy(update={"embedded_worker": True})
+    worker = embedded_memory_worker(services, embedded)
+    assert isinstance(worker, MemoryWorker)
+    async with services.repository.engine.begin() as c:
+        await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
+        )
+    claimed = await worker.claim()
+    assert claimed["owner"] == worker.owner
+    worker.stop()
+    await worker.serve()  # the stopping flag short-circuits the loop into finally
+    task = (await memory_tasks(services.repository.engine, settings.tenant_id))[0]
+    assert task["status"] == "pending" and task["owner"] is None
+
+
+async def test_p1_it_16_standalone_entry_executes_and_shuts_down_cleanly(platform):
+    """python -m agent_platform.apps.worker.memory runs the claim loop (P1-IT-16)."""
+    from agent_platform.apps.worker.memory import main as memory_main
+
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    async with services.repository.engine.begin() as c:
+        task_id = await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
+        )
+    loop = asyncio.create_task(memory_main(settings))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.1)
+            if (await task_row(services.repository.engine, task_id))["status"] == "done":
+                break
+        else:  # pragma: no cover - failure path
+            raise AssertionError("standalone memory worker did not execute the task")
+    finally:
+        loop.cancel()
+        await asyncio.gather(loop, return_exceptions=True)
+    # Shutdown left nothing stuck in running.
+    tasks = await memory_tasks(services.repository.engine, settings.tenant_id)
+    assert [task["status"] for task in tasks] == ["done"]
+
+
+async def test_p1_it_17_claim_writes_owner_and_lease(platform):
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    worker = make_worker(services, settings, RecordingGateway())
+    async with services.repository.engine.begin() as c:
+        await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
+        )
+    claimed = await worker.claim()
+    assert claimed["owner"] == worker.owner
+    lease = claimed["lease_expires_at"].timestamp()
+    updated = claimed["updated_at"].timestamp()
+    assert 119 < lease - updated <= 120
+
+
+async def test_p1_it_18_reaper_resets_lease_expired_running_tasks(platform):
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    engine = services.repository.engine
+    async with engine.begin() as c:
+        pending_id = await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "新"}], None, 40
+        )
+        dead_id = await enqueue_summary_task(
+            c, settings.tenant_id, uuid4(), [{"role": "user", "content": "死"}], None, 40
+        )
+        live_id = await enqueue_summary_task(
+            c, settings.tenant_id, uuid4(), [{"role": "user", "content": "活"}], None, 40
+        )
+        # Two running rows: one lease-expired (hard-killed owner), one healthy.
+        await c.execute(
+            text(
+                "UPDATE memory_tasks SET status='running',owner=gen_random_uuid(),"
+                "lease_expires_at=now()-interval '1 second' WHERE id=:id"
+            ),
+            {"id": dead_id},
+        )
+        await c.execute(
+            text(
+                "UPDATE memory_tasks SET status='running',owner=gen_random_uuid(),"
+                "lease_expires_at=now()+interval '120 seconds' WHERE id=:id"
+            ),
+            {"id": live_id},
+        )
+    worker = make_worker(services, settings, RecordingGateway())
+    claimed = await worker.claim()  # claim pass reaps first, then takes the pending row
+    assert claimed["id"] == pending_id
+    dead = await task_row(engine, dead_id)
+    assert dead["status"] == "pending" and dead["owner"] is None
+    assert dead["lease_expires_at"] is None
+    live = await task_row(engine, live_id)
+    assert live["status"] == "running" and live["owner"] is not None
+
+
+class BlockingService:
+    """Holds execution until released, so heartbeats can be observed mid-flight."""
+
+    def __init__(self):
+        self.release = asyncio.Event()
+
+    async def execute(self, task):
+        await self.release.wait()
+        return "done"
+
+
+async def test_p1_it_19_heartbeat_renewal_prevents_false_reaping(platform):
+    client, services, settings = platform
+    agent, _ = await create_agent(client)
+    conv = await make_conversation(client, agent)
+    engine = services.repository.engine
+    blocking = BlockingService()
+    worker = MemoryWorker(
+        engine, blocking, settings, lease_seconds=3, heartbeat_seconds=0.5
+    )
+    async with engine.begin() as c:
+        await enqueue_summary_task(
+            c, settings.tenant_id, conv["id"], [{"role": "user", "content": "x"}], None, 40
+        )
+    claimed = await worker.claim()
+    original_lease = claimed["lease_expires_at"]
+    executing = asyncio.create_task(worker._execute(claimed))
+    try:
+        # Two heartbeat ticks pass while the task is still executing.
+        await asyncio.sleep(1.2)
+        row = await task_row(engine, claimed["id"])
+        assert row["status"] == "running" and row["lease_expires_at"] > original_lease
+        # A second replica's claim pass must not reap the live lease.
+        replica = make_worker(services, settings, RecordingGateway())
+        assert await replica.claim() is None
+        row = await task_row(engine, claimed["id"])
+        assert row["status"] == "running" and row["owner"] == worker.owner
+    finally:
+        blocking.release.set()
+        await executing
