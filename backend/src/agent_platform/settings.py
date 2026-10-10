@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     tool_concurrency: int = Field(default=8, ge=1, le=64)
     lease_seconds: int = Field(default=30, ge=10)
     history_turns: int = Field(default=10, ge=0, le=50)
+    # Rolling conversation summary (Phase 1 memory). Platform-wide kill switch:
+    # when off, no summary is injected and no summary task is dispatched, which
+    # degrades behaviour exactly to the pre-summary sliding window.
+    summary_enabled: bool = True
+    # Cap on dropped messages entering one summary call; older ones are covered
+    # by the previous rolling summary.
+    summary_max_input_messages: int = Field(default=40, ge=1, le=200)
+    # 500 Chinese characters of summary prose is roughly 1000 characters.
+    summary_max_output_chars: int = Field(default=1000, ge=100, le=8000)
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None

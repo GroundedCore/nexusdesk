@@ -50,7 +50,13 @@ class HandoffService:
                 "SELECT role,content FROM conversation_messages WHERE conversation_id=:id ORDER BY seq DESC LIMIT 10",
                 id=cid,
             )
-            summary = "\n".join(f"{m['role']}: {m['content'][:300]}" for m in reversed(messages))
+            recent = "\n".join(f"{m['role']}: {m['content'][:300]}" for m in reversed(messages))
+            # Rolling summary (when present) plus the recent raw messages; without
+            # a summary the handoff text is exactly what it used to be.
+            if conv.get("summary"):
+                summary = "【对话摘要】" + conv["summary"] + "\n\n【最近消息】\n" + recent
+            else:
+                summary = recent
             row = await one(
                 c,
                 """INSERT INTO handoffs(id,tenant_id,conversation_id,reason,summary)

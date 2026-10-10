@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.modules.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.modules.conversation.service import add_message
+from agent_platform.modules.memory.summary import enqueue_summary_task
 from agent_platform.platform.persistence.store import DomainError, transaction
 
 
@@ -171,12 +172,22 @@ class RunRepository:
                 .mappings()
                 .one()
             )
-            history = await conn.scalar(
-                text("SELECT history FROM runtime_conversations WHERE id=:id"),
-                {"id": row["conversation_id"]},
+            history = (
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT history,summary FROM runtime_conversations WHERE id=:id"
+                        ),
+                        {"id": row["conversation_id"]},
+                    )
+                )
+                .mappings()
+                .one()
             )
             await self._event(conn, row["id"], "run.started", {})
-            return {**dict(row), "history": history}
+            # The rolling summary rides along with the claimed run so the engine
+            # can inject it without a second round-trip.
+            return {**dict(row), "history": history["history"], "summary": history["summary"]}
 
     async def append(self, run_id, owner, kind, data):
         async with self.engine.begin() as conn:
@@ -208,13 +219,22 @@ class RunRepository:
             )
             return "lost" if cancelled is None else ("cancel" if cancelled else "ok")
 
-    async def finish(self, run_id, owner, status, output=None, error=None, history=None):
+    async def finish(
+        self, run_id, owner, status, output=None, error=None, history=None, memory=None
+    ):
         async with self.engine.begin() as conn:
             cid = await conn.scalar(
                 text("SELECT conversation_id FROM runtime_runs WHERE id=:id"), {"id": run_id}
             )
-            await conn.execute(
-                text("SELECT id FROM runtime_conversations WHERE id=:id FOR UPDATE"), {"id": cid}
+            conversation = (
+                (
+                    await conn.execute(
+                        text("SELECT summary FROM runtime_conversations WHERE id=:id FOR UPDATE"),
+                        {"id": cid},
+                    )
+                )
+                .mappings()
+                .one()
             )
             row = (
                 (
@@ -244,6 +264,20 @@ class RunRepository:
                     SET history=CAST(:history AS jsonb) WHERE id=:id"""),
                     {"id": row["conversation_id"], "history": json.dumps(history or [])},
                 )
+                if memory and memory.get("dropped"):
+                    # Async by design: dispatching the summary task shares this
+                    # transaction, so it never blocks or fails the run itself.
+                    await enqueue_summary_task(
+                        conn,
+                        row["tenant_id"],
+                        cid,
+                        memory["dropped"],
+                        conversation["summary"],
+                        memory.get("max_input", 40),
+                    )
+                    await self._event(
+                        conn, run_id, "summary.queued", {"dropped": len(memory["dropped"])}
+                    )
             await self._event(
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )
