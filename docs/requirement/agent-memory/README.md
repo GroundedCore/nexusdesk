@@ -30,11 +30,13 @@ NexusDesk 当前的"上下文"仅有 `runtime_conversations.history` JSONB 滑�
 | Phase 3 | 事件记忆 + 语义检索 | 工单闭环联动；海量记忆按需检索（含检索时间衰减） | 中 | ~2 周 | [phase-3-event-memory-search/](phase-3-event-memory-search/) |
 | Phase 4 | 治理、衰退与标记记忆 | 生产合规前提：纠错、遗忘、防污染；记忆衰退与强化保鲜 | 中低 | ~1-2 周 | [phase-4-governance/](phase-4-governance/) |
 
-各阶段目录下统一包含三份文档：
+各阶段目录下统一包含五份文档：
 
 - `01-business-goals.md` — 业务目标、价值、成功指标、范围边界
 - `02-requirements.md` — 用户故事、功能需求、验收标准
 - `03-technical-design.md` — 数据模型、代码改动点、接口设计、测试方案
+- `04-test-plan.md` — 测试方案：单元/集成/API 用例、非功能专项、出口准则（实现落地后执行）
+- `05-acceptance-plan.md` — 验收方案：AC 逐条验收步骤、业务指标测量、合规核对与签字
 
 ## 明确不做的（整体边界）
 
