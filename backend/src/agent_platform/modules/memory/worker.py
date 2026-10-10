@@ -1,4 +1,17 @@
-"""Claim loop for memory_tasks, mirroring the RuntimeWorker dispatcher pattern."""
+"""Claim loop for memory_tasks, mirroring the RuntimeWorker dispatcher pattern.
+
+Deployment forms (2026-10-10 revision): quickstart/development embed this loop
+in the API process lifespan when ``AGENT_EMBEDDED_WORKER=true``; production runs
+it as a standalone ``memory-worker`` container (``python -m
+agent_platform.apps.worker.memory``) that scales independently of the runtime
+worker. Assembly lives in ``agent_platform.modules.memory.bootstrap``.
+
+Multi-replica safety follows the knowledge worker precedent
+(``knowledge/ingestion.py``): claiming writes ``owner`` plus a 120-second lease
+(``lease_expires_at``), a heartbeat renews the lease while a task executes, and
+every claim pass first reaps running tasks whose lease expired, so a hard-killed
+replica's rows return to ``pending`` instead of sticking in ``running``.
+"""
 
 import asyncio
 import logging
@@ -9,19 +22,42 @@ from agent_platform.platform.persistence.store import audit, execute, one
 
 logger = logging.getLogger(__name__)
 
+LEASE_SECONDS = 120
+HEARTBEAT_SECONDS = 30
+
 
 class MemoryWorker:
-    def __init__(self, engine, service, settings, poll_seconds=0.5):
+    def __init__(
+        self,
+        engine,
+        service,
+        settings,
+        poll_seconds=0.5,
+        lease_seconds=LEASE_SECONDS,
+        heartbeat_seconds=HEARTBEAT_SECONDS,
+    ):
         self.engine, self.service, self.settings = engine, service, settings
         self.poll_seconds = poll_seconds
+        self.lease_seconds = lease_seconds
+        self.heartbeat_seconds = heartbeat_seconds
         self.owner = uuid4()
         self.stopping = asyncio.Event()
 
     async def claim(self):
         async with self.engine.begin() as c:
+            # Reaper: a replica that died mid-execution lets its lease lapse;
+            # those rows become claimable again instead of sticking in running.
+            await execute(
+                c,
+                """UPDATE memory_tasks SET status='pending',owner=NULL,
+                lease_expires_at=NULL,updated_at=now()
+                WHERE status='running' AND lease_expires_at<now() AND tenant_id=:tenant""",
+                tenant=self.settings.tenant_id,
+            )
             return await one(
                 c,
                 """UPDATE memory_tasks SET status='running',owner=:owner,
+                lease_expires_at=now()+:lease*interval '1 second',
                 attempts=attempts+1,updated_at=now()
                 WHERE id = (
                     SELECT id FROM memory_tasks
@@ -29,23 +65,70 @@ class MemoryWorker:
                     ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
                 ) RETURNING *""",
                 owner=self.owner,
+                lease=self.lease_seconds,
                 tenant=self.settings.tenant_id,
             )
 
+    async def renew(self, task):
+        """Heartbeat: extend the lease while the task is still executing."""
+        async with self.engine.begin() as c:
+            renewed = await one(
+                c,
+                """UPDATE memory_tasks SET lease_expires_at=now()+:lease*interval '1 second',
+                updated_at=now()
+                WHERE id=:id AND owner=:owner AND status='running' RETURNING id""",
+                id=task["id"],
+                owner=self.owner,
+                lease=self.lease_seconds,
+            )
+        if not renewed:
+            logger.warning(
+                "Memory task %s lease lost; another replica may re-run it", task["id"]
+            )
+
+    async def _heartbeat(self, task):
+        while True:
+            await asyncio.sleep(self.heartbeat_seconds)
+            try:
+                await self.renew(task)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # a failed heartbeat must not kill execution
+                logger.exception("Memory task %s heartbeat failed", task["id"])
+
+    async def _execute(self, task):
+        """Run the service with a heartbeat renewing the lease in the background."""
+        heartbeat = asyncio.create_task(self._heartbeat(task))
+        try:
+            return await self.service.execute(task)
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+
     async def _finish(self, task, status, error=None, retry_in=None):
         async with self.engine.begin() as c:
-            await execute(
+            # The owner guard keeps a worker whose lease was reaped from
+            # clobbering a row another replica has since picked up.
+            updated = await one(
                 c,
                 """UPDATE memory_tasks SET status=:status,error=:error,owner=NULL,
+                lease_expires_at=NULL,
                 run_after=CASE WHEN :retry THEN now() + :seconds * interval '1 second'
                     ELSE run_after END,
-                updated_at=now() WHERE id=:id""",
+                updated_at=now() WHERE id=:id AND owner=:owner RETURNING id""",
                 id=task["id"],
+                owner=self.owner,
                 status=status,
                 error=error,
                 retry=retry_in is not None,
                 seconds=retry_in or 0,
             )
+            if not updated:
+                logger.warning(
+                    "Memory task %s finish skipped: lease was reaped mid-execution",
+                    task["id"],
+                )
+                return
             if status == "failed":
                 await audit(
                     c,
@@ -64,7 +147,7 @@ class MemoryWorker:
         if not task:
             return False
         try:
-            await self.service.execute(task)
+            await self._execute(task)
         except SummaryError as exc:
             retryable = exc.retryable and task["attempts"] < task["max_attempts"]
             if retryable:
@@ -96,7 +179,8 @@ class MemoryWorker:
         async with self.engine.begin() as c:
             await execute(
                 c,
-                """UPDATE memory_tasks SET status='pending',owner=NULL,updated_at=now()
+                """UPDATE memory_tasks SET status='pending',owner=NULL,
+                lease_expires_at=NULL,updated_at=now()
                 WHERE status='running' AND owner=:owner""",
                 owner=self.owner,
             )

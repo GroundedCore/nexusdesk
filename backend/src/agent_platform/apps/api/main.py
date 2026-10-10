@@ -14,6 +14,7 @@ from agent_platform.apps.api.runtime_routes import router as runtime_router
 from agent_platform.modules.agent_runtime.bootstrap import runtime_services
 from agent_platform.modules.agent_runtime.schemas import BusyError, CapacityError
 from agent_platform.modules.knowledge.routes import router as knowledge_router
+from agent_platform.modules.memory.bootstrap import embedded_memory_worker
 from agent_platform.modules.model_gateway.management_routes import (
     router as gateway_management_router,
 )
@@ -36,10 +37,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task = (
                 asyncio.create_task(services.worker.serve()) if settings.embedded_worker else None
             )
+            # Quickstart/development embed the memory claim loop in this process;
+            # production runs it as the standalone memory-worker container.
+            memory_worker = embedded_memory_worker(services, settings)
             memory_task = (
-                asyncio.create_task(services.memory_worker.serve())
-                if settings.embedded_worker and settings.summary_enabled
-                else None
+                asyncio.create_task(memory_worker.serve()) if memory_worker else None
             )
             webhook_task = asyncio.create_task(services.platform.open_platform.webhooks.serve())
             try:
@@ -49,7 +51,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 webhook_task.cancel()
                 await asyncio.gather(webhook_task, return_exceptions=True)
                 services.worker.stop()
-                services.memory_worker.stop()
+                if memory_worker:
+                    memory_worker.stop()
                 if memory_task:
                     await memory_task
                 if task:

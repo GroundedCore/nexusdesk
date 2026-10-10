@@ -13,7 +13,9 @@ def upgrade():
     # isolation and the row lifecycle (a deleted conversation drops its summary).
     op.execute("ALTER TABLE runtime_conversations ADD COLUMN summary TEXT")
     # Generic async memory task table; Phase 2+ extraction tasks reuse it with a
-    # different kind. Follows the runtime_runs claim pattern (SKIP LOCKED).
+    # different kind. Follows the runtime_runs claim pattern (SKIP LOCKED) plus
+    # the knowledge worker lease: claiming writes owner and lease_expires_at so
+    # a reaper can recover rows whose owner died mid-execution.
     op.execute("""
         CREATE TABLE memory_tasks (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -26,6 +28,7 @@ def upgrade():
             max_attempts INT NOT NULL DEFAULT 2,
             error TEXT,
             owner UUID,
+            lease_expires_at TIMESTAMPTZ,
             run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
