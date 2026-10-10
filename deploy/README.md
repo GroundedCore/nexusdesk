@@ -73,7 +73,7 @@ sh nexusdesk deploy
 
 PowerShell 使用 `Copy-Item` 复制模板，再执行 `.\nexusdesk.ps1 deploy`。环境变量文件中的特殊字符按 Compose .env 规则引用；数据库 URL 的密码需要 URL 编码。不要把真实 .env、主密钥提交到代码仓库。
 
-包含 Web、API、Runtime Worker、Knowledge Worker 四个常驻容器，共用后端镜像；另有一次性 migrate 服务。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，默认不导入演示数据。如需在目标库预置行业案例，在 `.env` 设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
+包含 Web、API、Runtime Worker、Knowledge Worker、Memory Worker 五个常驻容器，共用后端镜像；另有一次性 migrate 服务。Memory Worker 执行会话摘要等异步记忆任务（复用 `memory_tasks` 表认领，非新中间件），与 Runtime Worker 解耦、可独立伸缩。中间件由外部提供，不重复启动、不修改已有 PostgreSQL / Milvus / MinIO。脚本先构建镜像，停止应用服务，重新执行迁移与已配置存储连接检查，成功后启动全部服务；迁移失败不启动应用，默认不导入演示数据。如需在目标库预置行业案例，在 `.env` 设 `AGENT_SEED_INDUSTRIES=true`（写入 36 篇标注为虚构的演示文档，脚本不提供清理）。
 
 - PostgreSQL 必需；配置 `AGENT_DATABASE_URL`。
 - 默认使用 `AGENT_MODEL_BACKEND=unconfigured`，无需模型密钥即可启动。界面提示添加供应商连接、Chat 模型和发布配置方案，再绑定到 Agent；未配置时对话明确返回配置提示，不降级 Demo。可选的旧版默认模型通过 `openai` 后端配置。
@@ -104,9 +104,9 @@ docker compose --env-file deploy/production/.env -f deploy/production/compose.ya
 
 ```sh
 docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml ps
-docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml logs --tail=100 migrate api runtime-worker knowledge-worker
+docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml logs --tail=100 migrate api runtime-worker knowledge-worker memory-worker
 # 扩容前核算每进程数据库连接池、模型限流及资源占用
-docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml up -d --scale runtime-worker=2 --scale knowledge-worker=2
+docker compose --env-file deploy/production/.env -f deploy/production/compose.yaml up -d --scale runtime-worker=2 --scale knowledge-worker=2 --scale memory-worker=2
 ```
 
 API 就绪检查为 `/api/v1/ready`；它不代表模型调用一定成功。Worker 暂无独立 HTTP 健康接口，需结合容器日志、租约与任务进度判断。Nginx 已关闭流式缓冲，代理读超时为 650 秒；代理允许 100 MB，请求仍受后端上传限制约束。

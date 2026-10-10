@@ -16,7 +16,7 @@ NexusDesk 当前的"上下文"仅有 `runtime_conversations.history` JSONB 滑�
 
 ## 总体原则
 
-1. **零新中间件**：存储用 PostgreSQL，队列复用 PG 任务表 + Worker claim 模式，向量检索用 pgvector（可降级 TSVECTOR），LLM 调用走模型网关。与"两容器快速体验"部署承诺兼容。
+1. **零新中间件**：存储用 PostgreSQL，队列复用 PG 任务表 + Worker claim 模式，向量检索用 pgvector（可降级 TSVECTOR），LLM 调用走模型网关。与"两容器快速体验"部署承诺兼容。部署形态：quickstart 两容器承诺不变（Memory Worker 内嵌于 API 进程，跟随 `AGENT_EMBEDDED_WORKER`）；生产拓扑使用独立 `memory-worker` 常驻容器（复用后端镜像，非新中间件），与 runtime-worker 解耦、可独立伸缩（2026-10-10 修订，见 `phase-1-conversation-summary/03-technical-design.md` §核心流程3）。
 2. **每阶段独立可上线、独立有价值**：不做依赖后续阶段才能生效的设计。
 3. **记忆严格按 `tenant_id + customer_id` 维度隔离**：跨客户共享知识是知识库的职责，不属于记忆系统。
 4. **错误记忆必须可人工纠正**：所有自动写入的记忆都可查询、可编辑、可删除、可溯源。

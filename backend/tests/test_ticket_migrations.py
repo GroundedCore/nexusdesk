@@ -73,7 +73,7 @@ def query(url, sql, *params):
 def test_empty_upgrade_downgrade_upgrade(migration_database):
     url = migration_database
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0029_default_admin"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0030_conversation_summary"
     migrate(url, "base", "downgrade")
     assert not query(
         url,
