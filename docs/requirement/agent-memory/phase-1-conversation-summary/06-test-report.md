@@ -94,7 +94,7 @@
 |---|---|---|---|
 | R1 | P2 | FR-1 要求摘要输出 ≤500 字；实现（prompt 指令与硬截断）按 `summary_max_output_chars=1000` 字符执行。注入侧 800 tokens 预算兜底，成本与上下文安全不受影响，仅摘要可能偏长 | 待产品确认：收紧默认值至 500 或修订需求口径并签字（详见 `07-acceptance-report.md` §6） |
 | R2 | P3 | 无 Agent 绑定的 legacy 会话每次截断产生一个不可重试的 `failed(no_chat_profile)` 任务，`memory_tasks` 失败行随轮次累积 | 建议 Phase 2 决策：投递时跳过无绑定会话或引入租户默认 profile |
-| R3 | P3 | 硬杀（非优雅停机）时 MemoryWorker 持有的 running 任务无 lease/reaper，将卡在 running；优雅停机路径已被 P1-IT-14 覆盖 | 部署形态已修订为生产独立 memory-worker 容器且可多副本伸缩（见 `03-technical-design.md` §核心流程3，2026-10-10 修订）；lease/reaper 由"列入 Phase 4 治理"提前为**生产多副本部署的前置项**，随 memory-worker 独立容器落地实施（设计见 `../../phase-4-governance/03-technical-design.md`） |
+| R3 | P3 | 硬杀（非优雅停机）时 MemoryWorker 持有的 running 任务无 lease/reaper，将卡在 running；优雅停机路径已被 P1-IT-14 覆盖 | **已关闭（2026-10-10）**：部署形态代码对齐落地——quickstart 内嵌 API 进程 / 生产独立 `memory-worker` 容器（`apps/worker/memory.py` + production compose 服务）；lease/reaper 按 Phase 4 设计 §4 提前实施（claim 写 owner + `lease_expires_at=now()+120s`、心跳续约、claim 前置 reaper），覆盖用例 P1-IT-15~19 |
 
 ## 9. CI 证据
 

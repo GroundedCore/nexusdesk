@@ -4,10 +4,14 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/0030_conversation_summary.py` | 新增：`runtime_conversations.summary` 列；`memory_tasks` 任务表 |
+| 迁移 | `backend/migrations/versions/0030_conversation_summary.py` | 新增：`runtime_conversations.summary` 列；`memory_tasks` 任务表（含 `owner` + `lease_expires_at` 租约列） |
 | 新模块 | `backend/src/agent_platform/modules/memory/__init__.py` | 空包占位（后续阶段扩展） |
 | 新模块 | `backend/src/agent_platform/modules/memory/summary.py` | 摘要生成服务 |
-| 新模块 | `backend/src/agent_platform/modules/memory/worker.py` | 摘要任务认领循环 |
+| 新模块 | `backend/src/agent_platform/modules/memory/worker.py` | 摘要任务认领循环（SKIP LOCKED + 120s 租约 + 心跳续约 + reaper） |
+| 新模块 | `backend/src/agent_platform/modules/memory/bootstrap.py` | 两种部署形态的装配：API 内嵌 / 独立进程 |
+| 入口 | `backend/src/agent_platform/apps/worker/memory.py` | 生产独立 memory-worker 进程入口 |
+| 入口 | `backend/src/agent_platform/apps/api/main.py` | `AGENT_EMBEDDED_WORKER=true` 时 lifespan 装配内嵌认领循环 |
+| 部署 | `deploy/production/compose.yaml` | 新增 `memory-worker` 常驻服务（复用后端镜像） |
 | 运行时 | `modules/agent_runtime/engine.py` | 摘要注入消息序列 |
 | 运行时 | `modules/agent_runtime/repository.py` | `finish()` 投递摘要任务；`claim()` 读出 summary |
 | 接管 | `modules/human_handoff/service.py` | handoff summary 拼接逻辑 |
@@ -81,10 +85,12 @@ class SummaryService:
 
 ```python
 class MemoryWorker:
-    # 复用 RuntimeWorker 的认领循环模式：
-    # UPDATE memory_tasks SET status='running' ... WHERE id = (
+    # 复用 RuntimeWorker 的认领循环模式（含知识库 Worker 的租约先例）：
+    # UPDATE memory_tasks SET status='running', owner=:owner,
+    #   lease_expires_at=now()+120s ... WHERE id = (
     #   SELECT id FROM memory_tasks WHERE status='pending' AND run_after<=now()
     #   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *
+    # 执行期间心跳续约；每次 claim 前置 reaper 将租约过期的 running 重置 pending。
 ```
 
 - 部署形态：分两种形态，与 Runtime Worker 自身的部署模式对齐——
@@ -93,7 +99,7 @@ class MemoryWorker:
 - 失败处理：`attempts < max_attempts` 则 `run_after = now() + 指数退避` 重新 pending，否则置 `failed` 并记审计事件。
 - 优雅停机：跟随所属进程（quickstart：API 进程；生产：memory-worker 容器）的 shutdown 信号，running 任务重置为 pending。
 
-> 修订（2026-10-10）：部署形态由"Runtime Worker 进程内并发循环、不新增容器角色"修订为"quickstart 内嵌 API 进程 / 生产独立 memory-worker 容器"；compose 服务与独立入口（`apps/worker` 侧）的实现另行落地，本文档先行记录目标设计。多副本生产的 lease/reaper 前置要求见 Phase 4 技术设计（承接测试报告 R3 / 验收报告 L3）。
+> 修订（2026-10-10）：部署形态由"Runtime Worker 进程内并发循环、不新增容器角色"修订为"quickstart 内嵌 API 进程 / 生产独立 memory-worker 容器"。compose 服务与独立入口（`apps/worker/memory.py`）已随本次代码对齐落地；多副本生产的 lease/reaper（claim 写 owner + `lease_expires_at=now()+120s`、执行期间心跳续约、claim 前置 reaper 重置过期 running）按 Phase 4 技术设计 §4 提前一并实施（承接测试报告 R3 / 验收报告 L3，先例为知识库 Worker 的 SKIP LOCKED + 120s 租约 + reap 模式）。
 
 ### 4. 注入（`engine.py`）
 
