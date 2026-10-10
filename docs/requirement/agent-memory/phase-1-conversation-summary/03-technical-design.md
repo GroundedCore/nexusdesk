@@ -87,9 +87,13 @@ class MemoryWorker:
     #   ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *
 ```
 
-- 部署形态：Phase 1 直接作为 Runtime Worker 进程内的一个并发循环启动（`agent_runtime/bootstrap.py` 装配），不新增容器角色；生产拓扑的 Runtime Worker 副本数即并发度。
+- 部署形态：分两种形态，与 Runtime Worker 自身的部署模式对齐——
+  - 开发 / quickstart：作为 API 进程内的并发循环启动（`AGENT_EMBEDDED_WORKER=true` 时随 API lifespan 装配），两容器承诺不变；
+  - 生产：独立 `memory-worker` 常驻容器（复用后端镜像、独立进程运行认领循环，不依附 Runtime Worker / API 进程），与 runtime-worker 解耦、可独立伸缩；并发度 = memory-worker 副本数（`FOR UPDATE SKIP LOCKED` 保证多副本认领安全，伸缩模型同 runtime-worker）。
 - 失败处理：`attempts < max_attempts` 则 `run_after = now() + 指数退避` 重新 pending，否则置 `failed` 并记审计事件。
-- 优雅停机：跟随 Runtime Worker 的 shutdown 信号，running 任务重置为 pending。
+- 优雅停机：跟随所属进程（quickstart：API 进程；生产：memory-worker 容器）的 shutdown 信号，running 任务重置为 pending。
+
+> 修订（2026-10-10）：部署形态由"Runtime Worker 进程内并发循环、不新增容器角色"修订为"quickstart 内嵌 API 进程 / 生产独立 memory-worker 容器"；compose 服务与独立入口（`apps/worker` 侧）的实现另行落地，本文档先行记录目标设计。多副本生产的 lease/reaper 前置要求见 Phase 4 技术设计（承接测试报告 R3 / 验收报告 L3）。
 
 ### 4. 注入（`engine.py`）
 

@@ -137,6 +137,7 @@ memory_search_half_life_days: int = 30   # 检索排序的时间衰减半衰期�
 ## 部署变更
 
 - `compose.yaml`（quickstart）与 `deploy/production`：`postgres:16` → `pgvector/pgvector:pg16`（同名服务，数据卷兼容，纯镜像替换）；
+- `deploy/production`：新增 `memory-worker` 常驻服务（Phase 1 部署形态 2026-10-10 修订引入：生产独立容器、复用后端镜像、可多副本伸缩；quickstart 不变，仍内嵌于 API 进程）；
 - 不换镜像的存量部署：迁移照常通过，自动降级 TSVECTOR，文档（`deploy/README.md`）补一节说明差异；
 - 生产备份/升级流程不变（pgvector 数据随 PG dump 走）。
 
