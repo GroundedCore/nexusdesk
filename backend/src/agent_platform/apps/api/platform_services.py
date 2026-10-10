@@ -118,6 +118,9 @@ class RuntimeFactory:
                 "max_model_rounds": self.platform.policy.check_rounds(
                     snapshot["config"]["max_model_rounds"], self.settings
                 ),
+                # Both switches must agree before the engine injects a summary.
+                "summary_enabled": self.settings.summary_enabled
+                and snapshot["config"].get("summary_enabled", True),
             }
         )
 

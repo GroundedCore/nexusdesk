@@ -143,7 +143,7 @@ class EvaluationService:
                 error = None
                 try:
                     async with asyncio.timeout(max(0, deadline - time.monotonic())):
-                        output, _ = await runtime.run(spec.input, [], emit)
+                        output, _, _ = await runtime.run(spec.input, [], emit)
                 except Exception as exc:  # noqa: BLE001 - isolate evaluation cases
                     output, error = "", getattr(exc, "code", type(exc).__name__)
                 passed = (

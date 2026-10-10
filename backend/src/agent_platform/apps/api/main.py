@@ -36,6 +36,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             task = (
                 asyncio.create_task(services.worker.serve()) if settings.embedded_worker else None
             )
+            memory_task = (
+                asyncio.create_task(services.memory_worker.serve())
+                if settings.embedded_worker and settings.summary_enabled
+                else None
+            )
             webhook_task = asyncio.create_task(services.platform.open_platform.webhooks.serve())
             try:
                 yield
@@ -44,6 +49,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 webhook_task.cancel()
                 await asyncio.gather(webhook_task, return_exceptions=True)
                 services.worker.stop()
+                services.memory_worker.stop()
+                if memory_task:
+                    await memory_task
                 if task:
                     await task
 

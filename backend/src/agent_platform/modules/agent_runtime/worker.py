@@ -54,11 +54,18 @@ class RuntimeWorker:
                 if hasattr(self.runtime, "for_run")
                 else self.runtime
             )
-            execution = asyncio.create_task(runtime.run(row["input"], row["history"], emit))
+            execution = asyncio.create_task(
+                runtime.run(row["input"], row["history"], emit, summary=row.get("summary"))
+            )
             watcher = asyncio.create_task(monitor(execution))
-            output, history = await execution
+            output, history, dropped = await execution
             await self.repository.finish(
-                row["id"], self.owner, "completed", output=output, history=history
+                row["id"],
+                self.owner,
+                "completed",
+                output=output,
+                history=history,
+                memory=self._memory_context(row, dropped),
             )
         except asyncio.CancelledError:
             if execution:
@@ -83,6 +90,20 @@ class RuntimeWorker:
                 await asyncio.gather(watcher, return_exceptions=True)
             if execution:
                 await asyncio.gather(execution, return_exceptions=True)
+
+    def _memory_context(self, row, dropped):
+        """Summary-task dispatch gates: dropped messages plus both kill switches.
+
+        The global switch and the per-agent switch from the run's config
+        snapshot are ANDed; a legacy run without an agent snapshot follows the
+        global switch only.
+        """
+        if not dropped or not self.settings.summary_enabled:
+            return None
+        agent = (row["config"].get("agent") or {}).get("config") or {}
+        if not agent.get("summary_enabled", True):
+            return None
+        return {"dropped": dropped, "max_input": self.settings.summary_max_input_messages}
 
     def _done(self, task):
         self.tasks.discard(task)
