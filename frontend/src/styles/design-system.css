@@ -66,6 +66,22 @@
 .console-layout .module-conversations button.list-item {background:white;color:var(--ui-ink);border:1px solid transparent;width:100%;text-align:left;border-radius:6px;padding:14px}
 .console-layout .module-conversations button.list-item.selected {background:#f5f4ff;border-color:#dcdafe}
 .console-layout .module-conversations button.list-item:hover {background:#f8f8fc}
+/* Agent conversation picker stays on neutral surfaces instead of the accent fill. */
+.console-layout .module-conversations button.agent-stats-all,
+.console-layout .module-conversations button.agent-stats-card {
+  background:#fff;border:1px solid var(--ui-line);color:var(--ui-ink);
+  border-radius:8px;padding:16px 18px;min-height:0;font-weight:400;text-align:left;
+}
+.console-layout .module-conversations button.agent-stats-card {min-height:132px}
+.console-layout .module-conversations button.agent-stats-all:hover,
+.console-layout .module-conversations button.agent-stats-card:hover {background:#fafaff;border-color:#d5d3fb}
+.console-layout .module-conversations button.c-filter-tab {
+  background:transparent;border:1px solid transparent;color:#656d7b;
+  min-height:28px;padding:4px 10px;border-radius:14px;font-weight:400;font-size:12px;
+}
+.console-layout .module-conversations button.c-filter-tab.is-active {
+  background:var(--ui-accent-soft);border-color:#dcdafe;color:var(--ui-accent);font-weight:500;
+}
 .console-layout .module-page button:not(.ant-btn):disabled {opacity:.45;cursor:not-allowed}
 .console-layout :is(.module-conversations,.module-handoff,.channel-workspace) .secondary+.secondary {margin-left:8px}
 .console-layout .message-content {border:1px solid #edf0f5;border-radius:8px;background:#f8f9fc;color:var(--ui-ink)}

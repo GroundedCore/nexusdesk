@@ -14,6 +14,7 @@ function normalizePath(value: string) {
   if (path === '/channels') return '/open-platform/channels';
   if (path === '/open-platform/channels') return path;
   if (pages.some(page => path === `/${page}`)) return path;
+  if (/^\/conversations\/[0-9a-zA-Z_-]+$/.test(path)) return path;
   if (/^\/tools\/[0-9a-f-]+\/(apis|versions|calls)$/.test(path)) return path;
   if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
   if (path === '/open-platform/identity') return path;

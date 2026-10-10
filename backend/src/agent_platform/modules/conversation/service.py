@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 from uuid import uuid4
 
 from agent_platform.platform.persistence.store import (
@@ -41,6 +42,84 @@ class ConversationService:
                 lim=limit,
                 off=offset,
             )
+
+    async def list_paginated(
+        self,
+        tenant,
+        page=1,
+        page_size=10,
+        agent_id: Optional[str | None] = None,
+        status: str = "all",
+    ):
+        page = max(page, 1)
+        page_size = max(1, min(page_size, 100))
+        where = "tenant_id=:t"
+        params = {"t": tenant, "lim": page_size, "off": (page - 1) * page_size}
+        if agent_id:
+            where += " AND agent_id=:aid"
+            params["aid"] = agent_id
+        if status and status != "all":
+            where += " AND mode=:status"
+            params["status"] = status
+        async with self.engine.connect() as c:
+            total = await one(
+                c,
+                "SELECT count(*) AS total FROM runtime_conversations WHERE " + where,
+                **{k: v for k, v in params.items() if k not in ("lim", "off")},
+            )
+            items = await many(
+                c,
+                """SELECT id,external_id,mode,agent_id,deleted_agent,assigned_to,created_at,updated_at
+                FROM runtime_conversations WHERE """ + where + " ORDER BY updated_at DESC,id DESC LIMIT :lim OFFSET :off",
+                **params,
+            )
+            return {
+                "items": items,
+                "total": total["total"],
+                "page": page,
+                "page_size": page_size,
+            }
+
+    async def agent_counts(self, tenant, agent_id: Optional[str | None] = None):
+        where = "tenant_id=:t"
+        params = {"t": tenant}
+        if agent_id:
+            where += " AND agent_id=:aid"
+            params["aid"] = agent_id
+        async with self.engine.connect() as c:
+            row = await one(
+                c,
+                """SELECT
+                    count(*)::int AS total,
+                    count(*) FILTER (WHERE mode='bot')::int AS bot,
+                    count(*) FILTER (WHERE mode='waiting')::int AS waiting,
+                    count(*) FILTER (WHERE mode='human')::int AS human,
+                    count(*) FILTER (WHERE mode='closed')::int AS closed
+                FROM runtime_conversations WHERE """ + where,
+                **params,
+            )
+            return row
+
+    async def counts_by_agent(self, tenant):
+        async with self.engine.connect() as c:
+            rows = await many(
+                c,
+                """SELECT
+                    r.agent_id,
+                    COALESCE(a.name, r.agent_id::text) AS name,
+                    count(*)::int AS total,
+                    count(*) FILTER (WHERE r.mode='bot')::int AS bot,
+                    count(*) FILTER (WHERE r.mode='waiting')::int AS waiting,
+                    count(*) FILTER (WHERE r.mode='human')::int AS human,
+                    count(*) FILTER (WHERE r.mode='closed')::int AS closed
+                FROM runtime_conversations r
+                LEFT JOIN agents a ON a.id = r.agent_id AND a.tenant_id = r.tenant_id
+                WHERE r.tenant_id=:t
+                GROUP BY r.agent_id, a.name
+                ORDER BY total DESC, r.agent_id""",
+                t=tenant,
+            )
+            return {"items": rows, "total": len(rows)}
 
     async def agent_records(self, tenant, aid, source="all", q="", page=1, page_size=12):
         where = """tenant_id=:t AND agent_id=:aid AND (:source='all' OR source=:source)

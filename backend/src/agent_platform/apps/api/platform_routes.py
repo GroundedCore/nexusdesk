@@ -150,6 +150,11 @@ async def agents(
     return await services(request).agents.list(user.tenant, q, include_archived)
 
 
+@router.get("/agents/counts")
+async def agent_counts(request: Request, user: Reader):
+    return await services(request).conversations.counts_by_agent(user.tenant)
+
+
 @router.get("/agents/catalog")
 async def agent_catalog(
     request: Request,
@@ -181,6 +186,11 @@ async def agent_catalog(
 @router.get("/agents/{aid}")
 async def agent_detail(aid: UUID, request: Request, user: Reader):
     return await services(request).agents.get(user.tenant, aid)
+
+
+@router.get("/agents/{aid}/conversations/counts")
+async def agent_conversation_counts(aid: UUID, request: Request, user: Reader):
+    return await services(request).conversations.agent_counts(user.tenant, str(aid))
 
 
 @router.get("/agents/{aid}/conversations")
@@ -400,8 +410,21 @@ async def search(
 
 
 @router.get("/conversations")
-async def conversations(request: Request, user: Reader, offset: Annotated[int, Query(ge=0)] = 0):
-    return await services(request).conversations.list(user.tenant, offset=offset)
+async def conversations(
+    request: Request,
+    user: Reader,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    agent_id: UUID | None = None,
+    status: Literal["all", "bot", "waiting", "human", "closed"] = "all",
+):
+    return await services(request).conversations.list_paginated(
+        user.tenant,
+        page,
+        page_size,
+        agent_id=str(agent_id) if agent_id else None,
+        status=status,
+    )
 
 
 @router.post("/conversations", status_code=201)
