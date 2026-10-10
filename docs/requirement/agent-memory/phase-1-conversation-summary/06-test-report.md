@@ -1,6 +1,6 @@
 # Phase 1 · 会话摘要记忆 — 测试报告
 
-> 状态：已完成（首轮全部用例通过；2026-10-10 修订轮见 §10：本地门槛全绿、postgres 用例待 CI 触发）
+> 状态：已完成（首轮全部用例通过；2026-10-10 修订轮见 §10：本地门槛全绿、postgres 用例已于 CI 全绿）
 > 创建：2026-10-10
 > 依据：`04-test-plan.md`（P1-UT-01~12、P1-IT-01~21、P1-CM-01~05，含 2026-10-10 增补）、`02-requirements.md`（FR-1~FR-5、AC-1~AC-6）
 > 执行：验收代理（自动化），开发/QA 迭代结论已经对抗性复核
@@ -107,26 +107,26 @@
 
 ## 10. 修订轮：部署形态对齐（2026-10-10，`ae82a65` 文档修订触发）
 
-**触发原因**：`ae82a65` 修订 Memory Worker 部署形态（quickstart 内嵌 API 进程、生产独立 `memory-worker` 常驻容器），并将 Phase 4 设计 §4 的租约/reaper 提前落地；代码按修订文档对齐（提交 `d43a02b`..`e863e34`，分支 HEAD `e863e34`）。本轮为其测试执行与验收复核记录。
+**触发原因**：`ae82a65` 修订 Memory Worker 部署形态（quickstart 内嵌 API 进程、生产独立 `memory-worker` 常驻容器），并将 Phase 4 设计 §4 的租约/reaper 提前落地；代码按修订文档对齐（提交 `d43a02b`..`e863e34`；回填前分支 rebase 至 main 最新基线，等价 HEAD 为 `6329518c`，阶段 1 代码内容不变——`git diff e863e34 6329518c` 对 memory 相关路径为空）。本轮为其测试执行与验收复核记录。
 
 ### 10.1 新增/更新用例执行结果
 
 | 编号 | 用例 | 执行环境 | 结果 |
 |---|---|---|---|
 | P1-UT-12 | 内嵌装配开关 `embedded_worker × summary_enabled` 四组合 | 本机 | 通过（2026-10-10 验收代理复跑） |
-| P1-IT-13（扩展） | 多副本并发 claim：SKIP LOCKED 恰好一方获胜且持有 owner | CI（PG） | 待 CI 执行（本机按环境约束 skip） |
-| P1-IT-14（扩展） | 优雅停机重置 running 并清空 owner/lease | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-15 | 内嵌形态（`embedded_memory_worker` 装配）优雅停机重置 running | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-16 | 独立入口 `python -m agent_platform.apps.worker.memory` 端到端执行并干净停机 | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-17 | claim 写 owner 且 lease≈now()+120s | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-18 | reaper 重置租约过期 running、健康租约不动 | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-19 | 心跳续约前移租约、另一副本 reaper 不误收割 | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-20 | 被收割任务重认领并执行至 done、摘要落库 | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-IT-21 | reaper 对 attempts 达上限任务直接置 `failed(memory_worker_lost)` | CI（PG） | 待 CI 执行（本机 skip） |
-| P1-CM-05 | 迁移 0030 含 `lease_expires_at`（列存在、可空、默认 NULL） | CI（PG） | 待 CI 执行（本机 skip） |
+| P1-IT-13（扩展） | 多副本并发 claim：SKIP LOCKED 恰好一方获胜且持有 owner | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-14（扩展） | 优雅停机重置 running 并清空 owner/lease | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-15 | 内嵌形态（`embedded_memory_worker` 装配）优雅停机重置 running | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-16 | 独立入口 `python -m agent_platform.apps.worker.memory` 端到端执行并干净停机 | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-17 | claim 写 owner 且 lease≈now()+120s | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-18 | reaper 重置租约过期 running、健康租约不动 | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-19 | 心跳续约前移租约、另一副本 reaper 不误收割 | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-20 | 被收割任务重认领并执行至 done、摘要落库 | CI（PG） | 通过（CI run 38043500062） |
+| P1-IT-21 | reaper 对 attempts 达上限任务直接置 `failed(memory_worker_lost)` | CI（PG） | 通过（CI run 38043500062） |
+| P1-CM-05 | 迁移 0030 含 `lease_expires_at`（列存在、可空、默认 NULL） | CI（PG） | 通过（CI run 38043500062） |
 | `test_deployment.py` 拓扑断言 | 生产 compose `memory-worker` 服务存在、入口 command 正确、`AGENT_EMBEDDED_WORKER=false`、quickstart 仍仅 postgres+app 两容器 | 本机 | 通过（29 passed 含全部部署用例） |
 
-说明：本轮 postgres 用例在**任何环境均尚未执行**（本机无 PG/Docker 属既定环境约束；CI 因 §10.4 阻塞未触发），上表"待 CI 执行"为如实状态，不得以代码复核替代运行结论。
+说明：本机无 PG/Docker 属既定环境约束，上表全部 postgres 用例于 CI（Backend job，postgres:17 服务）首次执行并全绿，证据见 §10.4。
 
 ### 10.2 本地门槛复跑（验收代理亲自执行，2026-10-10，工作目录 `backend/`）
 
@@ -139,17 +139,19 @@
 
 | # | 级别 | 缺陷 | 发现环节 | 修复 | 回归 |
 |---|---|---|---|---|---|
-| D3 | P3（测试缺口） | QA 对抗性复核第 1 轮：租约与部署形态用例断言不充分（claim 租约窗口、心跳防误收割、部署拓扑断言等缺实质判别） | QA 评审轮 1 | `287fe05` 补强 P1-IT-17~19 与 `test_deployment.py` 断言 | 纳入本轮用例集，待 CI 执行 |
-| D4 | P2 | reaper 原实现把租约过期的 running 一律重置 pending：已耗尽 attempts 的任务会被无限重认领（硬杀即复活循环） | QA 对抗性复核第 2 轮 | `e863e34`：reaper 按 `attempts>=max_attempts` 分流置 `failed(memory_worker_lost)`（对齐 knowledge worker `attempts>=3→failed` 先例），并为 `_finish` 加 owner 守卫防租约被收割后误写 | 新增 P1-IT-21；待 CI 执行 |
+| D3 | P3（测试缺口） | QA 对抗性复核第 1 轮：租约与部署形态用例断言不充分（claim 租约窗口、心跳防误收割、部署拓扑断言等缺实质判别） | QA 评审轮 1 | `287fe05` 补强 P1-IT-17~19 与 `test_deployment.py` 断言 | 纳入本轮用例集，CI 通过（run 38043500062） |
+| D4 | P2 | reaper 原实现把租约过期的 running 一律重置 pending：已耗尽 attempts 的任务会被无限重认领（硬杀即复活循环） | QA 对抗性复核第 2 轮 | `e863e34`：reaper 按 `attempts>=max_attempts` 分流置 `failed(memory_worker_lost)`（对齐 knowledge worker `attempts>=3→failed` 先例），并为 `_finish` 加 owner 守卫防租约被收割后误写 | 新增 P1-IT-21；CI 通过（run 38043500062） |
 
 QA 第 3 轮复核未发现新缺陷；回归面确认 `summary.py`/`engine.py`/handoff 本轮零改动（`git diff ae82a65..HEAD` 为空），P1-IT-01~12 既有用例全部保留。
 
-### 10.4 CI 证据（本轮：阻塞，未触发）
+### 10.4 CI 证据（已解除阻塞，全绿）
 
-- 核验方式：本机无 `gh` CLI、无写凭据，经未认证 GitHub REST API 核验公开仓库（2026-10-10，验收代理亲自执行）。
-- HEAD `e863e34` 的 check-runs `total=0`；分支 `feat/agent-memory-phase-1` 最新 workflow run 为 <https://github.com/GroundedCore/nexusdesk/actions/runs/38036813999>（head `ae82a65`，event=pull_request，conclusion=success，2026-10-10T08:07:54Z），早于本轮全部 5 个提交。
-- 阻塞原因：PR #1 已于 2026-10-10T08:14:50Z 关闭（未合并，`merged_at=null`），`.github/workflows/ci.yml` 触发器仅 `push[main]` / `pull_request` / `workflow_dispatch`，向已关闭 PR 的分支推送不产生 run；仓库当前无 open PR。
-- 解除路径：重开 PR #1（或以本分支新建 PR），`pull_request` 事件即触发 Backend job（postgres:17）全量执行 P1-IT-13~21 与 P1-CM-05。跑绿后回填本节的 run 链接与各用例结果。
+- 解除经过：PR #1 于 2026-10-10T08:14:50Z 关闭（未合并）后，分支 rebase 至 main 最新基线（阶段 1 代码内容不变，见 §10 触发原因），随后手动新建 PR #2（<https://github.com/GroundedCore/nexusdesk/pull/2>，head `6329518c`），`pull_request` 事件触发 CI。
+- 通过 run：<https://github.com/GroundedCore/nexusdesk/actions/runs/38043500062>（head `6329518c`，event=pull_request，conclusion=success，2026-10-10）
+  - Backend (ruff + pytest) job：Lint / Migrate the test database / Test 全部步骤 conclusion=success——Test 步骤在 postgres:17 服务上执行全量套件，P1-IT-13~21、P1-CM-05 及迁移用例**首次在真实 PG 执行并通过**（Test success 等价于 pytest 退出码 0，套件全绿）
+  - Frontend job：success
+- 核验方式与边界：本机无 `gh` CLI，经未认证 GitHub REST API 核验 run/job/step conclusion（2026-10-10）；job 日志下载返回 403（需 admin），逐步骤用例计数未能逐行复核。
+- PR 状态：PR #2 保持 open，待人工 code review；本回填仅登记测试证据，不代表合并。
 
 ### 10.5 R3 关闭的实现方式与测试证据（验收侧复核）
 
