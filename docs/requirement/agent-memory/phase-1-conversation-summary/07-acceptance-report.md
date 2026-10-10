@@ -59,7 +59,7 @@
 |---|---|---|---|---|
 | L1 | P2 | FR-1 要求摘要输出 ≤500 字；实现（prompt 指令与硬截断）按 `summary_max_output_chars=1000` 字符执行（`settings.py:61`）。注入侧 800 tokens 预算兜底，成本与上下文安全不受影响，仅摘要可能偏长、滚动信息密度低于预期 | 产品负责人：确认收紧默认值至 500，或修订需求口径并签字 | 上线前 |
 | L2 | P3 | 无 Agent 绑定的 legacy 会话每次截断产生一个不可重试的 `failed(no_chat_profile)` 任务，`memory_tasks` 失败行随轮次累积（符合降级语义，但存在表膨胀与失败噪音） | 研发负责人：Phase 2 决策——投递时跳过无绑定会话，或引入租户默认 profile | Phase 2 启动前 |
-| L3 | P3 | 硬杀（kill -9 等非优雅停机）的 MemoryWorker 持有的 running 任务不会被重置（无 lease/reaper）；优雅停机路径已被 P1-IT-14 覆盖 | 研发负责人：列入 Phase 4 治理（reaper）；多副本部署前必须解决 | Phase 4 |
+| L3 | P3 | 硬杀（kill -9 等非优雅停机）的 MemoryWorker 持有的 running 任务不会被重置（无 lease/reaper）；优雅停机路径已被 P1-IT-14 覆盖 | 研发负责人：lease/reaper 随 memory-worker 独立容器落地实施（部署形态 2026-10-10 修订为生产独立容器、可多副本伸缩，见 `03-technical-design.md` §核心流程3；设计见 `../../phase-4-governance/03-technical-design.md`）；**生产多副本部署的前置项** | 随 memory-worker 独立容器落地 |
 | L4 | pending_env | A2 坐席工作台 UI 验收未执行（后端证据已就绪）；另 FR-5 的 `summary.queued` 事件前端控制台是否渲染未在本阶段范围 | 产品负责人 + 坐席代表（A2/UAT）；前端负责人（事件渲染确认） | 前端联调环境就绪后 1 周内 |
 | L5 | 待生产验证 | 指标 1、2 及 §4 所列生产复核抽查 | 研发负责人出具测量数据，产品负责人判定 | 上线后 2 周内 |
 
