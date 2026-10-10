@@ -42,7 +42,9 @@ class DemoModel:
                     }
                 ],
             )
-        if "查询演示" in str(messages[-1].content):
+        # Never emit a tool call the caller did not offer: summary-style chats
+        # pass no tools, and quoting an earlier demo reply must not change that.
+        if "查询演示" in str(messages[-1].content) and "demo_order_lookup" in self.available:
             return AIMessage(
                 content="",
                 tool_calls=[

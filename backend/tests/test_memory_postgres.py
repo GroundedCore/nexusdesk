@@ -170,7 +170,8 @@ async def test_p1_it_02_summary_rolls_forward_with_previous_summary(platform):
     settings.history_turns = 1
     agent, _ = await create_agent(client)
     conv = await make_conversation(client, agent)
-    gateway = stub_memory(services, settings, RecordingGateway("摘要一", "摘要二"))
+    gateway = RecordingGateway("摘要一", "摘要二")
+    stub_memory(services, settings, gateway)
     await send_and_run(client, services, settings, conv["id"], "第1轮 订单号 A123")
     await send_and_run(client, services, settings, conv["id"], "第2轮")
     assert await services.memory_worker.run_once() is True
