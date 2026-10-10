@@ -48,6 +48,15 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
+The first build compiles the frontend, which is slow. To skip it, pull the prebuilt image instead:
+
+```bash
+NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
+  docker compose -f deploy/quickstart/compose.yaml up -d
+```
+
+The image is published to both [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) and [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) with identical contents, so pick whichever your network prefers. GHCR public packages carry no per-IP pull quota; Docker Hub is easier to search and share but rate-limits anonymous pulls, which a shared egress IP (corporate NAT, shared CI runner) can exhaust.
+
 Open **https://localhost:8080**, then open `sample-support` in the conversation workbench:
 
 - Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.

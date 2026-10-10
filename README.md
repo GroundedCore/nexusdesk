@@ -48,6 +48,15 @@ sh nexusdesk quickstart
 .\nexusdesk.ps1 quickstart
 ```
 
+首次构建要编译前端，较慢。不想本地构建可以直接拉预构建镜像：
+
+```bash
+NEXUSDESK_IMAGE_REGISTRY=docker.io/groundedcore/ NEXUSDESK_VERSION=latest \
+  docker compose -f deploy/quickstart/compose.yaml up -d
+```
+
+镜像同时发布到 [GHCR](https://github.com/GroundedCore/nexusdesk/pkgs/container/nexusdesk-quickstart) 和 [Docker Hub](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart)，内容一致，按你的网络选一个。GHCR 的公开包没有按 IP 的拉取配额；Docker Hub 更方便搜索和分享，但对匿名拉取有限速，共用出口 IP 的场景（公司 NAT、共享 CI runner）可能撞上限。
+
 打开 **https://localhost:8080**，进入会话工作台的 `sample-support`：
 
 - 输入“发货需要多久？”体验知识问答。

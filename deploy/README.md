@@ -117,6 +117,9 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 
 `.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
 
+镜像随后由一个**独立的 `mirror` job** 搬到 Docker Hub（`docker.io/<namespace>/nexusdesk-quickstart`），不重新构建，用 `buildx imagetools create` 在注册表之间直传。它刻意独立于部署：Docker Hub 的 token 过期或服务抖动**不会让部署失败**，最坏只是这一个 job 变红，已成功的部署不受影响。若命名空间与登录账号不同（例如目标是组织），另外设仓库变量 `DOCKERHUB_NAMESPACE`，默认取 `DOCKERHUB_USERNAME`。
+
+
 自动部署会顺带把访问地址交给证书：`NEXUSDESK_TLS_HOSTS` 默认取 `DEPLOY_HOST`，也就是服务器实际被访问的那个地址；两者不一致时，用仓库变量 `NEXUSDESK_TLS_HOSTS` 覆盖（多个地址用英文逗号分隔）。少了这一步，证书只覆盖回环地址，用公网地址访问时浏览器会提示名称不匹配——注意这和"证书不受信任"是两条不同的警告，导入 `ca.crt` 只能消除后者。
 
 自动部署默认把端口绑定到 `0.0.0.0`（`NEXUSDESK_BIND`）。这意味着体验入口会直接对公网开放，请先用安全组/防火墙把 8080 限制到可信 IP。
@@ -145,9 +148,37 @@ postgres 镜像仍从 Docker Hub 拉取；服务器访问 Docker Hub 受限时�
 
 在 Settings → Secrets and variables → Actions 添加仓库级 secrets：`DEPLOY_HOST`、`DEPLOY_PORT`、`DEPLOY_USER`、`DEPLOY_SSH_KEY`（上面生成的私钥全文）。Actions 推送 GHCR 使用内置 `GITHUB_TOKEN`，无需额外配置。如需人工审批后再部署，可在 Settings → Environments 创建环境并在 workflow 的 job 上加 `environment:` 引用（引用不存在的环境会自动创建），将 secrets 迁移到环境作用域。
 
+推送到 Docker Hub 需要两项，缺任意一项时 `mirror` job 会被整体跳过（不报错）：
+
+| 名称 | 类型 | 值 |
+| --- | --- | --- |
+| `DOCKERHUB_USERNAME` | Variables | Docker Hub 用户名，**同时作为镜像命名空间** |
+| `DOCKERHUB_TOKEN` | Secrets | Docker Hub 的 access token，权限需含 **Read & Write**（用登录密码无效） |
+
+`DOCKERHUB_USERNAME` 放在 Variables 而不是 Secrets 是有原因的：job 级 `if` 读不到 secrets 上下文（只有 `github`、`needs`、`vars`、`inputs`），用户名不敏感，正好兼作开关。token 仍然只放 Secrets。要用命令行设置时，`gh secret set` 会交互式提示粘贴，凭据不进命令历史。
+
+
 回滚到历史版本：在服务器上执行 `NEXUSDESK_VERSION=<旧commit-sha> NEXUSDESK_IMAGE_REGISTRY=ghcr.io/<owner>/ docker compose -f deploy/quickstart/compose.yaml up -d`（注意数据库迁移不支持自动回滚；数据保存在 `postgres_data` 与 `app_data` 卷中，回滚镜像不会丢失数据）。
 
 ## 镜像与网络
+
+预构建的 quickstart 镜像发布在两个注册表，内容完全一致（同一个 index，连 attestation 一并复制）：
+
+| 注册表 | 地址 | 特点 |
+| --- | --- | --- |
+| GHCR | `ghcr.io/<owner>/nexusdesk-quickstart` | 公开包，**没有按 IP 的拉取配额** |
+| Docker Hub | `docker.io/<namespace>/nexusdesk-quickstart` | 便于搜索和分享，但匿名拉取**有限速**（按 IP 计），共用出口 IP 时可能撞上限 |
+
+只有 `quickstart` 目标发布。生产用的 `backend` / `web` 目标不推送到任何注册表，由使用者在本地构建。标签包含每个提交的 40 位 commit-sha，以及跟随最新构建的 `latest`。
+
+用预构建镜像启动（跳过本地构建前端）：
+
+```sh
+NEXUSDESK_IMAGE_REGISTRY=docker.io/<namespace>/ NEXUSDESK_VERSION=latest \
+  docker compose -f deploy/quickstart/compose.yaml up -d
+```
+
+注意 `NEXUSDESK_VERSION` **必须显式指定**：默认值是 `local`，那是本地构建用的标签，注册表上没有。
 
 Dockerfile 的 `quickstart`、`backend`、`web` 为三个构建目标，前端由 Node 构建后交给 Nginx，不运行 Vite 开发服务器。Python 使用 `uv.lock`，前端使用 `package-lock.json`。`.dockerignore` 排除密钥、环境配置、数据库目录和本地依赖。
 
