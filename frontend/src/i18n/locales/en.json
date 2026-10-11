@@ -1069,7 +1069,7 @@
   "平台可以先启动。请添加供应商连接和 Chat 模型，发布配置方案后绑定到 Agent，即可开始对话。": "You can start the platform now. Add a provider connection and a Chat model, publish a profile and bind it to an Agent to start chatting.",
   "开放平台接入方式": "Open platform access methods",
   "应用接入": "Application integration",
-  "通用消息接入": "Generic messaging",
+  "客服渠道": "Support channels",
   "接收客服消息，映射客户会话，并拉取 Agent 与人工回复。": "Receive customer messages, map conversations, and retrieve Agent and human replies.",
   "如何选择接入方式": "Choose an integration method",
   "自研网站、App 和企业系统调用 Agent，请使用“应用接入”。需要接入客服消息并衔接人工回复时，可使用通用消息协议。企微、飞书等原生渠道适配尚未提供。": "Use Application integration to call Agents from your website, app, or business system. Use the generic messaging protocol for customer service messages and human replies. Native WeCom and Feishu adapters are not yet available.",

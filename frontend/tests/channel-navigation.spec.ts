@@ -28,7 +28,7 @@ for (const role of ['admin', 'viewer']) {
     await page.goto('/#/channels');
     await expect(page).toHaveURL(/#\/open-platform\/channels$/);
     await expect(page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '渠道接入', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: '通用消息接入', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: '客服渠道', exact: true })).toHaveAttribute('aria-selected', 'true');
     expect(requests.some(path => path.includes('/applications/channels'))).toBe(false);
     if (role === 'viewer') {
       await expect(page.getByRole('button', { name: '创建渠道', exact: true })).toBeDisabled();
@@ -42,9 +42,9 @@ for (const role of ['admin', 'viewer']) {
     await expect(page).toHaveURL(/#\/open-platform$/);
     await expect(page.getByRole('heading', { name: '企业应用', exact: true })).toBeVisible();
     await page.goBack();
-    await expect(page.getByRole('tab', { name: '通用消息接入', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: '客服渠道', exact: true })).toHaveAttribute('aria-selected', 'true');
     await page.reload();
-    await expect(page.getByRole('heading', { name: '通用消息接入', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '客服渠道', exact: true })).toBeVisible();
     expect(errors).toEqual([]);
   });
 }

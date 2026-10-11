@@ -91,10 +91,10 @@ export function OpenPlatformPage(props:{route:string;onNavigate:(path:string)=>v
     <Tabs aria-label={t('开放平台接入方式')} activeKey={identity ? 'identity' : channels ? 'channels' : 'applications'} onChange={key=>props.onNavigate(key === 'identity' ? '/open-platform/identity' : key === 'channels' ? '/open-platform/channels' : '/open-platform')} items={[
       {key:'applications',label:t('应用接入')},
       {key:'identity',label:t('企业身份与 SSO')},
-      {key:'channels',label:t('通用消息接入')},
+      {key:'channels',label:t('客服渠道')},
     ]}/>
     {identity ? <IdentityPage back={()=>props.onNavigate('/open-platform')}/> : channels ? <>
-      <div className="op-heading"><div><h2>{t('通用消息接入')}</h2><p>{t('接收客服消息，映射客户会话，并拉取 Agent 与人工回复。')}</p></div></div>
+      <div className="op-heading"><div><h2>{t('客服渠道')}</h2><p>{t('接收客服消息，映射客户会话，并拉取 Agent 与人工回复。')}</p></div></div>
       <Alert showIcon type="info" title={t('如何选择接入方式')} description={t('自研网站、App 和企业系统调用 Agent，请使用“应用接入”。需要接入客服消息并衔接人工回复时，可使用通用消息协议。企微、飞书等原生渠道适配尚未提供。')}/>
       <ChannelsPage/>
     </> : <ApplicationWorkspace {...props}/>}
