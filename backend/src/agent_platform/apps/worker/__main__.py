@@ -5,8 +5,12 @@ from agent_platform.settings import Settings
 
 
 async def main():
-    async with runtime_services(Settings()) as services:
-        await services.worker.serve()
+    settings = Settings()
+    async with runtime_services(settings) as services:
+        try:
+            await services.worker.serve()
+        finally:
+            services.worker.stop()
 
 
 if __name__ == "__main__":

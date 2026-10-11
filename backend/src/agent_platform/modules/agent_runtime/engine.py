@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langgraph.graph import END, START, StateGraph
 
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
+from agent_platform.modules.memory.summary import render_injection
 
 
 class RunState(TypedDict):
@@ -144,9 +145,14 @@ class RuntimeEngine:
             "signatures": signatures,
         }
 
-    async def run(self, message, history, emit):
+    async def run(self, message, history, emit, summary=None):
         messages: list[BaseMessage] = [SystemMessage(content=self.settings.system_prompt)]
         kept = history[-self.settings.history_turns * 2 :] if self.settings.history_turns else []
+        if summary and self.settings.summary_enabled:
+            # Rolling summary of everything the sliding window dropped. It sits
+            # between the system prompt and the kept history; an empty summary
+            # (or the kill switch) keeps the message sequence exactly as before.
+            messages.append(SystemMessage(content=render_injection(summary)))
         for item in kept:
             messages.append(
                 HumanMessage(content=item["content"])
@@ -190,6 +196,11 @@ class RuntimeEngine:
                 ),
             },
         ]
-        return result["output"], new_history[
-            -self.settings.history_turns * 2 :
-        ] if self.settings.history_turns else []
+        final = (
+            new_history[-self.settings.history_turns * 2 :] if self.settings.history_turns else []
+        )
+        # Messages that fell out of the window this run; finish() feeds them to
+        # the rolling-summary task queue. They always come from the old history,
+        # never from the just-finished turn.
+        dropped = new_history[: len(new_history) - len(final)]
+        return result["output"], final, dropped

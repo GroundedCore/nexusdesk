@@ -158,17 +158,30 @@ def test_deployment_topologies_and_no_secret_copy():
     # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
     assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
     assert "ports" not in quick["services"]["postgres"]
-    assert set(prod["services"]) == {"migrate", "api", "web", "runtime-worker", "knowledge-worker"}
-    for name in ("api", "runtime-worker", "knowledge-worker"):
+    assert set(prod["services"]) == {
+        "migrate",
+        "api",
+        "web",
+        "runtime-worker",
+        "knowledge-worker",
+        "memory-worker",
+    }
+    for name in ("api", "runtime-worker", "knowledge-worker", "memory-worker"):
         assert prod["services"][name]["environment"]["AGENT_EMBEDDED_WORKER"] == "false"
         assert (
             prod["services"][name]["depends_on"]["migrate"]["condition"]
             == "service_completed_successfully"
         )
+    # The memory worker is a standalone claim loop reusing the backend image.
+    assert prod["services"]["memory-worker"]["command"] == [
+        "python",
+        "-m",
+        "agent_platform.apps.worker.memory",
+    ]
     assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text()
     # Quickstart loads the industry case set; production stays clean unless opted in.
     assert quick["services"]["app"]["environment"]["AGENT_SEED_INDUSTRIES"] == "true"
-    for name in ("api", "runtime-worker", "knowledge-worker"):
+    for name in ("api", "runtime-worker", "knowledge-worker", "memory-worker"):
         assert "AGENT_SEED_INDUSTRIES" not in prod["services"][name]["environment"]
     assert "AGENT_SEED_INDUSTRIES=false" in (ROOT / "deploy/production/.env.example").read_text()
     quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()

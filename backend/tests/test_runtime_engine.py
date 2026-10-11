@@ -59,9 +59,10 @@ async def test_reasoning_survives_history_without_becoming_visible_output():
 
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(model, ToolGateway(client, []), Settings())
-        first, history = await engine.run("first question", [], emit)
+        first, history, dropped = await engine.run("first question", [], emit)
         assert first == "first answer" and history[-1]["reasoning_content"] == "first trace"
-        second, history = await engine.run("second question", history, emit)
+        assert dropped == []
+        second, history, _ = await engine.run("second question", history, emit)
     assert model.seen[1][2].additional_kwargs["reasoning_content"] == "first trace"
     assert second == "second answer" and history[-1]["reasoning_content"] == "second trace"
     assert "first trace" not in json.dumps(events) and "second trace" not in json.dumps(events)
@@ -82,7 +83,7 @@ async def test_model_tool_observe_reply_and_history():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(http)) as client:
         engine = RuntimeEngine(model, ToolGateway(client, [spec()]), Settings())
-        answer, history = await engine.run("查订单", [], emit)
+        answer, history, _ = await engine.run("查订单", [], emit)
     assert answer == "订单已发货"
     assert history[-1] == {"role": "assistant", "content": answer}
     assert requests[0].url.params["order_id"] == "A"
@@ -232,4 +233,4 @@ async def test_graph_run_states_do_not_leak_between_conversations():
     async with httpx.AsyncClient() as client:
         engine = RuntimeEngine(EchoModel(), ToolGateway(client, []), Settings())
         results = await asyncio.gather(*(engine.run(str(i), [], ignore_event) for i in range(20)))
-    assert [answer for answer, _ in results] == [str(i) for i in range(20)]
+    assert [answer for answer, _, _ in results] == [str(i) for i in range(20)]

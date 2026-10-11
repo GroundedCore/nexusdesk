@@ -6,7 +6,7 @@
 
 ## 1. 测试范围与原则
 
-**范围**：会话滚动摘要的生成、存储、注入；人工接管摘要改造；租户级/Agent 级开关；摘要任务表（`memory_tasks`）与 Memory Worker。
+**范围**：会话滚动摘要的生成、存储、注入；人工接管摘要改造；租户级/Agent 级开关；摘要任务表（`memory_tasks`）与 Memory Worker（含部署形态与租约/reaper，2026-10-10 修订后补充 P1-UT-12、P1-IT-15~21、P1-CM-05）。
 
 **原则**：
 
@@ -43,6 +43,7 @@
 | P1-UT-09 | profile 选择：Agent 绑定 / 租户默认 / 无 profile | 分别命中绑定 profile、默认 profile、任务 failed(`no_chat_profile`) | 技术设计 §模型调用路径 |
 | P1-UT-10 | 失败重试：第 1 次失败 | status 回 pending，`run_after` 为指数退避后的将来时刻，attempts=1 | FR-1 |
 | P1-UT-11 | 失败兜底：`attempts` 达 `max_attempts`（2） | 任务置 failed，记审计事件，不再重试 | FR-1 |
+| P1-UT-12 | 内嵌装配开关：`embedded_worker` × `summary_enabled` 四种组合 | 仅 `embedded_worker=true` 且 `summary_enabled=true` 时装配 MemoryWorker，其余返回 None | 技术设计 §核心流程3（2026-10-10 修订） |
 
 ## 4. 集成测试
 
@@ -60,8 +61,15 @@
 | P1-IT-10 | Agent 级 `summary_enabled=false`（草稿→发布→回滚） | 该 Agent 不产生摘要；其他 Agent 不受影响；回滚后配置恢复 | AC-3/FR-4 |
 | P1-IT-11 | 会话已关闭/删除时摘要任务执行 | 跳过写库（revision 检查），不报错 | 技术设计 §核心流程2 |
 | P1-IT-12 | evaluation 模块跑 case | 空历史下摘要注入为空，评估结果与接入前一致 | FR-2 |
-| P1-IT-13 | 并发 claim | 两个并发 claim 模拟仅一个成功，任务不被重复执行 | memory_tasks 模式 |
-| P1-IT-14 | 优雅停机 | Worker 收 shutdown 时 running 任务重置 pending，不丢任务 | 技术设计 §核心流程3 |
+| P1-IT-13 | 并发 claim（多副本安全） | 两个并发 claim 模拟仅一个成功（SKIP LOCKED），任务不被重复执行；获胜方持有 owner 与租约 | memory_tasks 模式 |
+| P1-IT-14 | 优雅停机 | Worker 收 shutdown 时 running 任务重置 pending（owner/lease 清空），不丢任务 | 技术设计 §核心流程3 |
+| P1-IT-15 | 内嵌形态优雅停机 | API 内嵌装配（`embedded_memory_worker`）的 Worker 停机同样重置 running 为 pending | 技术设计 §核心流程3（2026-10-10 修订） |
+| P1-IT-16 | 独立入口可运行 | `python -m agent_platform.apps.worker.memory` 以独立进程认领并执行任务；取消后无 running 残留 | 技术设计 §核心流程3（2026-10-10 修订） |
+| P1-IT-17 | claim 写租约 | claim 后行含 owner 与 `lease_expires_at ≈ now()+120s` | Phase 4 设计 §4 租约/reaper（提前落地） |
+| P1-IT-18 | reaper 重置过期租约 | claim 前置 reaper：租约过期的 running 重置 pending（owner/lease 清空）；租约未过期的 running 不动 | Phase 4 设计 §4 租约/reaper（提前落地） |
+| P1-IT-19 | 心跳续约防误收割 | 执行期间心跳续约（租约前移）；另一副本的 reaper 不收割持有有效租约的 running 任务 | Phase 4 设计 §4 租约/reaper（提前落地） |
+| P1-IT-20 | 收割后重认领执行到 done | 硬杀副本的 running 任务（租约过期）被 reaper 重置后，由新副本重新认领并执行到 done（owner/lease 清空、摘要落库） | Phase 4 设计 §4 租约/reaper（提前落地） |
+| P1-IT-21 | reaper 对 poison task 置 failed | 租约过期且 attempts 已达上限的 running 任务被 reaper 直接置 failed（`error='memory_worker_lost'`，owner/lease 清空）；同批未达上限的任务重置 pending 并被重认领 | Phase 4 设计 §4 租约/reaper（知识库 attempts 上限先例） |
 
 ## 5. 通用核对项（本阶段适用）
 
@@ -71,6 +79,7 @@
 | P1-CM-02 | 配置加载 | `summary_enabled` / `summary_max_input_messages` / `summary_max_output_chars` 默认值正确、环境变量覆盖生效 |
 | P1-CM-03 | 审计与观测 | 每次摘要生成有审计事件（conversation_id、输入消息数、前后长度、模型用量）；run trace 可见"摘要已更新"标记；审计 payload 无敏感信息 |
 | P1-CM-04 | 租户隔离 | 摘要存会话行，继承 `tenant_id` 隔离；跨租户会话 ID 访问摘要不可达 |
+| P1-CM-05 | 迁移 `0030` 含租约列 | `memory_tasks.lease_expires_at` 列存在、可空、默认 NULL |
 
 ## 6. 回归范围
 

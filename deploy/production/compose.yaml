@@ -47,6 +47,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+  memory-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: [python, -m, agent_platform.apps.worker.memory]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
   web:
     image: nexusdesk-web:${NEXUSDESK_VERSION:-local}
     build:

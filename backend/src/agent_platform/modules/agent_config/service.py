@@ -25,6 +25,9 @@ class AgentConfig(BaseModel):
     model_profile_id: UUID | None = None
     model_profile_version: int | None = Field(default=None, ge=1)
     reply_language: Literal["auto", "zh-CN", "zh-TW", "en", "hi"] = "auto"
+    # Agent-level switch for the rolling conversation summary. Flows through the
+    # existing draft/publish/snapshot chain, so no table change is needed.
+    summary_enabled: bool = True
 
     @model_validator(mode="after")
     def model_binding(self):
