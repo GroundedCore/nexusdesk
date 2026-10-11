@@ -495,7 +495,7 @@ async def test_evaluation_never_executes_live_business_tools(platform):
     assert report.status_code == 200, report.text
     assert report.json()["results"][0]["passed"] is True
     assert (await client.get("/api/v1/tickets")).json() == []
-    assert (await client.get("/api/v1/conversations")).json() == []
+    assert (await client.get("/api/v1/conversations")).json()["items"] == []
 
 
 async def test_metrics_and_audit_reflect_real_operations(platform):
