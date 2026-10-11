@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { LanguageSelector } from '../i18n/LanguageSelector';
 import { t } from '../i18n/index';
 import { lazy, Suspense, useState, useRef, useEffect } from 'react';
-import { Layout, Button, Avatar, Tag, Spin, Alert as AntAlert } from 'antd';
+import { Layout, Button, Avatar, Tag, Spin } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined, BarChartOutlined, MessageOutlined, FileTextOutlined, CustomerServiceOutlined, RobotOutlined, ApiOutlined, BookOutlined, ToolOutlined, SafetyOutlined, ExperimentOutlined, LineChartOutlined } from '@ant-design/icons';
 import { type PlatformModule, type Summary, setToken, token } from '../shared/api/client';
 import { Alert, Badge, Field, Panel, Role, useResource } from '../shared/components/ui';
@@ -58,7 +58,6 @@ function Shell({ reset }: {
         role: string;
         tenant: string;
     }>('/me');
-    const deployment = useResource<{quickstart: boolean}>('/deployment');
     const [collapsed, setCollapsed] = useState(false);
     const [agentWorkspace, setAgentWorkspace] = useState(false);
     const previousCollapsed = useRef(false);
@@ -91,7 +90,7 @@ function Shell({ reset }: {
     <div className="console-brand"><div className="brand-wordmark">nexus<span>desk</span><small>{t("智能客服平台")}</small></div></div>
     <nav aria-label={t("主导航")} className="console-nav">{groups.map(group => <div key={group.title}><div className="nav-group-title">{group.title}</div>{group.ids.map(id => <Button block type="text" icon={icons[id]} className={page === id ? 'nav-selected' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => navigate(id)}>{sections().find(item => item[0] === id)?.[1]}</Button>)}</div>)}</nav>
   </Layout.Sider><Layout className="console-body"><Layout.Header className="console-header"><div className="console-heading"><Button type="text" aria-label={collapsed ? t("展开导航") : t("收起导航")} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={() => setCollapsed(!collapsed)}/><div><h1>{sections().find(([id]) => id === page)?.[1]}</h1><p className="page-description">{page === 'tickets' ? t("跟进每一个问题，记录每一次处理。") : page === 'overview' ? t("了解服务运行情况，管理你的客服工作空间。") : page === 'models' ? t("统一接入模型服务，管理模型能力与发布方案。") : t("管理服务配置与协作，让客户问题得到持续跟进。")}</p></div></div><div className="console-header-actions"><LanguageSelector /><AccountMenu access={() => navigate('access')}><Button type="text" aria-label={t("账户菜单")}><Avatar size="small">{role[0].toUpperCase()}</Avatar>{me.data?.tenant || t("未连接")}<Tag>{role}</Tag></Button></AccountMenu></div></Layout.Header>
-    <Layout.Content className="console-content">{deployment.data?.quickstart && <AntAlert style={{marginBottom: 20}} showIcon type="warning" title="nexusdesk · 快速体验模式" description={<span>默认使用模拟模型，仅供本机体验，不代表真实模型回答或业务处理结果。打开“会话工作台”的 sample-support，尝试“发货需要多久？”或“帮我创建工单”。</span>} />}{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pages[page]}</Suspense></div></Layout.Content>
+    <Layout.Content className="console-content">{me.error && page !== 'access' && <div role="alert" className="alert error">{t("无法连接后端或读取权限：")}{me.error} <Button onClick={() => me.refresh()}>{t("重试")}</Button> <Button onClick={() => navigate('access')}>{t("设置凭据")}</Button></div>}<div className={`page module-page module-${page}`} key={page}><Suspense fallback={<Spin tip={t("正在加载页面")}><div style={{ minHeight: 160 }}/></Spin>}>{pages[page]}</Suspense></div></Layout.Content>
   </Layout></Layout></Role.Provider>;
 }
 export function App() { useTranslation(); const [revision, setRevision] = useState(0); return <AuthBoundary key={revision}><Shell reset={() => setRevision(v => v + 1)}/></AuthBoundary>; }
