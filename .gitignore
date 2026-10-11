@@ -26,3 +26,8 @@ scripts/
 .run-logs/
 # Local agent artifacts (memory, plan drafts, probe scripts)
 .workbuddy/
+
+# Local-only compose overrides: these carry real middleware credentials as
+# `${VAR:-default}` fallbacks and must never reach a public repository.
+*.local.yaml
+work/
