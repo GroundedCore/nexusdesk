@@ -1,8 +1,8 @@
 # NexusDesk
 
-简体中文 · [English](README.en.md)
+简体中文 · [English](README.en.md) · [官网](https://www.aidet.top)
 
-[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml)
+[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
 
 **基于 AI Agent 的智能客服与服务协同平台。**
 
@@ -10,7 +10,7 @@ NexusDesk 将知识检索、业务工具调用、人工协同与工单处理连�
 
 基于 Python、LangGraph 与 React 构建，支持两容器快速体验，以及使用独立 Worker 和外部中间件的生产部署。
 
-[快速体验](#快速体验) · [生产部署](#生产部署) · [文档导航](#文档导航) · [参与贡献](#参与贡献)
+[快速体验](#快速体验) · [生产部署](#生产部署) · [文档导航](#文档导航) · [参与贡献](#参与贡献) · [官网](https://www.aidet.top)
 
 > 项目处于持续开发阶段，已具备可运行的客服核心流程。功能现状与规划分别说明，部署验证范围见 [验证记录](deploy/validation-20260923.md)。
 
@@ -161,6 +161,16 @@ flowchart LR
 - 改进开发文档、自动化验证及部署体验。
 
 各模块的设计与实施范围见 [模块规划索引](docs/architecture.md)。
+
+## 商务合作
+
+社区版采用 Apache-2.0，可免费自托管。以下场景欢迎与我们联系：
+
+- **私有化部署与实施** —— 内网与信创环境，以及与既有业务系统的对接
+- **企业版授权** —— 合规治理、多租户运营、高可用部署
+- **行业加速包** —— 开箱即用的行业客服 Agent 配置与评测集
+
+联系方式与报价见 [官网咨询](https://www.aidet.top/contact.html)。不确定是否适合，也欢迎先聊一次。
 
 ## 参与贡献
 

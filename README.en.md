@@ -1,8 +1,8 @@
 # NexusDesk
 
-[简体中文](README.md) · English
+[简体中文](README.md) · English · [Website](https://www.aidet.top/en/index.html)
 
-[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml)
+[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
 
 **An AI agent-powered platform for intelligent customer service and service collaboration.**
 
@@ -10,7 +10,7 @@ NexusDesk connects knowledge retrieval, business tool invocation, human collabor
 
 Built with Python, LangGraph, and React. It supports a two-container quickstart experience as well as production deployments that use dedicated workers and external middleware.
 
-[Quickstart](#quickstart) · [Production deployment](#production-deployment) · [Documentation](#documentation) · [Contributing](#contributing)
+[Quickstart](#quickstart) · [Production deployment](#production-deployment) · [Documentation](#documentation) · [Contributing](#contributing) · [Website](https://www.aidet.top/en/index.html)
 
 > The project is under continuous development and already has a working core customer service flow. Current capabilities and planned work are described separately; the scope of deployment validation is recorded in the [validation record](deploy/validation-20260923.md).
 
@@ -165,6 +165,16 @@ The following are ongoing improvement directions. They do not represent delivere
 - Improve developer documentation, automated validation, and the deployment experience.
 
 Each module's design and implementation scope is described in the [module planning index](docs/architecture.md).
+
+## Business enquiries
+
+The community edition is Apache-2.0 and free to self-host. We are glad to hear from you about:
+
+- **Private deployment and implementation** — intranet and regulated environments, and integration with existing business systems
+- **Enterprise licensing** — compliance governance, multi-tenant operations, high-availability deployment
+- **Industry accelerators** — ready-to-import agent configurations and evaluation sets for specific industries
+
+Contact options and pricing are on the [website](https://www.aidet.top/en/contact.html). If you are not sure whether this fits your case, we are happy to simply talk it through.
 
 ## Contributing
 
