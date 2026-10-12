@@ -54,7 +54,9 @@ class PlatformServices:
         self.customer = CustomerService(
             engine, repository, self.agents, self.handoffs, settings, snapshot
         )
-        self.channels = ChannelService(engine, self.conversations, self.customer, self.agents)
+        self.channels = ChannelService(
+            engine, self.conversations, self.customer, self.agents, settings
+        )
         self.observability = ObservabilityService(engine)
         self.open_platform = OpenPlatform(self)
         self.evaluation = None

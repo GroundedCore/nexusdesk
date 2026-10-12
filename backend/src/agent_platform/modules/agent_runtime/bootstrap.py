@@ -80,6 +80,7 @@ async def runtime_services(settings):
             runtime = RuntimeEngine(model, tools, settings)
             repository = RunRepository(engine)
             platform = PlatformServices(engine, repository, settings, snapshot, specs, model_client)
+            platform.channels.bind_listener(listener)
             factory = RuntimeFactory(runtime, platform, client, settings, tools.limit)
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             yield RuntimeServices(

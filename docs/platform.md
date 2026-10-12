@@ -40,7 +40,7 @@ npm run dev
 | 会话管理 | 消息账本、Agent 绑定、自动/等待/人工/关闭状态 | 会话工作台 |
 | 客服业务 | 工单提案、确认/拒绝、幂等创建和工单状态流转 | 会话工作台 / 服务工单 |
 | 人工协同 | 转接、摘要、接管、人工回复、恢复 Agent、关闭 | 人工协同 |
-| 渠道接入 | 独立令牌、通用 Webhook、消息去重、会话映射、回复拉取 | 渠道接入 |
+| 渠道接入 | 独立令牌/HMAC、通用 Webhook、企业微信/微信客服/飞书/钉钉/Slack/Telegram/Discord 原生适配、消息去重、会话映射、回复拉取与主动投递 | 渠道接入 |
 | 策略权限 | admin/operator/viewer、部署租户隔离、工具及知识范围、预算 | 访问与策略 |
 | 观测审计 | 24 小时统计、运行记录、事件回放、管理操作审计 | 运行与审计 |
 | 质量评测 | 用例、模拟业务工具、输出/工具断言、按版本保存报告 | 质量评测 |
@@ -94,20 +94,27 @@ API 注册工具只能使用 `AGENT_TOOL_ALLOWED_HOSTS` 中的固定主机。参
 | `/handoffs`、`/handoffs/{id}/transition` | 队列、接管/恢复/关闭 |
 | `/actions/{id}/decision`、`/tickets`、`/tickets/{id}` | 确认动作、工单维护 |
 | `/channels`、`/channels/{id}` | 渠道配置、启停 |
-| `/ingress/channels/{id}/messages`、`/replies` | 渠道消息及回复 |
+| `/channels/providers`、`/channels/{id}/config` | 可用 provider 清单、原生渠道配置 |
+| `/channels/{id}/deliveries`、`/deliveries/{did}/retry` | 主动投递记录、失败重试 |
+| `/ingress/channels/{id}/messages`、`/replies` | 通用渠道消息及回复 |
+| `/ingress/channels/{id}/webhook/{provider}` | 原生渠道回调（验签、解密、标准化、出站投递） |
 | `/observability/summary`、`/runs` | 统计及运行列表 |
 | `/audit` | 管理员操作审计 |
 | `/agents/{id}/evaluation-cases`、`/evaluation-reports`、`/evaluate` | 用例、报告、运行评测 |
 
 表中相邻缩写路径继承同一资源前缀，例如发布为 `/agents/{id}/publish`，统计运行列表为 `/observability/runs`。原 `/runs` Runtime 接口仍可用，会遵守绑定 Agent 及人工接管状态。
 
-渠道是可信服务端之间的接口：创建时返回一次明文 token，数据库只保存摘要。调用方传 `X-Channel-Token`，提交：
+渠道分为通用协议与原生适配两类。
+
+通用渠道（`provider=generic_webhook`）是可信服务端之间的接口：创建时返回一次明文 token，数据库只保存摘要。调用方传 `X-Channel-Token`，提交：
 
 ```json
 {"message_id":"upstream-unique-id","session_id":"customer-session","text":"什么时候发货？"}
 ```
 
-同一渠道相同 message_id 和内容返回已处理结果；同一 ID 不同内容返回 409。通过 `/replies?session_id=customer-session&after=0` 拉取回复并推进游标。渠道令牌不应发给终端客户；上游服务负责认证客户并保证 session_id 所有权。当前没有主动推送到第三方平台。
+同一渠道相同 message_id 和内容返回已处理结果；同一 ID 不同内容返回 409。通过 `/replies?session_id=customer-session&after=0` 拉取回复并推进游标。渠道令牌不应发给终端客户；上游服务负责认证客户并保证 session_id 所有权。
+
+原生渠道（`provider` 为 `wecom`/`wecom_kf`/`feishu`/`dingtalk`/`slack`/`telegram`/`discord`）通过 `/ingress/channels/{id}/webhook/{provider}` 接收平台回调。适配器负责验签/解密、challenge 应答与入站消息标准化，无需渠道 Token；回调只写入 `channel_inbound_events`（入站 outbox，按渠道+消息号去重）并立即返回平台 ACK，随后由入站 worker 建立会话并执行 Agent，避免 Slack/Discord 等 3 秒 ACK 时限导致平台重试或禁用订阅。Agent 与人工回复由出站投递 worker 主动推送到对应平台，投递记录与失败重试可通过 `/channels/{id}/deliveries` 及其 `retry` 接口查看与重放。渠道按渠道行解析租户，支持多租户。平台侧凭据在服务端加密保存，不回显、不入日志。
 
 ## 验证和当前边界
 
@@ -131,7 +138,7 @@ npm run test:e2e
 - 采用服务令牌角色和部署级租户，未实现员工账号、SSO、细粒度组织授权及渠道客户身份系统。
 - 知识库为 PostgreSQL 关键词检索，支持中英文；尚无向量召回、重排、PDF/OCR、异步大文件管线。
 - 工单写入本地 PostgreSQL；外部 CRM、订单、退款等写入接口仍需专用适配器。普通 API 调用不需要沙箱，未来开放代码执行再独立设计沙箱。
-- 渠道为通用协议，微信/企业微信等原生签名验证、回调和主动回复适配尚未接入。
+- 渠道内置企业微信/微信客服/飞书/钉钉/Slack/Telegram/Discord 原生适配，均具备验签/解密、回调标准化与主动出站投递；Discord 采用应用交互端点（普通消息需 Gateway），其余平台（微信公众号、Teams 等）仍需按需新增适配器。
 - SSE 是阶段事件，不是逐 Token 输出。Worker 失联会把运行标为失败，不支持 LangGraph 节点检查点续跑。
 - 评测最多 20 个用例、单次总预算 60 秒，当前通过请求执行，进程内限流；尚无分布式评测队列和模型效果基准。
 - 列表采用有限条数，管理台暂无全量搜索/分页、数据保留清理及附件对象存储。耗时与并发仍需针对实际模型和业务 API 压测；本次验证不代表生产容量承诺。

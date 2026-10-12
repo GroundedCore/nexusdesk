@@ -42,6 +42,11 @@ def validate_production(settings):
         raise RuntimeError(
             "Production requires production environment and separate workers"
         )
+    if settings.channel_worker_embedded:
+        raise RuntimeError(
+            "Production requires the standalone channel worker; "
+            "leave AGENT_EMBEDDED_CHANNEL_WORKER unset or false"
+        )
     for name in (
         "database_url",
         "api_token",

@@ -23,6 +23,9 @@ async def platform():
         database_url=url,
         tenant_id="test-" + str(uuid4()),
         embedded_worker=False,
+        # The runtime worker is driven manually in tests, but the channel
+        # inbound/outbound loops must run in-process or nothing consumes them.
+        embedded_channel_worker=True,
         model_backend="demo",
         tools_file=None,
         api_token=SecretStr("platform-admin"),
@@ -42,6 +45,10 @@ async def platform():
             try:
                 yield client, app.state.runtime, settings
             finally:
+                # Stop channel loops before deleting their rows. Otherwise an
+                # in-flight inbound event can insert a receipt after cleanup
+                # has removed receipts but before channels are deleted.
+                await app.state.runtime.platform.channels.stop()
                 engine = app.state.runtime.repository.engine
                 async with engine.begin() as c:
                     await c.execute(

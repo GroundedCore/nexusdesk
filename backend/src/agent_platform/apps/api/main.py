@@ -44,12 +44,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 asyncio.create_task(memory_worker.serve()) if memory_worker else None
             )
             webhook_task = asyncio.create_task(services.platform.open_platform.webhooks.serve())
+            # Channel inbound/outbound loops follow settings.channel_worker_embedded:
+            # quickstart/development run them in-process; production runs the
+            # standalone channel-worker container instead.
+            channel_task = (
+                asyncio.create_task(services.platform.channels.serve_deliveries())
+                if settings.channel_worker_embedded
+                else None
+            )
+            channel_inbound_task = (
+                asyncio.create_task(services.platform.channels.serve_inbound())
+                if settings.channel_worker_embedded
+                else None
+            )
             try:
                 yield
             finally:
                 services.platform.open_platform.webhooks.stopping.set()
                 webhook_task.cancel()
                 await asyncio.gather(webhook_task, return_exceptions=True)
+                if channel_task is not None:
+                    channel_task.cancel()
+                    await asyncio.gather(channel_task, return_exceptions=True)
+                if channel_inbound_task is not None:
+                    channel_inbound_task.cancel()
+                    await asyncio.gather(channel_inbound_task, return_exceptions=True)
+                await services.platform.channels.stop()
                 services.worker.stop()
                 if memory_worker:
                     memory_worker.stop()

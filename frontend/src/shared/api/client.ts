@@ -10,7 +10,47 @@ export interface Action { id: string; status: string; payload: { title: string; 
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
 export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
-export interface Channel { id: string; name: string; agent_id: string; enabled: boolean; token?: string }
+export interface ChannelField {
+  name: string;
+  label: string;
+  required?: boolean;
+  secret?: boolean;
+  type?: "text" | "select";
+  options?: { value: string; label: string }[];
+  default?: string;
+}
+export interface ChannelProvider {
+  id: string;
+  name: string;
+  description: string;
+  native: boolean;
+  config_fields: ChannelField[];
+  credential_fields: ChannelField[];
+}
+export interface Channel {
+  id: string;
+  name: string;
+  agent_id: string;
+  enabled: boolean;
+  provider: string;
+  config: Record<string, unknown>;
+  credentials_configured: boolean;
+  last_error_code?: string | null;
+  last_activity_at?: string | null;
+  token?: string | null;
+}
+export interface ChannelDelivery {
+  id: string;
+  message_id: string;
+  role: string;
+  status: string;
+  attempts: number;
+  http_status: number | null;
+  error_code: string | null;
+  next_attempt_at: string;
+  created_at: string;
+  updated_at: string;
+}
 export interface Document { id: string; title: string; content: string; current_version: number; enabled: boolean }
 export interface SearchResult { chunk_id: string; title: string; version: number; excerpt: string; score: number }
 export interface Summary { total: number; completed: number; failed: number; cancelled: number; running: number; queued: number; average_seconds: number | null; p95_seconds: number | null; tool_failures: number; tokens: number; ttfc?: { p50_ms: number | null; p95_ms: number | null; samples: number } }
