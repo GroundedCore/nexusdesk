@@ -9,9 +9,18 @@
 | 入口 | 适用场景 | 当前协议 |
 | --- | --- | --- |
 | 应用接入 | 自研网站、App、企业系统调用 Agent，管理授权、密钥、限流与集成 | `/openapi/v1` |
-| 客服渠道 | 外部客服消息映射到会话，经过客服路由处理并拉取 Agent、人工回复 | `/api/v1/ingress/channels/{id}/messages` 与 `replies` |
+| 客服渠道 | 外部客服消息映射到会话，经过客服路由处理并拉取或主动推送 Agent、人工回复 | `/api/v1/ingress/channels/{id}/messages`、`replies` 与 `/api/v1/ingress/channels/{id}/webhook/{provider}` |
 
-“客服渠道”（曾用名“通用消息接入”）由原“配置管理 → 渠道接入”迁入，旧页面地址 `#/channels` 自动转到 `#/open-platform/channels`。现有渠道 Token、HMAC、去重和接口保持有效；应用密钥与渠道 Token 不互通。企微、飞书等原生协议适配尚未实现。
+“客服渠道”（曾用名“通用消息接入”）由原“配置管理 → 渠道接入”迁入，旧页面地址 `#/channels` 自动转到 `#/open-platform/channels`。现有渠道 Token、HMAC、去重和 `/messages`、`/replies` 接口保持有效；应用密钥与渠道 Token 不互通。
+
+渠道按 `provider` 区分两类协议：
+
+- `generic_webhook`：保留原有通用协议，使用渠道 Token（可选叠加 HMAC-SHA256 验签），由上游服务主动调用 `/messages` 提交消息、调用 `/replies` 拉取回复。
+- 原生渠道：内置企业微信、微信客服、飞书、钉钉、Slack、Telegram、Discord 适配器。回调地址为 `/api/v1/ingress/channels/{id}/webhook/{provider}`，负责平台验签/解密、事件 challenge 应答、入站消息标准化，以及 Agent/人工回复的主动出站投递与失败重试。
+
+原生渠道回调采用入站 outbox：验签/标准化后写入 `channel_inbound_events` 并立即返回平台 ACK，由后台 worker 建会话、触发 Runtime；满足 Slack/Discord 等平台的 3 秒 ACK 要求，并让入站消息具备退避重试与死信能力。渠道按渠道行解析租户，支持多租户部署。
+
+原生渠道的凭据（CorpID、AppSecret、EncodingAESKey、AppKey、机器人 Webhook、Slack Signing Secret/Bot Token、Telegram Bot Token、Discord Public Key/Bot Token 等）由适配器在服务端加密保存，仅用于验签、解密和出站调用，不回显、不入日志。
 
 Webhook、调用日志和 SDK 文档仍属于具体应用，先进入“应用接入”选择应用后管理。此调整统一导航，不把两套会话语义当作相同接口：渠道经过客服路由，开放平台消息当前直接提交 Runtime。后续统一底层客服会话能力后再收敛通用协议，避免丢失人工协同能力。
 

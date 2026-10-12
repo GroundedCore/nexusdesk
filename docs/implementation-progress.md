@@ -11,7 +11,7 @@
 | conversation | 关闭/重开、状态版本、归属校验 | 完整筛选与游标 |
 | customer_service | 会话内工单查询、确认流程回归 | 外部业务适配 |
 | human_handoff | 员工凭证、本人权限、状态版本 | SSO、排班与 SLA |
-| channel | HMAC、轮换、防重复 | 具体渠道与出站回执 |
+| channel | HMAC、轮换、防重复、企业微信/微信客服/飞书/钉钉/Slack/Telegram/Discord 原生适配、出站投递与重试 | 更多平台适配、投递回执核对 |
 | knowledge | 任务、三种分片、Parser/S3/Milvus 适配 | 全格式/真实服务验收、大文档、混合召回 |
 | evaluation | Judge、相似度、硬规则分层 | 人工复核持久化及校准 |
 | observability | 调用关联、网关计量 | 游标、告警、指标导出 |

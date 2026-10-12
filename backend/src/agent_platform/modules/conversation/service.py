@@ -2,6 +2,8 @@ import json
 import logging
 from uuid import uuid4
 
+from agent_platform.integrations.channels.base import CHANNEL_WORK_CHANNEL, chunk_text
+from agent_platform.integrations.channels.registry import chunk_size_for
 from agent_platform.platform.persistence.store import (
     DomainError,
     audit,
@@ -16,17 +18,55 @@ logger = logging.getLogger(__name__)
 
 
 async def add_message(c, cid, role, content, run_id=None):
-    await execute(
+    result = await execute(
         c,
         """INSERT INTO conversation_messages(id,conversation_id,role,content,run_id)
-        VALUES(:id,:cid,:role,:content,:run)""",
+        VALUES(:id,:cid,:role,:content,:run) RETURNING id""",
         id=uuid4(),
         cid=cid,
         role=role,
         content=content,
         run=run_id,
     )
+    message_id = result.scalar_one()
+    if role != "user":
+        targets = await many(
+            c,
+            """SELECT cc.channel_id,cc.conversation_id,cc.target,ch.provider
+            FROM channel_conversations cc
+            JOIN channels ch ON ch.id=cc.channel_id
+            WHERE cc.conversation_id=:cid AND ch.enabled
+                AND ch.provider <> 'generic_webhook'""",
+            cid=cid,
+        )
+        for target in targets:
+            parts = chunk_text(content, chunk_size_for(target["provider"]))
+            for seq, part in enumerate(parts):
+                await execute(
+                    c,
+                    """INSERT INTO channel_deliveries(
+                        id,channel_id,conversation_id,message_id,role,content,target,seq
+                    ) VALUES(
+                        :delivery_id,:channel_id,:conversation_id,:message_id,:role,:content,
+                        CAST(:target AS jsonb),:seq
+                    )
+                    ON CONFLICT(channel_id,message_id,seq) DO NOTHING""",
+                    delivery_id=uuid4(),
+                    channel_id=target["channel_id"],
+                    conversation_id=target["conversation_id"],
+                    message_id=message_id,
+                    role=role,
+                    content=part,
+                    target=json.dumps(target["target"]),
+                    seq=seq,
+                )
+        if targets:
+            # Transactional wakeup for the delivery worker; a spurious notify is harmless.
+            await execute(
+                c, "SELECT pg_notify(:ch, :kind)", ch=CHANNEL_WORK_CHANNEL, kind="delivery"
+            )
     await execute(c, "UPDATE runtime_conversations SET updated_at=now() WHERE id=:id", id=cid)
+    return message_id
 
 
 class ConversationService:

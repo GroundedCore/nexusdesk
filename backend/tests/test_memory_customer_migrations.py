@@ -1,4 +1,4 @@
-"""P2-CM-01: migration 0031 is online-safe and reversible.
+"""P2-CM-01: migration 0035 is online-safe and reversible.
 
 It only adds three new tables plus a nullable ``customer_id`` column on
 ``runtime_conversations``; legacy rows keep ``customer_id = NULL``.
@@ -85,7 +85,7 @@ def test_customer_memory_migration_preserves_existing_conversations(migration_da
     ] == customer
     # Downgrade removes the column and all three tables.
     query(url, "UPDATE runtime_conversations SET customer_id=NULL WHERE id=$1", cid)
-    migrate(url, "0030_conversation_summary", "downgrade")
+    migrate(url, "0034_channel_access_tokens", "downgrade")
     assert not query(
         url,
         "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename IN ('memory_customers','memory_identities','memory_items')",

@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -105,6 +106,14 @@ class ChannelInput(NameInput):
     signing_secret_ref: str | None = Field(
         default=None, pattern=r"^AGENT_CHANNEL_SECRET_[A-Z0-9_]+$"
     )
+    provider: str = Field(default="generic_webhook", pattern=r"^[a-z][a-z0-9_]{0,39}$")
+    config: dict[str, object] = Field(default_factory=dict)
+    credentials: dict[str, str] = Field(default_factory=dict)
+
+
+class ChannelUpdateInput(Input):
+    config: dict[str, object] | None = None
+    credentials: dict[str, str] | None = None
 
 
 def services(request):
@@ -509,10 +518,35 @@ async def channels(request: Request, user: Reader):
     return await services(request).channels.list(user.tenant)
 
 
+@router.get("/channels/providers")
+async def channel_providers(request: Request, user: Reader):
+    return services(request).channels.providers()
+
+
 @router.post("/channels", status_code=201)
 async def channel(body: ChannelInput, request: Request, user: Admin):
     return await services(request).channels.create(
-        user.tenant, user.actor, body.name, body.agent_id, body.signing_secret_ref
+        user.tenant,
+        user.actor,
+        body.name,
+        body.agent_id,
+        body.signing_secret_ref,
+        provider=body.provider,
+        config=body.config,
+        credentials=body.credentials,
+    )
+
+
+@router.post("/channels/{cid}/config")
+async def configure_channel(
+    cid: UUID, body: ChannelUpdateInput, request: Request, user: Admin
+):
+    return await services(request).channels.update(
+        user.tenant,
+        user.actor,
+        cid,
+        config=body.config,
+        credentials=body.credentials,
     )
 
 
@@ -524,6 +558,25 @@ async def toggle_channel(cid: UUID, body: EnabledInput, request: Request, user: 
 @router.post("/channels/{cid}/rotate-token")
 async def rotate_channel(cid: UUID, request: Request, user: Admin):
     return await services(request).channels.rotate(user.tenant, user.actor, cid)
+
+
+@router.get("/channels/{cid}/deliveries")
+async def channel_deliveries(
+    cid: UUID,
+    request: Request,
+    user: Reader,
+    page: int = Query(default=1, ge=1),
+):
+    return await services(request).channels.deliveries(user.tenant, cid, page)
+
+
+@router.post("/channels/{cid}/deliveries/{did}/retry")
+async def retry_channel_delivery(
+    cid: UUID, did: UUID, request: Request, user: Admin
+):
+    return await services(request).channels.retry_delivery(
+        user.tenant, user.actor, cid, did
+    )
 
 
 @ingress.post("/ingress/channels/{cid}/messages", status_code=202)
@@ -550,6 +603,34 @@ async def channel_replies(
     after: Annotated[int, Query(ge=0)] = 0,
 ):
     return await services(request).channels.replies(cid, x_channel_token, session_id, after)
+
+
+@ingress.api_route(
+    "/ingress/channels/{cid}/webhook/{provider}",
+    methods=["GET", "POST"],
+    status_code=200,
+)
+async def channel_webhook(cid: UUID, provider: str, request: Request):
+    result = await services(request).channels.webhook(
+        cid,
+        provider,
+        await request.body(),
+        dict(request.query_params),
+        dict(request.headers),
+    )
+    if result.ack is not None:
+        return JSONResponse(result.ack)
+    if result.challenge is not None:
+        if provider == "feishu":
+            return JSONResponse({"challenge": str(result.challenge)})
+        return PlainTextResponse(str(result.challenge))
+    if provider in {"wecom", "wecom_kf", "slack"}:
+        return PlainTextResponse("")
+    if provider == "dingtalk":
+        return JSONResponse({"success": True})
+    if provider == "feishu":
+        return JSONResponse({"code": 0, "msg": "success"})
+    return JSONResponse({"ok": True})
 
 
 @router.get("/observability/summary")

@@ -7,8 +7,8 @@ to match every existing table (the design doc's UUID was idealised).
 
 from alembic import op
 
-revision = "0031_memory_customers"
-down_revision = "0030_conversation_summary"
+revision = "0035_memory_customers"
+down_revision = "0034_channel_access_tokens"
 branch_labels = None
 depends_on = None
 

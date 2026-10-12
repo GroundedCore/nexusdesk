@@ -14,9 +14,10 @@ for (const role of ['admin', 'viewer']) {
       if (path === '/me') return route.fulfill({ json: { role, tenant: 'test' } });
       if (path === '/deployment') return route.fulfill({ json: { quickstart: false } });
       if (path === '/agents' || path === '/open-platform/agents') return route.fulfill({ json: [{ id: agentId, name: '客服 Agent', published_version: 1 }] });
+      if (path === '/channels/providers') return route.fulfill({ json: [{ id: 'generic_webhook', name: '通用 Webhook', description: '', native: false, config_fields: [], credential_fields: [] }] });
       if (path === '/channels') {
         if (req.method() === 'POST') {
-          expect(req.postDataJSON()).toEqual({ name: '客服消息入口', agent_id: agentId, signing_secret_ref: null });
+          expect(req.postDataJSON()).toEqual({ name: '客服消息入口', agent_id: agentId, provider: 'generic_webhook', signing_secret_ref: null });
           const channel = { id: '33333333-3333-4333-8333-333333333333', name: '客服消息入口', agent_id: agentId, enabled: true };
           channels = [channel];
           return route.fulfill({ status: 201, json: { ...channel, token: 'test-channel-token' } });

@@ -52,6 +52,7 @@ def test_production_rejects_demo_and_placeholder_credentials():
         {"model_backend": "demo"},
         {"api_token": "REPLACE_ME"},
         {"embedded_worker": True},
+        {"embedded_channel_worker": True},
     ):
         with pytest.raises(RuntimeError):
             bootstrap.validate_production(settings.model_copy(update=changes))
@@ -163,15 +164,21 @@ def test_deployment_topologies_and_no_secret_copy():
         "api",
         "web",
         "runtime-worker",
+        "channel-worker",
         "knowledge-worker",
         "memory-worker",
     }
-    for name in ("api", "runtime-worker", "knowledge-worker", "memory-worker"):
+    for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert prod["services"][name]["environment"]["AGENT_EMBEDDED_WORKER"] == "false"
         assert (
             prod["services"][name]["depends_on"]["migrate"]["condition"]
             == "service_completed_successfully"
         )
+    assert prod["services"]["channel-worker"]["command"] == [
+        "python",
+        "-m",
+        "agent_platform.apps.worker.channel",
+    ]
     # The memory worker is a standalone claim loop reusing the backend image.
     assert prod["services"]["memory-worker"]["command"] == [
         "python",
@@ -181,7 +188,7 @@ def test_deployment_topologies_and_no_secret_copy():
     assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text()
     # Quickstart loads the industry case set; production stays clean unless opted in.
     assert quick["services"]["app"]["environment"]["AGENT_SEED_INDUSTRIES"] == "true"
-    for name in ("api", "runtime-worker", "knowledge-worker", "memory-worker"):
+    for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert "AGENT_SEED_INDUSTRIES" not in prod["services"][name]["environment"]
     assert "AGENT_SEED_INDUSTRIES=false" in (ROOT / "deploy/production/.env.example").read_text()
     quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()

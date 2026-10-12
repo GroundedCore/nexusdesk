@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     tool_allowed_hosts: list[str] = ["127.0.0.1", "localhost"]
     tenant_id: str = "local"
     embedded_worker: bool = True
+    # Channel inbound/outbound loops default to following ``embedded_worker``:
+    # quickstart/development embed them in the API process, production runs the
+    # standalone ``agent_platform.apps.worker.channel`` container. Set this
+    # explicitly to decouple the two.
+    embedded_channel_worker: bool | None = None
     # Deployments seed the default administrator password and force a change on the
     # first login. Development can set AGENT_REQUIRE_PASSWORD_CHANGE=false to skip
     # that gate; leave it enabled for any shared or production deployment.
@@ -36,6 +41,14 @@ class Settings(BaseSettings):
     # validator below sees it, so the plain "host,1.2.3.4" form works.
     tls_hosts: Annotated[list[str], NoDecode] = []
     worker_concurrency: int = Field(default=8, ge=1, le=256)
+    # Channel inbound/outbound claim loops per process. Rows are claimed with
+    # FOR UPDATE SKIP LOCKED, so raising this only adds parallelism; it never
+    # double-processes a row.
+    channel_worker_concurrency: int = Field(default=4, ge=1, le=64)
+    # Fallback poll for the channel loops when a LISTEN/NOTIFY wakeup is missed
+    # or the listener is unavailable. New work wakes immediately; this bounds
+    # how long a retry whose next_attempt_at has arrived can wait.
+    channel_worker_poll_seconds: float = Field(default=5.0, gt=0, le=120)
     queue_capacity: int = Field(default=200, ge=1)
     tenant_capacity: int = Field(default=50, ge=1)
     queue_timeout_seconds: int = Field(default=120, ge=1)
@@ -159,3 +172,17 @@ class Settings(BaseSettings):
         if self.model_backend == "openai" and (not self.model_name or not self.model_api_key):
             raise ValueError("openai backend requires model_name and model_api_key")
         return self
+
+    @property
+    def channel_worker_embedded(self) -> bool:
+        """Whether channel inbound/outbound loops run inside the API process.
+
+        Falls back to ``embedded_worker`` so quickstart/development keep the
+        loops in-process and production (``AGENT_EMBEDDED_WORKER=false``) hands
+        them to the standalone channel-worker container. Setting
+        ``AGENT_EMBEDDED_CHANNEL_WORKER`` explicitly overrides either way.
+        """
+
+        if self.embedded_channel_worker is not None:
+            return self.embedded_channel_worker
+        return self.embedded_worker

@@ -1268,5 +1268,20 @@
   "拒绝后这条记忆将被删除": "Rejecting deletes this memory",
   "客户画像与偏好": "Customer profile & preferences",
   "查看客户记忆": "View customer memory",
-  "正在加载": "Loading"
+  "正在加载": "Loading",
+  "（可选）": " (optional)",
+  "暂无投递记录": "No deliveries yet",
+  "凭据未配置": "Credentials not configured",
+  "配置凭据": "Configure credentials",
+  "收起投递记录": "Hide delivery history",
+  "查看投递记录": "View delivery history",
+  "创建渠道接入业务系统": "Connect a channel to your business system",
+  "渠道已创建，请完成平台回调配置": "Channel created. Complete the platform callback configuration.",
+  "渠道类型": "Channel type",
+  "渠道配置已保存": "Channel configuration saved",
+  "渠道配置信息": "Channel configuration",
+  "请在对应聊天软件中配置以下回调地址：": "Configure the following callback URL in the corresponding chat platform:",
+  "接入说明": "Integration guide",
+  "渠道使用平台原生签名校验，Agent 和人工回复会通过出站投递 Worker 主动发送。": "Native channels verify requests with platform signatures. Agent and human replies are sent proactively by the outbound delivery worker.",
+  "通用 Webhook 使用渠道 Token；回复通过 replies 接口按 seq 拉取。": "Generic webhooks use a channel token; replies are retrieved through the replies API by seq."
 }

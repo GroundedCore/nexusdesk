@@ -40,6 +40,13 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+  channel-worker:
+    <<: *backend
+    restart: unless-stopped
+    command: [python, -m, agent_platform.apps.worker.channel]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
   knowledge-worker:
     <<: *backend
     restart: unless-stopped
