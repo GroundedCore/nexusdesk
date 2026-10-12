@@ -4,12 +4,15 @@ from uuid import uuid4
 
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
+from agent_platform.modules.memory.service import render_memory_injection
 
 logger = logging.getLogger(__name__)
 
 
 class RuntimeWorker:
-    def __init__(self, repository, runtime, settings, fingerprint, notifier=None, listener=None):
+    def __init__(
+        self, repository, runtime, settings, fingerprint, notifier=None, listener=None, memory=None
+    ):
         self.repository, self.runtime, self.settings = repository, runtime, settings
         self.fingerprint = fingerprint
         self.owner = uuid4()
@@ -17,6 +20,7 @@ class RuntimeWorker:
         self.stopping = asyncio.Event()
         self.notifier = notifier
         self.listener = listener
+        self.memory = memory
 
     async def _execute(self, row):
         monitor_failure = False
@@ -55,7 +59,13 @@ class RuntimeWorker:
                 else self.runtime
             )
             execution = asyncio.create_task(
-                runtime.run(row["input"], row["history"], emit, summary=row.get("summary"))
+                runtime.run(
+                    row["input"],
+                    row["history"],
+                    emit,
+                    summary=row.get("summary"),
+                    customer_memory=await self._customer_memory(row),
+                )
             )
             watcher = asyncio.create_task(monitor(execution))
             output, history, dropped = await execution
@@ -91,19 +101,55 @@ class RuntimeWorker:
             if execution:
                 await asyncio.gather(execution, return_exceptions=True)
 
-    def _memory_context(self, row, dropped):
-        """Summary-task dispatch gates: dropped messages plus both kill switches.
+    async def _customer_memory(self, row):
+        """Fetch and render the customer's active memories for injection (FR-3).
 
-        The global switch and the per-agent switch from the run's config
-        snapshot are ANDed; a legacy run without an agent snapshot follows the
-        global switch only.
+        Gated by the per-agent ``memory_enabled`` switch (a legacy run without
+        an agent snapshot defaults to on). A lookup failure must never break
+        the run itself, so it degrades to no injection with a warning.
         """
-        if not dropped or not self.settings.summary_enabled:
+        if self.memory is None or not row.get("customer_id"):
             return None
         agent = (row["config"].get("agent") or {}).get("config") or {}
-        if not agent.get("summary_enabled", True):
+        if not agent.get("memory_enabled", True):
             return None
-        return {"dropped": dropped, "max_input": self.settings.summary_max_input_messages}
+        try:
+            items = await self.memory.injection_items(
+                row["tenant_id"], row["customer_id"], self.settings.memory_inject_max_items
+            )
+        except Exception:
+            logger.warning(
+                "Customer memory lookup failed for run %s; continuing without it",
+                row["id"],
+                exc_info=True,
+            )
+            return None
+        return render_memory_injection(items)
+
+    def _memory_context(self, row, dropped):
+        """Memory-task dispatch gates for finish().
+
+        Summary: dropped messages plus both kill switches (global and per-agent
+        from the run's config snapshot; a legacy run without a snapshot follows
+        the global switch only). Extraction (Phase 2): global switch AND
+        per-agent ``memory_write``, with example agents kept out of the
+        pipeline entirely; the customer link and playground exclusion are
+        checked in ``finish()`` where the conversation row is locked.
+        """
+        agent = row["config"].get("agent") or {}
+        config = agent.get("config") or {}
+        memory = {}
+        if dropped and self.settings.summary_enabled and config.get("summary_enabled", True):
+            memory["dropped"] = dropped
+            memory["max_input"] = self.settings.summary_max_input_messages
+        if (
+            self.settings.memory_extract_enabled
+            and config.get("memory_write", True)
+            and not agent.get("is_example")
+        ):
+            memory["extract"] = True
+            memory["extract_debounce"] = self.settings.memory_extract_debounce_seconds
+        return memory or None
 
     def _done(self, task):
         self.tasks.discard(task)

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const modelSections = ['connections', 'models', 'profiles', 'playground', 'logs', 'monitor', 'access_keys', 'sensitive_words', 'alert_rules', 'quota'] as const;
 export type ModelSection = typeof modelSections[number];
-const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'open-platform', 'evaluation', 'observability', 'access'];
+const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access'];
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);
-  return path.startsWith('/agents') && query ? `${path}?${new URLSearchParams(query)}` : path;
+  return (path.startsWith('/agents') || path.startsWith('/conversations')) && query ? `${path}?${new URLSearchParams(query)}` : path;
 }
 function normalizePath(value: string) {
   const path = value.replace(/^#/, '').replace(/\/+$/, '') || '/overview';
@@ -15,6 +15,8 @@ function normalizePath(value: string) {
   if (path === '/open-platform/channels') return path;
   if (pages.some(page => path === `/${page}`)) return path;
   if (/^\/conversations\/[0-9a-zA-Z_-]+$/.test(path)) return path;
+  if (path === '/memory/pending') return path;
+  if (/^\/memory\/customers\/[0-9a-zA-Z_-]+$/.test(path)) return path;
   if (/^\/tools\/[0-9a-f-]+\/(apis|versions|calls)$/.test(path)) return path;
   if (/^\/open-platform\/[0-9a-f-]+\/(settings|integrations|embed|webhook|keys|docs|debug|logs)$/.test(path)) return path;
   if (path === '/open-platform/identity') return path;

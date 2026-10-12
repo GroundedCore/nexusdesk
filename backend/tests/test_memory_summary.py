@@ -133,8 +133,13 @@ def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
     assert embedded_memory_worker(services, both_off) is None
     # Production form: the API process never assembles the loop.
     assert embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=False)) is None
-    # Feature switched off: nothing to run even in the embedded form.
-    assert embedded_memory_worker(services, Settings(_env_file=None, summary_enabled=False)) is None
+    # Feature switched off: nothing to run even in the embedded form. Since
+    # Phase 2 the loop serves both kinds, so both features must be off.
+    both_features_off = Settings(_env_file=None, summary_enabled=False, memory_extract_enabled=False)
+    assert embedded_memory_worker(services, both_features_off) is None
+    # Summary off but extraction on still assembles the loop (Phase 2).
+    extraction_only = Settings(_env_file=None, summary_enabled=False, memory_extract_enabled=True)
+    assert embedded_memory_worker(services, extraction_only) is not None
     # Quickstart/development form: embedded mode assembles the claim loop.
     worker = embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=True))
     assert isinstance(worker, MemoryWorker) and worker.stopping.is_set() is False

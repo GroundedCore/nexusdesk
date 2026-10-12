@@ -60,6 +60,21 @@ class Settings(BaseSettings):
     summary_max_input_messages: int = Field(default=40, ge=1, le=200)
     # 500 Chinese characters of summary prose is roughly 1000 characters.
     summary_max_output_chars: int = Field(default=1000, ge=100, le=8000)
+    # Customer profile/preference memory (Phase 2). Platform-wide kill switch
+    # for the write side: when off, no extraction task is dispatched and
+    # behaviour degrades exactly to Phase 1.
+    memory_extract_enabled: bool = True
+    # Recent messages feeding one extraction call.
+    memory_extract_recent_messages: int = Field(default=20, ge=1, le=100)
+    # Per-conversation extraction debounce: at most one task per window.
+    memory_extract_debounce_seconds: int = Field(default=300, ge=0, le=86400)
+    # Confidence routing: >=auto becomes active, >=pending waits for human
+    # confirmation, anything lower is dropped.
+    memory_confidence_auto: float = Field(default=0.8, ge=0, le=1)
+    memory_confidence_pending: float = Field(default=0.5, ge=0, le=1)
+    # Injection cap: at most this many active items enter the prompt (the
+    # 1000-token budget is a fixed module constant in memory.service).
+    memory_inject_max_items: int = Field(default=20, ge=1, le=100)
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None

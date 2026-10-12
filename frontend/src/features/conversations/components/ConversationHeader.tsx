@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Button, Space, Tooltip } from 'antd';
-import { CopyOutlined, CustomerServiceOutlined, ReloadOutlined, ToolOutlined, UnlockOutlined, LockOutlined } from '@ant-design/icons';
+import { CopyOutlined, CustomerServiceOutlined, IdcardOutlined, ReloadOutlined, ToolOutlined, UnlockOutlined, LockOutlined } from '@ant-design/icons';
 import { t, dateTime } from '../../../i18n';
 import { Badge } from '../../../shared/components/ui';
+import { CustomerMemoryDrawer } from '../../memory/CustomerMemoryDrawer';
 import type { Agent, ConversationDetail, Run } from '../../../shared/api/client';
 
 interface Props {
@@ -29,6 +30,7 @@ export function ConversationHeader({
   onHandoff,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   if (!detail) {
     return (
       <div className="c-chat-header">
@@ -57,6 +59,13 @@ export function ConversationHeader({
         <h3 title={detail.external_id}>{detail.external_id}</h3>
         <Badge value={detail.mode} />
         <div className="c-chat-actions">
+          {detail.customer_id && (
+            <Tooltip title={t('客户画像与偏好')}>
+              <Button icon={<IdcardOutlined aria-hidden />} onClick={() => setMemoryOpen(true)}>
+                {t('客户画像')}
+              </Button>
+            </Tooltip>
+          )}
           {detail.runs[0]?.id && (
             <Tooltip title={t('查看运行轨迹')}>
               <Button icon={<ToolOutlined aria-hidden />} disabled={actionBusy} onClick={() => onTrace(detail.runs[0].id)} />
@@ -89,6 +98,9 @@ export function ConversationHeader({
       </div>
       {detail.deleted_agent && (
         <p className="hint">「{detail.deleted_agent.name}」{t('已永久删除。历史对话与运行记录保留，此会话为只读。')}</p>
+      )}
+      {detail.customer_id && (
+        <CustomerMemoryDrawer customerId={detail.customer_id} open={memoryOpen} onClose={() => setMemoryOpen(false)} />
       )}
     </div>
   );

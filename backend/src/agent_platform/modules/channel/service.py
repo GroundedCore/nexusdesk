@@ -24,6 +24,16 @@ class IncomingMessage(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
 
 
+def session_id_hash(session_id):
+    """Shared hash for a channel session id.
+
+    The conversation external_id keeps its historical 32-char prefix; the
+    memory identity external_key uses the full digest (FR-1). Both derive from
+    this one function so the two can never drift apart (P2-UT-04).
+    """
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
 class ChannelService:
     def __init__(self, engine, conversations, customer, agents):
         self.engine, self.conversations, self.customer, self.agents = (
@@ -137,12 +147,7 @@ class ChannelService:
                     "run_id": prior["run_id"],
                     "duplicate": True,
                 }
-            external = (
-                "channel:"
-                + str(cid)
-                + ":"
-                + hashlib.sha256(body.session_id.encode()).hexdigest()[:32]
-            )
+            external = "channel:" + str(cid) + ":" + session_id_hash(body.session_id)[:32]
             conv = await one(
                 c,
                 "SELECT * FROM runtime_conversations WHERE tenant_id=:t AND external_id=:external",
@@ -151,7 +156,12 @@ class ChannelService:
             )
             if not conv:
                 conv = await self.conversations.create(
-                    channel["tenant_id"], "channel", external, channel["agent_id"], c
+                    channel["tenant_id"],
+                    "channel",
+                    external,
+                    channel["agent_id"],
+                    c,
+                    identity={"source": "channel", "external_key": session_id_hash(body.session_id)},
                 )
             result = await self.customer.send(
                 channel["tenant_id"], "channel", conv["id"], body.text, c
@@ -176,9 +186,7 @@ class ChannelService:
                 channel["token_hash"], hashlib.sha256(token.encode()).hexdigest()
             ):
                 raise DomainError("invalid_channel_token", 401)
-            external = (
-                "channel:" + str(cid) + ":" + hashlib.sha256(session_id.encode()).hexdigest()[:32]
-            )
+            external = "channel:" + str(cid) + ":" + session_id_hash(session_id)[:32]
             return await many(
                 c,
                 """SELECT m.seq,m.role,m.content,m.created_at FROM conversation_messages m

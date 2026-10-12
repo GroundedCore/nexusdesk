@@ -3,13 +3,13 @@ export interface AgentConfig { reply_language?: "auto"|"zh-CN"|"zh-TW"|"en"|"hi"
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }
 export interface Tool { revision?: number; published_version?: number; id: string; name: string; enabled: boolean; source: string; spec: Record<string, unknown> }
-export interface Conversation { deleted_agent?: { id: string; name: string; published_version: number | null } | null; source?: "business" | "playground"; last_message?: string | null; revision?: number; id: string; external_id: string; mode: string; agent_id: string | null; assigned_to: string | null; updated_at: string }
+export interface Conversation { deleted_agent?: { id: string; name: string; published_version: number | null } | null; source?: "business" | "playground"; last_message?: string | null; revision?: number; id: string; external_id: string; mode: string; agent_id: string | null; assigned_to: string | null; customer_id?: string | null; updated_at: string }
 export interface Run { id: string; conversation_id: string; status: string; error_code: string | null; created_at: string; output?: string; ttfc_ms?: number | null }
 export interface Message { id: string; seq: number; role: string; content: string; created_at: string; run_id?: string | null }
 export interface Action { id: string; status: string; payload: { title: string; description: string }; expires_at: string }
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
-export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
+export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; customer_id?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
 export interface Channel { id: string; name: string; agent_id: string; enabled: boolean; token?: string }
 export interface Document { id: string; title: string; content: string; current_version: number; enabled: boolean }
 export interface SearchResult { chunk_id: string; title: string; version: number; excerpt: string; score: number }
@@ -17,6 +17,15 @@ export interface Summary { total: number; completed: number; failed: number; can
 export interface EvaluationCase { id: string; name: string; spec: { input: string; expected_contains: string[] } }
 export interface EvaluationReport { id: string; agent_version: number; created_at: string; results: { status?:string; judge?:unknown;judge_error?:string;similarity?:unknown; name: string; passed: boolean; output: string; tools: string[]; error: string | null }[] }
 export interface Audit { id: number; actor: string; action: string; resource: string; created_at: string }
+
+// Phase 2 · customer entity + profile/preference memory (console API contract §5).
+export interface MemoryCustomer { id: string; external_keys: string[]; item_count: number; last_active_at: string | null; created_at: string }
+export interface MemoryCustomerPage { items: MemoryCustomer[]; total: number; page: number; page_size: number }
+export interface MemoryIdentity { id: string; source: string; external_key: string; created_at: string }
+export interface MemoryItem { id: string; type: string; key: string; content: string; confidence: number; status: string; source_type: string; source_ref: string | null; prev_content?: string | null; revision?: number; customer_id?: string; updated_at: string; created_at?: string }
+export interface MemoryCustomerDetail { id: string; created_at: string; identities: MemoryIdentity[]; items: MemoryItem[] }
+export interface MemoryPendingItem extends MemoryItem { customer_id: string; customer_external_keys?: string[] }
+export interface MemoryPendingPage { items: MemoryPendingItem[]; total: number; page: number; page_size: number }
 
 export function token() { return sessionStorage.getItem('agent-platform-token') || ''; }
 export function setToken(value: string) { if (value) sessionStorage.setItem('agent-platform-token', value); else sessionStorage.removeItem('agent-platform-token'); }

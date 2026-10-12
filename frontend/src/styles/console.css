@@ -23,3 +23,21 @@ html[lang="hi"] .agent-filter-row>strong { width: 52px; }
 /* A zero-width collapsed sidebar must not retain horizontal padding. */
 .console-sider.ant-layout-sider-collapsed{padding-inline:0;overflow:hidden;border:0}
 
+
+/* Phase 2 · 客户记忆管理 */
+.memory-workspace .ant-tabs-nav{margin-bottom:22px}
+.memory-workspace .ant-tabs-tab{padding:12px 0}
+.memory-workspace .ant-tabs-tab-active .ant-tabs-tab-btn{color:#202124;font-weight:600}
+.memory-workspace .ant-tabs-ink-bar{background:#5865f2}
+.memory-toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:20px}
+.memory-toolbar>.ant-typography{margin-left:auto;font-size:12px;color:#707584}
+.memory-search{max-width:360px}
+.memory-detail-header{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.memory-item-deleted{color:#a0a2ad;text-decoration:line-through}
+.memory-drawer-section{margin-bottom:24px}
+.memory-drawer-section h3{font-size:14px;font-weight:600;margin:0 0 12px;color:#353944}
+.memory-drawer-list{margin:0}
+.memory-drawer-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #f0f1f4}
+.memory-drawer-item dt{flex:0 0 auto}
+.memory-drawer-item dd{margin:0;overflow-wrap:anywhere}
+@media(max-width:640px){.memory-search{max-width:none;width:100%}.memory-toolbar>.ant-typography{margin-left:0}}
