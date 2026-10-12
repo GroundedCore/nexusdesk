@@ -1,6 +1,6 @@
 # Phase 2 · 客户实体 + 画像/偏好记忆 — 测试报告
 
-> 状态：进行中（本机全量验证含真实 PG 已完成，发现 1 个 P2 缺陷 D1 修复中；CI 首轮失败根因已定位=D1，待修复回归）
+> 状态：已完成（本机全量含真实 PG 全绿；CI 复跑全绿；D1 修复回归关闭；e2e baseline 对照确认零新增失败；出口准则逐条满足）
 > 创建：2026-10-12
 > 依据：`04-test-plan.md`（P2-UT-01~12、P2-IT-01~13、P2-API-01~06、P2-CM-01~04、§6 前端、§8 回归、§9 出口准则）、`02-requirements.md`（FR-1~FR-6、AC-1~AC-8）
 > 执行：QA 测试代理（自动化 + 对抗性代码复核），开发自报结果一律独立复跑验证
@@ -25,11 +25,12 @@
 | 本机 `uv run ruff check .`（合并后树 `fe12121`） | All checks passed | 附录 A-1 |
 | 本机 `uv run pytest -q`（无 PG，`fe12121`） | 155 passed, 208 skipped, 0 failed | 附录 A-2 |
 | 本机 Docker PG memory 全套（Phase 1+2 memory PG + 迁移） | 53 passed, 2 failed（=D1 的 api_04/api_05） | 附录 A-4 |
-| 本机 Docker PG 全量 `uv run pytest -q`（CI 复刻，空闲机器） | 进行中，结果回填 §9 | 附录 A-5 |
+| 本机 Docker PG 全量 `uv run pytest -q`（CI 复刻，修复提交 `5d0f3aa`，空闲机器单次完整跑批） | **362 passed, 1 skipped, 0 failed** | 附录 A-5 |
 | 前端 `npm run typecheck` / `check:i18n` / `build`（`fe12121`） | 全过（i18n 1285 keys × 4 语言；build 仅 chunk 体积警告） | 附录 B-1 |
 | Playwright `tests/memory.spec.ts` | 4 passed（§6 前端用例全绿） | 附录 B-2 |
 | Playwright 全量 e2e（合并树） | 43 passed, 28 failed（失败均为登录墙/真实后端类预存项，baseline 对照见 §8） | 附录 B-3 |
 | CI 首轮（run 38272790040，head `fe121215`） | Backend Test 步骤 failure（=D1）；Migrate 成功；Frontend success | §9 |
+| CI 复跑（run 38282001961，head `5d0f3aa3`，D1 修复） | **Backend（Lint/Migrate/Test 全 success）+ Frontend success，全绿** | §9 |
 
 ## 3. 单元测试（P2-UT）逐条结果
 
@@ -108,10 +109,11 @@
 ## 8. 回归范围
 
 - 本机无 PG 全量 155 passed / 208 skipped / 0 failed（合并后树；含 conversation / runtime / channel / ticket / gateway / knowledge 等既有套件）。
-- 本机 Docker PG：Phase 1 memory PG 全套（`test_memory_postgres.py` + `test_memory_migrations.py`）随 memory 定向跑批全绿（53 passed 中含）；全量 PG 回归进行中，结果回填。
+- 本机 Docker PG：修复提交 `5d0f3aa` 上全量单次跑批 **362 passed / 1 skipped / 0 failed**（含全部 28 个 P2 PG 用例、Phase 1 memory PG 回归、`test_channel_native.py` 13 例、全部迁移用例）。
 - Phase 1 摘要链路：注入顺序共存由 P2-IT-08 覆盖，通过。
 - 渠道合并影响面：合并后身份解析位于 `_accept_envelope()` 单点建会话处（原生渠道与 webhook 入口均覆盖），`_external_id` 委托 `session_id_hash()[:32]` 与记忆 identity key 同源（代码复核确认；P2-UT-04 固化该同源关系；P2-IT-01 在 PG 上验证端到端一致）。
-- 前端全量 e2e（合并树）：43 passed / 28 failed。28 个失败逐一复核失败特征（90s 超时等待登录态/真实后端数据的元素），均属任务启动时已确认的预存类别（登录墙/真实后端依赖），与本阶段改动无关；memory/hash-routing/channel-navigation 等本阶段相关用例全绿。预存声明为 26：该数字来自合并前树的对照实验，main 原生渠道集成自身可能带来 +2。已按协调者指示在 `c3ba708`（main tip，含渠道集成）建 worktree 跑 baseline 对照，结论回填。
+- 前端全量 e2e（合并树 `fe12121`/`5d0f3aa`）：43 passed / 28 failed（71 用例）。28 个失败逐一复核失败特征（90s 超时等待登录态/真实后端数据的元素），均属预存类别（登录墙/真实后端依赖），与本阶段改动无关；memory 4/4、hash-routing 3/3、channel-navigation 2/2 等本阶段相关用例全绿。
+- **baseline 对照（`c3ba708` worktree，独立 dev server 5174，67 用例）**：31 failed / 36 passed。合并树 28 个失败**全部是 baseline 31 个失败的子集**（同用例同失败特征）；baseline 另多 channel-navigation(2) 与 login.spec:89 三例（合并树上通过——channel-navigation 用例经适配新 ChannelsPage 后转绿）。结论：本分支引入**零新增** e2e 失败；预存声明的 26 为合并前数字，main 原生渠道集成自身又带入若干预存失败（baseline 实测 31），均非本阶段缺陷。
 
 ## 9. CI 证据与首轮失败定位
 
@@ -119,7 +121,7 @@
   - Backend (ruff + pytest) job：Lint / Migrate the test database 成功，**Test 步骤 failure**
   - Frontend job：success
 - 失败定位：job 日志下载 403（需 admin，同 Phase 1 边界），check-runs 无注解。用户 2026-10-13 提供本机 Docker PG 后，QA 复刻 CI 环境（同镜像 postgres:17、同环境变量、alembic upgrade head 后全量 pytest），**稳定复现且仅复现 2 个失败**——`test_p2_api_04` / `test_p2_api_05`（`assert 200 == 409`），即缺陷 D1（§10/§11）。CI Test 步骤失败与本机复现一致。
-- D1 修复推送后 CI 自动复跑，结果回填。
+- D1 修复（`5d0f3aa`）推送后 CI 复跑：<https://github.com/GroundedCore/nexusdesk/actions/runs/38282001961>（event=pull_request，conclusion=success）——Backend job 的 Lint / Migrate the test database / Test 全部步骤 success（Test success 等价于 pytest 退出码 0，套件全绿，含全部 PG 用例首次在 CI 通过），Frontend job success。核验方式同 Phase 1：未认证 REST API 逐步骤核验 conclusion；job 日志下载 403（需 admin），逐步骤用例计数未能逐行复核，以本机 Docker PG 单次完整跑批计数（362 passed / 1 skipped / 0 failed）为计数证据。
 
 ## 10. 关键实现决策对抗性复核（开发自报 5 项）
 
@@ -135,7 +137,7 @@
 
 | # | 级别 | 缺陷 | 发现环节 | 修复 | 回归 |
 |---|---|---|---|---|---|
-| D1 | P2 | `_set_status` 幂等语义不一致：restore/confirm/reject 对"当前状态==目标状态"的重复决策返回 200（一律幂等），而测试与设计错误码契约（`memory_item_not_deleted`/`memory_item_not_pending`）要求 409——决策类操作不可重复，仅 delete 幂等（安全重试）。数据无损坏、无泄漏；api_04/05 主体功能（删除/恢复/确认/拒绝/队列）全部正确，仅重复决策边界不符 | CI 首轮 Backend Test 失败；本机 Docker PG 复刻环境稳定复现（`assert 200 == 409` ×2）。根因：PG 用例此前从未在任何环境执行过（开发本机无 PG 全 skip，首跑即 CI） | 协调者裁决改实现（QA 建议方案 a）：决策类重复返回 409，delete 保持幂等。已派 dev-backend | 待修复推送后 QA 回归（本机 PG + CI 复跑） |
+| D1 | P2 | `_set_status` 幂等语义不一致：restore/confirm/reject 对"当前状态==目标状态"的重复决策返回 200（一律幂等），而测试与设计错误码契约（`memory_item_not_deleted`/`memory_item_not_pending`）要求 409——决策类操作不可重复，仅 delete 幂等（安全重试）。数据无损坏、无泄漏；api_04/05 主体功能（删除/恢复/确认/拒绝/队列）全部正确，仅重复决策边界不符 | CI 首轮 Backend Test 失败；本机 Docker PG 复刻环境稳定复现（`assert 200 == 409` ×2）。根因：PG 用例此前从未在任何环境执行过（开发本机无 PG 全 skip，首跑即 CI） | `5d0f3aa`：`_set_status` 增加 `repeat_ok` 参数，决策类重复 409、delete 幂等不变（协调者裁决采纳 QA 建议方案 a） | **已关闭**：QA 本机 PG 回归 `test_memory_customers_postgres.py` + 迁移 29 passed；终局全量 362 passed / 0 failed；CI 复跑 run 38282001961 全绿 |
 
 | # | 级别 | 残留风险/观察 | 处置 |
 |---|---|---|---|
@@ -147,8 +149,8 @@
 
 | 准则 | 状态 |
 |---|---|
-| 全部用例通过 | 暂不满足：D1（2 用例）修复回归前 CI 红 |
-| AC-1~AC-8 复现通过 | AC 溯源用例（P2-IT-01/02/04/05/06/07/09/11、P2-UT-02、P2-API-03/04/05 主体）本机 PG 实测通过；AC-6/FR-4 的重复决策边界随 D1 回归收尾 |
+| 全部用例通过 | 满足：本机 Docker PG 全量 362 passed / 0 failed；CI 复跑（`5d0f3aa`）Backend+Frontend 全绿 |
+| AC-1~AC-8 复现通过 | 满足：AC 溯源用例（AC-1/2→P2-IT-01/02，AC-3→P2-IT-07，AC-5→P2-IT-04，AC-6→P2-IT-11/12，AC-7→P2-IT-06/P2-UT-08，AC-8→P2-IT-09）本机 PG 实测全部通过 |
 | 防污染与租户隔离断言常驻 | P2-IT-04 / P2-API-06 在套件内常驻，本机 PG 实测通过 |
 | 无 P0/P1 未关闭 | 满足：全部验证未发现 P0/P1（无跨租户泄漏、无身份错绑、主流程无破坏；人工编辑保护实测有效） |
 
@@ -180,7 +182,11 @@ FAILED test_memory_customers_postgres.py::test_p2_api_04_soft_delete_and_restore
 FAILED test_memory_customers_postgres.py::test_p2_api_05_pending_queue_confirm_and_reject - assert 200 == 409
 ```
 
-A-5 本机 Docker PG 全量（CI 复刻，空闲机器）：进行中，结果回填。
+A-5 本机 Docker PG 全量（CI 复刻环境变量，`5d0f3aa`，空闲机器单次完整跑批）
+
+```text
+362 passed, 1 skipped, 1 warning in 371.03s (0:06:11)
+```
 
 A-6 挂起用例单独复跑：`tests/test_model_gateway.py::test_timeout_and_cancellation_release_slots` → `1 passed in 3.69s`（负载 flake 排除，见 §11 R2）。
 
@@ -190,4 +196,6 @@ B-1 `npm run typecheck && npm run check:i18n && npm run build`（`fe12121`）：
 
 B-2 `npx playwright test tests/memory.spec.ts`（dev server 5173，chromium）：`4 passed (22.4s)`。
 
-B-3 全量 e2e（合并树，71 用例）：`28 failed, 43 passed (34.6m)`。失败清单（均为登录墙/真实后端依赖的预存类别）：agent-filters、agent-model-required、agents-delete(3)、agents-fullstack、agents-workspace(2)、deployment banner、gateway-fullstack、i18n(4)、model-gateway-ui(9)、model-gateway、platform、tickets-antd(2)。baseline（c3ba708）对照进行中，结论回填 §8。
+B-3 全量 e2e（合并树，71 用例）：`28 failed, 43 passed (34.6m)`。失败清单（均为登录墙/真实后端依赖的预存类别）：agent-filters、agent-model-required、agents-delete(3)、agents-fullstack、agents-workspace(2)、deployment banner、gateway-fullstack、i18n(4)、model-gateway-ui(9)、model-gateway、platform、tickets-antd(2)。
+
+B-4 baseline 对照（`c3ba708` worktree，dev server 5174，67 用例）：`31 failed, 36 passed (33.8m)`——失败集包含合并树全部 28 个失败（另多 channel-navigation×2、login.spec:89），证实本分支零新增 e2e 失败（§8）。
