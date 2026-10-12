@@ -363,11 +363,17 @@ class MemoryService:
             )
             return row
 
-    async def _set_status(self, tenant, actor, item_id, action, allowed, target, conflict):
+    async def _set_status(
+        self, tenant, actor, item_id, action, allowed, target, conflict, repeat_ok=False
+    ):
         async with self.engine.begin() as c:
             item = await self._item(c, tenant, item_id, lock=True)
-            if item["status"] == target:  # idempotent repeat of the same decision
-                return item
+            if item["status"] == target:
+                # Only deletion may be safely retried; repeating a restore or a
+                # pending-queue decision is a conflict, not a no-op.
+                if repeat_ok:
+                    return item
+                raise DomainError(conflict, 409)
             if item["status"] not in allowed:
                 raise DomainError(conflict, 409)
             row = await one(
@@ -400,6 +406,7 @@ class MemoryService:
             {"pending", "active"},
             "deleted",
             "memory_item_not_active",
+            repeat_ok=True,
         )
 
     async def restore_item(self, tenant, actor, item_id):
