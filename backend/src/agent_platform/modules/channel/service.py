@@ -6,7 +6,8 @@ import logging
 import os
 import secrets
 import time
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -776,7 +777,7 @@ class ChannelService:
                 config=row["config"] or {},
                 credentials=credentials,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - adapter failures must become retryable state
             logger.warning("channel_delivery_unavailable type=%s", type(exc).__name__)
             result = DeliveryResult(
                 ok=False,

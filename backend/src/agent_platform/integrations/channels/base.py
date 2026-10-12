@@ -4,7 +4,7 @@ import asyncio
 import email.utils
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from agent_platform.platform.persistence.store import DomainError
@@ -107,8 +107,8 @@ def retry_after_seconds(headers: dict[str, str]) -> float | None:
     if parsed is None:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return max((parsed - datetime.now(timezone.utc)).total_seconds(), 0.0)
+        parsed = parsed.replace(tzinfo=UTC)
+    return max((parsed - datetime.now(UTC)).total_seconds(), 0.0)
 
 
 def chunk_text(content: str, size: int | None) -> list[str]:

@@ -1,5 +1,4 @@
 import json
-from typing import Optional
 from uuid import uuid4
 
 from agent_platform.integrations.channels.base import CHANNEL_WORK_CHANNEL, chunk_text
@@ -88,7 +87,7 @@ class ConversationService:
         tenant,
         page=1,
         page_size=10,
-        agent_id: Optional[str | None] = None,
+        agent_id: str | None = None,
         status: str = "all",
     ):
         page = max(page, 1)
@@ -120,7 +119,7 @@ class ConversationService:
                 "page_size": page_size,
             }
 
-    async def agent_counts(self, tenant, agent_id: Optional[str | None] = None):
+    async def agent_counts(self, tenant, agent_id: str | None = None):
         where = "tenant_id=:t"
         params = {"t": tenant}
         if agent_id:

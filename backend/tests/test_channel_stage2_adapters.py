@@ -1,15 +1,15 @@
 import email.utils
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from agent_platform.integrations.channels.base import (
-    TokenCache,
     IncomingEnvelope,
+    TokenCache,
     chunk_text,
     retry_after_seconds,
 )
@@ -40,7 +40,7 @@ def test_retry_after_parsing():
     assert retry_after_seconds({"Retry-After": "12"}) == 12.0
     assert retry_after_seconds({"retry-after": "nonsense"}) is None
     assert retry_after_seconds({}) is None
-    future = email.utils.format_datetime(datetime.now(timezone.utc) + timedelta(seconds=30))
+    future = email.utils.format_datetime(datetime.now(UTC) + timedelta(seconds=30))
     delay = retry_after_seconds({"Retry-After": future})
     assert delay is not None and 25 <= delay <= 31
 

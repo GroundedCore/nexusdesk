@@ -1,6 +1,5 @@
 """钉钉事件订阅与机器人消息适配器。"""
 
-import base64
 import hashlib
 import hmac
 import json
@@ -16,8 +15,8 @@ from agent_platform.integrations.channels.base import (
     TokenCache,
     WebhookResult,
     header_value,
-    retry_after_seconds,
     require_fields,
+    retry_after_seconds,
 )
 from agent_platform.integrations.channels.crypto import (
     decrypt_wechat_payload,
@@ -99,7 +98,6 @@ class DingTalkAdapter:
         )
         if isinstance(payload.get("challenge"), str):
             return WebhookResult(challenge=payload["challenge"])
-        event_type = str(payload.get("EventType") or payload.get("eventType") or "")
         data = payload.get("Data") or payload.get("data") or {}
         text = data.get("Content") or data.get("content") or data.get("Text") or payload.get("text")
         if not isinstance(text, str) or not text.strip():

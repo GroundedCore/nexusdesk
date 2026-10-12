@@ -13,8 +13,8 @@ from agent_platform.integrations.channels.base import (
     TokenCache,
     WebhookResult,
     header_value,
-    retry_after_seconds,
     require_fields,
+    retry_after_seconds,
 )
 from agent_platform.integrations.channels.crypto import (
     decrypt_feishu_payload,

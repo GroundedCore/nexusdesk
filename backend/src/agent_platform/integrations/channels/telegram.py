@@ -11,8 +11,8 @@ from agent_platform.integrations.channels.base import (
     IncomingEnvelope,
     WebhookResult,
     header_value,
-    retry_after_seconds,
     require_fields,
+    retry_after_seconds,
 )
 from agent_platform.platform.persistence.store import DomainError
 

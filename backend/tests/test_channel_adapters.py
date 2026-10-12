@@ -11,6 +11,7 @@ from agent_platform.integrations.channels.feishu import FeishuAdapter
 from agent_platform.integrations.channels.registry import provider_catalog
 from agent_platform.integrations.channels.wecom import WeComAdapter
 
+
 @pytest.mark.asyncio
 async def test_wecom_encrypted_text_callback_is_normalized():
     credentials = {

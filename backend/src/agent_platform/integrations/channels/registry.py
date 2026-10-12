@@ -9,7 +9,6 @@ from agent_platform.integrations.channels.wecom import WeComAdapter
 from agent_platform.integrations.channels.wecom_kf import WeComKfAdapter
 from agent_platform.platform.persistence.store import DomainError
 
-
 GENERIC_PROVIDER = {
     "id": "generic_webhook",
     "name": "通用 Webhook",
