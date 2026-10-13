@@ -35,6 +35,8 @@ interface Props {
 
 export function ConversationsPage({ route, onNavigate }: Props) {
   const agentId = route.split('?')[0].split('/')[2];
+  // Memory pages deep-link here with ?focus=<conversation_id> (source_ref jump).
+  const focus = new URLSearchParams(route.split('?')[1] || '').get('focus') || '';
   if (!agentId) {
     return (
       <AgentStatsPage
@@ -46,13 +48,15 @@ export function ConversationsPage({ route, onNavigate }: Props) {
   return (
     <ConversationWorkbench
       agentId={agentId === '_all' ? null : agentId}
+      focus={focus}
       onBack={() => onNavigate('/conversations')}
     />
   );
 }
 
-function ConversationWorkbench({ agentId, onBack }: {
+function ConversationWorkbench({ agentId, focus, onBack }: {
   agentId: string | null;
+  focus: string;
   onBack: () => void;
 }) {
   const [page, setPage] = useState(1);
@@ -87,6 +91,13 @@ function ConversationWorkbench({ agentId, onBack }: {
       setPendingRun(null);
     }
   }, [pendingRun, detail.data]);
+
+  // Deep link from memory source_ref: open the focused conversation directly.
+  useEffect(() => {
+    if (focus)
+      selectConversation(focus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus]);
 
   useEffect(() => {
     setEchoes(prev => prev.filter(echo => {

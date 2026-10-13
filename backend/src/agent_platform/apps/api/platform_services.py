@@ -15,6 +15,7 @@ from agent_platform.modules.knowledge.retrieval import Retrieval
 from agent_platform.modules.knowledge.service import KnowledgeService
 from agent_platform.modules.knowledge.vector_store import VectorIndex
 from agent_platform.modules.knowledge.workspace import Workspace
+from agent_platform.modules.memory.service import MemoryService
 from agent_platform.modules.model_gateway.gateway import GatewayChatModel, ModelGateway
 from agent_platform.modules.model_gateway.service import build_model
 from agent_platform.modules.observability.service import ObservabilityService
@@ -49,7 +50,8 @@ class PlatformServices:
             engine, settings, model_client, self.vector_index, self.gateway
         )
         self.retrieval = Retrieval(engine, self.knowledge, self.vector_index, self.gateway)
-        self.conversations = ConversationService(engine, settings.history_turns)
+        self.memory = MemoryService(engine, settings)
+        self.conversations = ConversationService(engine, settings.history_turns, self.memory)
         self.handoffs = HandoffService(engine, repository)
         self.customer = CustomerService(
             engine, repository, self.agents, self.handoffs, settings, snapshot

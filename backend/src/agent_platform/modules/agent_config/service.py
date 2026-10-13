@@ -28,6 +28,10 @@ class AgentConfig(BaseModel):
     # Agent-level switch for the rolling conversation summary. Flows through the
     # existing draft/publish/snapshot chain, so no table change is needed.
     summary_enabled: bool = True
+    # Agent-level read/write switches for customer memory (Phase 2, FR-6).
+    # memory_enabled gates prompt injection; memory_write gates extraction.
+    memory_enabled: bool = True
+    memory_write: bool = True
 
     @model_validator(mode="after")
     def model_binding(self):
@@ -286,7 +290,7 @@ class AgentService:
         row = required(
             await one(
                 c,
-                """SELECT a.id,v.version AS published_version,a.archived,v.config,v.tool_snapshot FROM agents a
+                """SELECT a.id,v.version AS published_version,a.archived,a.is_example,v.config,v.tool_snapshot FROM agents a
             LEFT JOIN agent_versions v ON v.agent_id=a.id AND v.version=COALESCE(CAST(:version AS integer),a.published_version)
             WHERE a.id=:id AND a.tenant_id=:t""",
                 id=aid,
@@ -307,6 +311,9 @@ class AgentService:
             "version": row["published_version"],
             "config": row["config"],
             "tools": specs,
+            # Rides along with the run config so the runtime can keep example
+            # agents out of the memory extraction pipeline without a re-query.
+            "is_example": row["is_example"],
         }
 
     async def archive(self, tenant, actor, aid, archived, revision):

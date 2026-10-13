@@ -85,7 +85,15 @@ async def runtime_services(settings):
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
             yield RuntimeServices(
                 repository,
-                RuntimeWorker(repository, factory, settings, fingerprint, notifier, listener),
+                RuntimeWorker(
+                    repository,
+                    factory,
+                    settings,
+                    fingerprint,
+                    notifier,
+                    listener,
+                    memory=platform.memory,
+                ),
                 snapshot,
                 platform,
                 listener,

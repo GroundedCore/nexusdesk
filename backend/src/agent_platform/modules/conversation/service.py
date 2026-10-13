@@ -1,4 +1,5 @@
 import json
+import logging
 from uuid import uuid4
 
 from agent_platform.integrations.channels.base import CHANNEL_WORK_CHANNEL, chunk_text
@@ -12,6 +13,8 @@ from agent_platform.platform.persistence.store import (
     required,
     transaction,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def add_message(c, cid, role, content, run_id=None):
@@ -67,9 +70,10 @@ async def add_message(c, cid, role, content, run_id=None):
 
 
 class ConversationService:
-    def __init__(self, engine, history_turns=10):
+    def __init__(self, engine, history_turns=10, memory=None):
         self.engine = engine
         self.history_limit = history_turns * 2
+        self.memory = memory
 
     async def list(self, tenant, limit=50, offset=0):
         async with self.engine.connect() as c:
@@ -209,13 +213,21 @@ class ConversationService:
             return {"items": list(reversed(rows[:limit])), "has_more": len(rows) > limit}
 
     async def create(
-        self, tenant, actor, external_id, agent_id=None, connection=None, source="business"
+        self,
+        tenant,
+        actor,
+        external_id,
+        agent_id=None,
+        connection=None,
+        source="business",
+        identity=None,
     ):
         if source not in {"business", "playground"}:
             raise DomainError("invalid_conversation_source", 422)
         if source == "playground" and not agent_id:
             raise DomainError("playground_agent_required", 422)
         async with transaction(self.engine, connection) as c:
+            example_agent = False
             if source == "playground":
                 agent = required(
                     await one(
@@ -229,24 +241,44 @@ class ConversationService:
                 if agent["archived"] or agent["published_version"] is None:
                     raise DomainError("agent_not_available", 409)
             if agent_id:
-                required(
+                agent = required(
                     await one(
                         c,
-                        "SELECT id FROM agents WHERE id=:id AND tenant_id=:t FOR KEY SHARE",
+                        "SELECT id,is_example FROM agents WHERE id=:id AND tenant_id=:t FOR KEY SHARE",
                         id=agent_id,
                         t=tenant,
                     ),
                     "agent_not_found",
                 )
+                example_agent = agent["is_example"]
+            # Customer identity resolution (Phase 2, FR-1). Conservative by
+            # design: playground conversations and example agents never resolve;
+            # any failure leaves customer_id NULL and never blocks creation.
+            customer_id = None
+            if identity and source != "playground" and not example_agent and self.memory:
+                try:
+                    async with c.begin_nested():
+                        customer_id = await self.memory.resolve_customer(
+                            c, tenant, identity["source"], identity["external_key"]
+                        )
+                except Exception:
+                    logger.warning(
+                        "Customer identity resolution failed for source=%s; "
+                        "conversation proceeds without a customer",
+                        identity.get("source"),
+                        exc_info=True,
+                    )
+                    customer_id = None
             row = await one(
                 c,
-                """INSERT INTO runtime_conversations(id,tenant_id,external_id,agent_id,source)
-                VALUES(:id,:t,:external,:aid,:source) ON CONFLICT(tenant_id,external_id) DO NOTHING RETURNING *""",
+                """INSERT INTO runtime_conversations(id,tenant_id,external_id,agent_id,source,customer_id)
+                VALUES(:id,:t,:external,:aid,:source,:customer) ON CONFLICT(tenant_id,external_id) DO NOTHING RETURNING *""",
                 id=uuid4(),
                 t=tenant,
                 external=external_id,
                 aid=agent_id,
                 source=source,
+                customer=customer_id,
             )
             if not row:
                 raise DomainError("conversation_exists", 409)

@@ -28,6 +28,12 @@ logger = logging.getLogger(__name__)
 LEASE_SECONDS = 120
 HEARTBEAT_SECONDS = 30
 
+# Permanent-failure audit action per task kind (Phase 1 summary, Phase 2 extraction).
+FAILURE_AUDIT = {
+    "conversation_summary": "memory.summary.failed",
+    "memory_extract": "memory.extract.failed",
+}
+
 
 class MemoryWorker:
     def __init__(
@@ -142,7 +148,7 @@ class MemoryWorker:
                     c,
                     task["tenant_id"],
                     "memory",
-                    "memory.summary.failed",
+                    FAILURE_AUDIT.get(task["kind"], "memory.task.failed"),
                     task["payload"].get("conversation_id") or task["id"],
                     task_id=str(task["id"]),
                     error=error,

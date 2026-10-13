@@ -42,6 +42,16 @@ class IncomingMessage(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
 
 
+def session_id_hash(session_id):
+    """Shared hash for a channel session id.
+
+    The conversation external_id keeps its historical 32-char prefix; the
+    memory identity external_key uses the full digest (FR-1). Both derive from
+    this one function so the two can never drift apart (P2-UT-04).
+    """
+    return hashlib.sha256(session_id.encode()).hexdigest()
+
+
 class ChannelService:
     """Channel management, provider webhooks, inbound idempotency, and delivery."""
 
@@ -534,12 +544,22 @@ class ChannelService:
                     external=external,
                 )
                 if not conv:
+                    # Customer identity resolution (Phase 2, FR-1): the same
+                    # session hash that shapes external_id becomes the memory
+                    # identity key, so a returning channel customer is
+                    # recognised. Failures degrade to NULL inside create().
                     conv = await self.conversations.create(
                         current["tenant_id"],
                         "channel",
                         external,
                         current["agent_id"],
                         c,
+                        identity={
+                            "source": "channel",
+                            "external_key": session_id_hash(
+                                envelope.external_conversation_id
+                            ),
+                        },
                     )
                 await execute(
                     c,
@@ -595,8 +615,9 @@ class ChannelService:
             return {"conversation_id": conv["id"], "run_id": run_id, "duplicate": False}
 
     def _external_id(self, channel_id, external_conversation_id: str) -> str:
-        digest = hashlib.sha256(external_conversation_id.encode()).hexdigest()[:32]
-        return "channel:" + str(channel_id) + ":" + digest
+        # Single source of truth: the conversation external_id is the 32-char
+        # prefix of the same session hash used as the memory identity key.
+        return "channel:" + str(channel_id) + ":" + session_id_hash(external_conversation_id)[:32]
 
     def _vault_spec(self, provider: str) -> dict[str, str]:
         return {"base_url": "channel:" + provider, "protocol": "channel"}

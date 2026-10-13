@@ -93,17 +93,27 @@ class CustomerService:
             return {"conversation_id": cid, "run": {"id": row["id"], "status": row["status"]}}
 
     async def propose(self, tenant, cid, run_id, body):
-        payload = body.model_dump_json()
-        key = hashlib.sha256((str(run_id) + payload).encode()).hexdigest()
         async with self.engine.begin() as c:
-            required(
+            conversation = required(
                 await one(
                     c,
-                    "SELECT id FROM runtime_conversations WHERE id=:id AND tenant_id=:t",
+                    "SELECT id,customer_id FROM runtime_conversations WHERE id=:id AND tenant_id=:t",
                     id=cid,
                     t=tenant,
                 )
             )
+            # The proposal carries the customer link forward so approving it
+            # writes tickets.customer_id without a second lookup (FR-5).
+            payload = json.dumps(
+                {
+                    **body.model_dump(),
+                    "customer_id": str(conversation["customer_id"])
+                    if conversation["customer_id"]
+                    else None,
+                },
+                ensure_ascii=False,
+            )
+            key = hashlib.sha256((str(run_id) + payload).encode()).hexdigest()
             row = await one(
                 c,
                 """INSERT INTO pending_actions(id,tenant_id,conversation_id,kind,payload,dedup_key,expires_at)
@@ -167,7 +177,11 @@ class CustomerService:
                 )
                 await audit(c, tenant, actor, "ticket.rejected", aid)
                 return {"id": aid, "status": "rejected"}
-            body = TicketProposal.model_validate(action["payload"])
+            proposal = dict(action["payload"])
+            # str(UUID) or None; rides in the proposal payload since Phase 2
+            # and lands on the VARCHAR(100) tickets.customer_id column (FR-5).
+            customer_id = proposal.pop("customer_id", None)
+            body = TicketProposal.model_validate(proposal)
             kind = await one(
                 c,
                 """INSERT INTO ticket_types(tenant_id,code,name)
@@ -193,8 +207,8 @@ class CustomerService:
             tid = uuid4()
             await execute(
                 c,
-                """INSERT INTO tickets(id,tenant_id,conversation_id,action_id,title,ticket_no,type_id,type_version,created_by)
-                VALUES(:id,:t,:cid,:aid,:title,:number,:kind,1,:actor)""",
+                """INSERT INTO tickets(id,tenant_id,conversation_id,action_id,title,ticket_no,type_id,type_version,created_by,customer_id)
+                VALUES(:id,:t,:cid,:aid,:title,:number,:kind,1,:actor,:customer)""",
                 id=tid,
                 t=tenant,
                 cid=conv["id"],
@@ -203,6 +217,7 @@ class CustomerService:
                 number="TK-" + tid.hex,
                 kind=kind["id"],
                 actor=actor,
+                customer=customer_id,
             )
             await execute(
                 c,

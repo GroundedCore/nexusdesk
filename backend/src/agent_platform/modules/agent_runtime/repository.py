@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.modules.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.modules.conversation.service import add_message
+from agent_platform.modules.memory.extraction import enqueue_extract_task
 from agent_platform.modules.memory.summary import enqueue_summary_task
 from agent_platform.platform.persistence.store import DomainError, transaction
 
@@ -176,7 +177,7 @@ class RunRepository:
                 (
                     await conn.execute(
                         text(
-                            "SELECT history,summary FROM runtime_conversations WHERE id=:id"
+                            "SELECT history,summary,customer_id FROM runtime_conversations WHERE id=:id"
                         ),
                         {"id": row["conversation_id"]},
                     )
@@ -185,9 +186,14 @@ class RunRepository:
                 .one()
             )
             await self._event(conn, row["id"], "run.started", {})
-            # The rolling summary rides along with the claimed run so the engine
-            # can inject it without a second round-trip.
-            return {**dict(row), "history": history["history"], "summary": history["summary"]}
+            # The rolling summary and the customer link ride along with the
+            # claimed run so the engine can inject both without a round-trip.
+            return {
+                **dict(row),
+                "history": history["history"],
+                "summary": history["summary"],
+                "customer_id": history["customer_id"],
+            }
 
     async def append(self, run_id, owner, kind, data):
         async with self.engine.begin() as conn:
@@ -229,7 +235,9 @@ class RunRepository:
             conversation = (
                 (
                     await conn.execute(
-                        text("SELECT summary FROM runtime_conversations WHERE id=:id FOR UPDATE"),
+                        text(
+                            "SELECT summary,customer_id,source FROM runtime_conversations WHERE id=:id FOR UPDATE"
+                        ),
                         {"id": cid},
                     )
                 )
@@ -278,6 +286,31 @@ class RunRepository:
                     await self._event(
                         conn, run_id, "summary.queued", {"dropped": len(memory["dropped"])}
                     )
+                # Extraction dispatch (Phase 2, FR-2): only successful runs on
+                # customer-bound business conversations; the agent-level and
+                # global switches were ANDed into memory["extract"] by the
+                # worker, and enqueue_extract_task applies the 5-minute
+                # per-conversation debounce.
+                if (
+                    memory
+                    and memory.get("extract")
+                    and conversation["customer_id"]
+                    and conversation["source"] != "playground"
+                ):
+                    task_id = await enqueue_extract_task(
+                        conn,
+                        row["tenant_id"],
+                        cid,
+                        conversation["customer_id"],
+                        memory.get("extract_debounce", 300),
+                    )
+                    if task_id:
+                        await self._event(
+                            conn,
+                            run_id,
+                            "memory_extract.queued",
+                            {"customer_id": str(conversation["customer_id"])},
+                        )
             await self._event(
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )

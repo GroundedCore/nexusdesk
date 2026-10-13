@@ -15,6 +15,7 @@ from agent_platform.modules.agent_runtime.bootstrap import runtime_services
 from agent_platform.modules.agent_runtime.schemas import BusyError, CapacityError
 from agent_platform.modules.knowledge.routes import router as knowledge_router
 from agent_platform.modules.memory.bootstrap import embedded_memory_worker
+from agent_platform.modules.memory.routes import router as memory_router
 from agent_platform.modules.model_gateway.management_routes import (
     router as gateway_management_router,
 )
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tool_workspace_router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(runtime_router, prefix="/api/v1")
+    app.include_router(memory_router, prefix="/api/v1")
     app.include_router(platform_router, prefix="/api/v1")
     app.include_router(ingress, prefix="/api/v1")
     app.include_router(gateway_management_router, prefix="/api/v1")

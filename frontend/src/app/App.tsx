@@ -5,7 +5,7 @@ import { LanguageSelector } from '../i18n/LanguageSelector';
 import { t } from '../i18n/index';
 import { lazy, Suspense, useState, useRef, useEffect } from 'react';
 import { Layout, Button, Avatar, Tag, Spin } from 'antd';
-import { MenuFoldOutlined, MenuUnfoldOutlined, BarChartOutlined, MessageOutlined, FileTextOutlined, CustomerServiceOutlined, RobotOutlined, ApiOutlined, BookOutlined, ToolOutlined, SafetyOutlined, ExperimentOutlined, LineChartOutlined } from '@ant-design/icons';
+import { MenuFoldOutlined, MenuUnfoldOutlined, BarChartOutlined, MessageOutlined, FileTextOutlined, CustomerServiceOutlined, RobotOutlined, ApiOutlined, BookOutlined, ToolOutlined, SafetyOutlined, ExperimentOutlined, LineChartOutlined, TeamOutlined } from '@ant-design/icons';
 import { type PlatformModule, type Summary, setToken, token } from '../shared/api/client';
 import { Alert, Badge, Field, Panel, Role, useResource } from '../shared/components/ui';
 import { AgentsPage } from '../features/agents/AgentsPage';
@@ -14,6 +14,7 @@ import { ConversationsPage } from '../features/conversations/ConversationsPage';
 import { ToolsPage } from '../features/tools/ToolsPage';
 import { HandoffPage } from '../features/handoff/HandoffPage';
 const TicketsPage = lazy(() => import('../features/tickets/TicketsPage').then(module => ({ default: module.TicketsPage })));
+const MemoryPage = lazy(() => import('../features/memory/MemoryPage').then(module => ({ default: module.MemoryPage })));
 import { EvaluationPage } from '../features/evaluation/EvaluationPage';
 import { Metrics, ObservabilityPage } from '../features/observability/ObservabilityPage';
 import { WorkbenchSso } from '../features/open-platform/SsoLogin';
@@ -21,9 +22,9 @@ import { StaffPanel } from '../features/handoff/StaffPanel';
 import { useHashRouter, type ModelSection } from './hashRouter';
 import { ModelsPage } from '../features/models/ModelsPage';
 const OpenPlatformPage = lazy(() => import('../features/open-platform/OpenPlatformPage').then(module => ({ default: module.OpenPlatformPage })));
-const sections = () => ([['overview', t("平台总览")], ['conversations', t("会话工作台")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['open-platform', t("开放平台")], ['evaluation', t("质量评测")], ['observability', t("运行与审计")], ['access', t("访问与策略")]] as const);
+const sections = () => ([['overview', t("平台总览")], ['conversations', t("会话工作台")], ['agents', t("Agent 管理")], ['models', t("模型网关")], ['knowledge', t("知识库")], ['tools', t("工具目录")], ['handoff', t("人工协同")], ['tickets', t("服务工单")], ['memory', t("客户记忆")], ['open-platform', t("开放平台")], ['evaluation', t("质量评测")], ['observability', t("运行与审计")], ['access', t("访问与策略")]] as const);
 type Page = ReturnType<typeof sections>[number][0];
-const icons = { 'open-platform': <ApiOutlined/>, overview: <BarChartOutlined />, conversations: <MessageOutlined />, tickets: <FileTextOutlined />, handoff: <CustomerServiceOutlined />, agents: <RobotOutlined />, models: <ApiOutlined />, knowledge: <BookOutlined />, tools: <ToolOutlined />, access: <SafetyOutlined />, evaluation: <ExperimentOutlined />, observability: <LineChartOutlined /> };
+const icons = { 'open-platform': <ApiOutlined/>, overview: <BarChartOutlined />, conversations: <MessageOutlined />, tickets: <FileTextOutlined />, handoff: <CustomerServiceOutlined />, agents: <RobotOutlined />, models: <ApiOutlined />, knowledge: <BookOutlined />, tools: <ToolOutlined />, memory: <TeamOutlined />, access: <SafetyOutlined />, evaluation: <ExperimentOutlined />, observability: <LineChartOutlined /> };
 function Overview() {
     const summary = useResource<Summary>('/observability/summary', 5000);
     const modules = useResource<PlatformModule[]>('/modules');
@@ -84,8 +85,8 @@ function Shell({ reset }: {
     const groups: {
         title: string;
         ids: Page[];
-    }[] = [{ title: t("客服工作"), ids: ['overview', 'conversations', 'tickets', 'handoff'] }, { title: t("配置管理"), ids: ['agents', 'models', 'knowledge', 'tools', 'open-platform', 'access'] }, { title: t("质量运营"), ids: ['evaluation', 'observability'] }];
-  const pages = { 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <Overview />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, evaluation: <EvaluationPage />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></> };
+    }[] = [{ title: t("客服工作"), ids: ['overview', 'conversations', 'tickets', 'handoff', 'memory'] }, { title: t("配置管理"), ids: ['agents', 'models', 'knowledge', 'tools', 'open-platform', 'access'] }, { title: t("质量运营"), ids: ['evaluation', 'observability'] }];
+  const pages = { 'open-platform': <OpenPlatformPage route={router.path} onNavigate={router.navigate}/>, models: <ModelsPage routeSection={router.path.split('/')[2] as ModelSection} onNavigate={section => router.navigate(`/models/${section}`)}/>, overview: <Overview />, conversations: <ConversationsPage route={router.path} onNavigate={router.navigate} />, agents: <AgentsPage route={router.path} onNavigate={router.navigate} onConfigureModels={() => navigate('models', 'profiles')} onWorkspaceChange={workspaceChanged} onGuardChange={guard => { leaveGuard.current = guard; }}/>, knowledge: <KnowledgePage />, tools: <ToolsPage route={router.path} onNavigate={router.navigate}/>, handoff: <HandoffPage />, tickets: <TicketsPage />, memory: <MemoryPage route={router.path} onNavigate={router.navigate} />, evaluation: <EvaluationPage />, observability: <ObservabilityPage />, access: <><Access onChange={reset}/><StaffPanel /></> };
     return <Role.Provider value={role}><Layout className={`console-layout ${page === 'agents' ? 'agents-shell' : page === 'tools' ? 'tools-shell' : page === 'open-platform' ? 'open-platform-shell' : ''} ${agentWorkspace ? 'agent-focus' : ''}`}><Layout.Sider className="console-sider" theme="light" width={248} collapsedWidth={0} collapsed={collapsed} breakpoint="lg" onBreakpoint={setCollapsed} trigger={null}>
     <div className="console-brand"><div className="brand-wordmark">nexus<span>desk</span><small>{t("智能客服平台")}</small></div></div>
     <nav aria-label={t("主导航")} className="console-nav">{groups.map(group => <div key={group.title}><div className="nav-group-title">{group.title}</div>{group.ids.map(id => <Button block type="text" icon={icons[id]} className={page === id ? 'nav-selected' : ''} aria-current={page === id ? 'page' : undefined} key={id} onClick={() => navigate(id)}>{sections().find(item => item[0] === id)?.[1]}</Button>)}</div>)}</nav>

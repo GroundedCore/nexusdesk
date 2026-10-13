@@ -49,6 +49,18 @@ def digest(value):
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def session_identity(identity, user):
+    """Memory identity for an open-platform conversation (FR-1, P2-UT-04).
+
+    Application API keys scope the customer to the app; enterprise-embedded
+    sessions already carry the ``enterprise:{user_id}`` convention in their
+    external user id, and keep it verbatim as the key.
+    """
+    if identity.external_user_id:
+        return {"source": "enterprise", "external_key": user}
+    return {"source": "open_platform", "external_key": f"{identity.app_id}:{user}"}
+
+
 class OpenPlatform:
     def __init__(self, platform):
         self.p = platform
@@ -343,7 +355,12 @@ class OpenPlatform:
                 + digest(json.dumps([user, external_session]))[:48]
             )
             conv = await self.p.conversations.create(
-                identity.tenant, "app:" + str(identity.app_id), key, agent_id, connection=c
+                identity.tenant,
+                "app:" + str(identity.app_id),
+                key,
+                agent_id,
+                connection=c,
+                identity=session_identity(identity, user),
             )
             await execute(
                 c,

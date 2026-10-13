@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 async def main(settings=None):
     settings = settings or Settings()
-    if not settings.summary_enabled:
+    if not (settings.summary_enabled or settings.memory_extract_enabled):
         # Idle rather than exit: the container runs with
-        # `restart: unless-stopped`, so exiting would crash-loop while the
-        # feature is deliberately switched off.
-        logger.info("summary_enabled=false; memory worker idling")
+        # `restart: unless-stopped`, so exiting would crash-loop while both
+        # features are deliberately switched off.
+        logger.info("summary and extraction disabled; memory worker idling")
         await asyncio.Event().wait()
         return
     async with runtime_services(settings) as services:

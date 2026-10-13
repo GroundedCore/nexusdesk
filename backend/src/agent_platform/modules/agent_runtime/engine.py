@@ -145,7 +145,7 @@ class RuntimeEngine:
             "signatures": signatures,
         }
 
-    async def run(self, message, history, emit, summary=None):
+    async def run(self, message, history, emit, summary=None, customer_memory=None):
         messages: list[BaseMessage] = [SystemMessage(content=self.settings.system_prompt)]
         kept = history[-self.settings.history_turns * 2 :] if self.settings.history_turns else []
         if summary and self.settings.summary_enabled:
@@ -153,6 +153,11 @@ class RuntimeEngine:
             # between the system prompt and the kept history; an empty summary
             # (or the kill switch) keeps the message sequence exactly as before.
             messages.append(SystemMessage(content=render_injection(summary)))
+        if customer_memory:
+            # Customer profile/preference memory (Phase 2, FR-3): right after
+            # the summary and before the kept history. The worker already
+            # applied the agent switch and the count/token budgets.
+            messages.append(SystemMessage(content=customer_memory))
         for item in kept:
             messages.append(
                 HumanMessage(content=item["content"])
