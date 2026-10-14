@@ -1,11 +1,15 @@
 """Phase 3 memory store unit tests: decay math, shared ranking, clamping.
 
 Database-backed probing and dual-mode search equivalence live in the
-PostgreSQL integration suites; these cover the pure pieces (P3-UT-04/05).
+PostgreSQL integration suites; these cover the pure pieces (P3-UT-04/05)
+plus the R16 half-done-enable probe warning.
 """
 
+import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 
+from agent_platform.modules.memory import store as store_module
 from agent_platform.modules.memory.store import (
     PgVectorStore,
     TsVectorStore,
@@ -84,3 +88,33 @@ def test_store_modes_and_limit_clamping():
     assert store._limit(5) == 5
     assert store._limit(999) == settings.memory_search_limit_max
     assert store._limit(0) == 1
+
+
+def _stub_probe(monkeypatch, *, column: bool, extension: bool):
+    async def has_column(engine):
+        return column
+
+    async def has_extension(engine):
+        return extension
+
+    monkeypatch.setattr(store_module, "_has_vector_column", has_column)
+    monkeypatch.setattr(store_module, "_has_vector_extension", has_extension)
+
+
+def test_probe_warns_when_extension_present_but_column_missing(monkeypatch, caplog):
+    # R16: manual enable steps half done (extension installed, column DDL not
+    # run) must degrade to text with a warning, never pick vector mode.
+    _stub_probe(monkeypatch, column=False, extension=True)
+    with caplog.at_level(logging.WARNING):
+        picked = asyncio.run(store_module.build_memory_store(None, None, Settings()))
+    assert picked.available() == "text"
+    assert any("manual enable steps incomplete" in r.message for r in caplog.records)
+
+
+def test_probe_stays_quiet_when_pgvector_entirely_absent(monkeypatch, caplog):
+    # The normal no-pgvector deployment degrades silently (auto mode).
+    _stub_probe(monkeypatch, column=False, extension=False)
+    with caplog.at_level(logging.WARNING):
+        picked = asyncio.run(store_module.build_memory_store(None, None, Settings()))
+    assert picked.available() == "text"
+    assert not caplog.records

@@ -136,7 +136,7 @@ memory_search_half_life_days: int = 30   # 检索排序的时间衰减半衰期�
 
 ## 部署变更
 
-- `compose.yaml`（quickstart）：默认镜像 `postgres:17-alpine` → `pgvector/pgvector:pg17`（`POSTGRES_IMAGE` 可覆盖/回退）；`deploy/production` 的 PostgreSQL 为外部中间件，Compose 零变更，在目标库启用 vector 扩展即自动升级为向量模式；
+- `compose.yaml`（quickstart）：默认镜像 `postgres:17-alpine` → `pgvector/pgvector:pg17`（`POSTGRES_IMAGE` 可覆盖/回退）。注意镜像替换不是纯替换即升级：vector 列由迁移 0036 的探测块在建库迁移当时一次性创建，存量数据卷换镜像后扩展与列仍缺失，需按 `deploy/README.md`"手工启用 vector（存量库）"执行一次幂等手工步骤（R16，不做启动自愈）；`deploy/production` 的 PostgreSQL 为外部中间件，Compose 零变更，同样按该手工步骤启用；
 - `deploy/production`：memory-worker 增加 event_write/TTL/重试任务处理能力，部署形态不变（该服务自 Phase 1 起已存在：生产独立容器、复用后端镜像、可多副本伸缩；quickstart 不变，仍内嵌于 API 进程）；
 - 不换镜像的存量部署：迁移照常通过，自动降级 TSVECTOR，文档（`deploy/README.md`）补一节说明差异；
 - 生产备份/升级流程不变（pgvector 数据随 PG dump 走）。
@@ -157,4 +157,4 @@ memory_search_half_life_days: int = 30   # 检索排序的时间衰减半衰期�
 
 - 全部能力由 `memory_tasks` 异步驱动，关闭 `memory_extract_enabled`（复用 Phase 2 总开关，或拆分 `memory_event_enabled`）即停止新事件写入；
 - 检索工具可通过 Agent 草稿移除，逐 Agent 灰度；
-- pgvector 镜像变更可独立回滚（换回 postgres 镜像，vector 列残留无害，探测自动降级）。
+- pgvector 镜像变更按 `deploy/README.md` 文档化流程回退：先在 pgvector 镜像上执行清理 DDL（`DROP COLUMN embedding` + `DROP EXTENSION vector`），再切回 postgres 镜像，探测自动降级（R17——"列残留无害"不成立，跳过清理直接换镜像会导致 `memory_items` 全表不可用）。

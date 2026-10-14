@@ -227,6 +227,12 @@ async def _has_vector_column(engine) -> bool:
         )
 
 
+async def _has_vector_extension(engine) -> bool:
+    """Whether the vector extension itself is installed in this database."""
+    async with engine.connect() as c:
+        return bool(await one(c, "SELECT 1 FROM pg_extension WHERE extname='vector'"))
+
+
 async def _embedding_ready(gateway, settings):
     """Check the deployment-level embedding profile (auto mode probe)."""
     profile_id = settings.memory_embedding_profile_id
@@ -266,6 +272,16 @@ async def build_memory_store(engine, gateway, settings) -> MemoryStore:
             logger.warning(
                 "memory_vector_enabled=true but memory_items.embedding is absent "
                 "(no pgvector at migration time); using keyword mode"
+            )
+        elif await _has_vector_extension(engine):
+            # R16: the manual enable steps were only half done — the extension
+            # is installed but the column/index DDL never ran. The probe must
+            # not pick vector mode (every query would fail at runtime), so
+            # degrade with a loud pointer at the documented steps instead.
+            logger.warning(
+                "vector extension is installed but memory_items.embedding is missing "
+                "(manual enable steps incomplete); using keyword mode — run the "
+                "idempotent DDL documented in deploy/README.md to enable vector mode"
             )
         return TsVectorStore(engine, settings)
     if configured == "true":
