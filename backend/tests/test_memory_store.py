@@ -1,0 +1,86 @@
+"""Phase 3 memory store unit tests: decay math, shared ranking, clamping.
+
+Database-backed probing and dual-mode search equivalence live in the
+PostgreSQL integration suites; these cover the pure pieces (P3-UT-04/05).
+"""
+
+from datetime import UTC, datetime, timedelta
+
+from agent_platform.modules.memory.store import (
+    PgVectorStore,
+    TsVectorStore,
+    decay_factor,
+    escape_like,
+    rank_hits,
+)
+from agent_platform.settings import Settings
+
+NOW = datetime(2026, 10, 14, tzinfo=UTC)
+
+
+def row(key, relevance, age_days):
+    referenced = NOW - timedelta(days=age_days)
+    return {
+        "key": key,
+        "content": f"content of {key}",
+        "updated_at": referenced,
+        "last_referenced_at": referenced,
+        "relevance": relevance,
+    }
+
+
+def test_decay_factor_is_exactly_half_at_one_half_life():
+    referenced = NOW - timedelta(days=30)
+    assert abs(decay_factor(referenced, 30, NOW) - 0.5) < 1e-9
+
+
+def test_decay_factor_uses_last_referenced_at_and_never_reaches_zero():
+    assert decay_factor(NOW, 30, NOW) == 1.0
+    ancient = NOW - timedelta(days=30 * 100)
+    assert decay_factor(ancient, 30, NOW) > 0.0
+
+
+def test_decay_factor_ignores_future_timestamps_and_naive_datetimes():
+    future = NOW + timedelta(days=3)
+    assert decay_factor(future, 30, NOW) == 1.0
+    naive = (NOW - timedelta(days=30)).replace(tzinfo=None)
+    assert abs(decay_factor(naive, 30, NOW.replace(tzinfo=None)) - 0.5) < 1e-9
+
+
+def test_rank_hits_orders_by_relevance_times_decay():
+    # Equal relevance: the 3-day-old item must outrank the 150-day-old one
+    # (AC-4b); stronger relevance can still beat freshness.
+    hits = rank_hits(
+        [row("old", 1.0, 150), row("recent", 1.0, 3), row("relevant", 1.5, 150)],
+        30,
+        10,
+    )
+    assert [hit["key"] for hit in hits] == ["recent", "relevant", "old"]
+
+
+def test_rank_hits_decays_but_never_hides():
+    hits = rank_hits([row("ancient", 0.9, 30 * 100)], 30, 10)
+    assert len(hits) == 1
+    assert hits[0]["score"] > 0.0
+
+
+def test_rank_hits_respects_limit():
+    hits = rank_hits([row(f"k{i}", 1.0, i) for i in range(10)], 30, 3)
+    assert len(hits) == 3
+    assert all(
+        hits[i]["score"] >= hits[i + 1]["score"] for i in range(len(hits) - 1)
+    )
+
+
+def test_escape_like_makes_wildcards_literal():
+    assert escape_like("50%_\\off") == "50\\%\\_\\\\off"
+
+
+def test_store_modes_and_limit_clamping():
+    settings = Settings()
+    assert TsVectorStore(None, settings).available() == "text"
+    assert PgVectorStore(None, None, settings).available() == "vector"
+    store = TsVectorStore(None, settings)
+    assert store._limit(5) == 5
+    assert store._limit(999) == settings.memory_search_limit_max
+    assert store._limit(0) == 1
