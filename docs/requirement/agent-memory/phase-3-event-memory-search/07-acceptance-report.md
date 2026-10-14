@@ -31,8 +31,8 @@
 
 | 项 | 结果 |
 |---|---|
-| P3 套件 · text 模式（alpine 容器） | **49 passed, 13 skipped, 0 failed**（= QA A-3 的 47 passed + A-4 迁移 2 passed；skip 均为 vector 专属按设计门控） |
-| P3 套件 · vector 模式（pgvector 容器） | **60 passed, 2 skipped, 0 failed**（= QA A-2 的 58 passed + A-4 迁移 2 passed；skip 为无列探测变体按设计门控） |
+| P3 套件 · text 模式（alpine 容器） | **49 passed, 13 skipped, 0 failed**（六文件合并复跑，含迁移 0036 用例 2 例。对账 06：A-3 的 47 passed/13 skipped 为五个非迁移文件批次、A-4 的 2 passed 为迁移文件批次，49=47+2 为两批合计而非重复计数；skip 均为 vector 专属按设计门控） |
+| P3 套件 · vector 模式（pgvector 容器） | **60 passed, 2 skipped, 0 failed**（六文件合并复跑，含迁移 0036 用例 2 例。对账 06：A-2 的 58 passed/2 skipped 为五个非迁移文件批次、A-4 的 2 passed 为迁移文件批次，60=58+2 为两批合计而非重复计数；skip 为无列探测变体按设计门控） |
 | `uv run ruff check .`（backend 目录，与 CI Lint 步骤同口径） | All checks passed |
 | 前端 `npm run typecheck` / `check:i18n` | 通过（1288 keys × 4 语言） |
 | C3 镜像回退演练（真实迁移 + 真实卷替换，§6-C3） | 通过 |
@@ -48,7 +48,7 @@ P3 套件 = `test_memory_events.py` + `test_memory_events_postgres.py` + `test_m
 | A1 | **通过（自动化层，双模式）**；真实模型作答质量待生产验证 | 前置：渠道会话绑定客户 → 工单 decide approve（创建事件）→ resolved（解决事件 + open_ticket 置 expired）。实际（双模式各一遍）：①3 条事件 active（created/resolved + open_ticket 软过期保留可审计），`source_type='ticket'`、`confidence=1.0`、`source_ref` 正确；②新一轮会话中 demo 模型对"上次的工单处理进展"发出 `memory_search` tool_call → 工具执行 → 返回含解决结论内容。"隔日"按既定约定改库构造时间字段，无真实等待。"Agent 引用解决结论作答"需真实模型推理——检索命中与内容进入模型输入已证，作答质量列入 §5 指标 1 | P3-IT-01、P3-IT-06（本轮双模式复跑通过） |
 | A2 | **通过（双模式）** | 坐席侧 `PATCH /tickets/{tid}` 备注带 `is_commitment=true`：①`ticket_process_log` remark 行落 `is_commitment=true` 并投递 commitment 事件；②记忆条目 key=`commitment:{log_id}`、`expires_at=NULL`（不过期类）、`source_ref=ticket_id:log_id`；③注入含该承诺（【待跟进事项】段），工单当前状态经 open_ticket 条目可见；未标记备注不产生承诺条目。前端"标记为承诺"勾选入口代码级核对在（TicketsPage 处理表单 + i18n key 四语言齐全） | P3-IT-04、P3-IT-05（本轮复跑）；`TicketsPage.tsx:57` |
 | A3 | **通过（双模式）** | 客户在途工单进线：注入体在画像/偏好段之后出现【待跟进事项】段（代码核对 `agent_runtime/worker.py::_customer_memory` 段顺序：摘要 → 画像/偏好 → 待跟进事项，Phase 1/2 红线未动）；>5 条截断为 5 且按 updated_at 倒序。"Agent 主动提及"为模型行为，注入内容完整进入模型输入已证 | P3-IT-05（两例，本轮复跑）；代码核对 |
-| A4 | **通过（text 模式功能层）**；降级作答质量待生产验证（人工判定） | 在 alpine（无 pgvector）环境重复 A1：text 模式全套 49 passed——关键词检索（tsvector + R9 ILIKE 兜底）命中目标事件，工具端到端返回解决结论内容；探测降级 text 行为正确。"回答质量可接受"按方案为人工判定，留待类生产环境（§7 L6） | 本轮 text 模式全量复跑；P3-IT-06/07（text 腿） |
+| A4 | **通过（text 模式功能层）**；降级作答质量待生产验证（人工判定） | 在 alpine（无 pgvector）环境重复 A1：text 模式全套 49 passed（含迁移 2 例）——关键词检索（tsvector + R9 ILIKE 兜底）命中目标事件，工具端到端返回解决结论内容；探测降级 text 行为正确。"回答质量可接受"按方案为人工判定，留待类生产环境（§7 L6） | 本轮 text 模式全量复跑；P3-IT-06/07（text 腿） |
 | A4b | **通过（双模式）** | 改库构造 3 天前 / 150 天前两条相关度相近事件：3 天前排前（双模式）；半衰期 30→365 调整后分差比值符合 `2^((150-3)/half_life)` 公式（公式断言用英文内容固化，中文平票弱化为已知限制，见 §7 L3） | P3-IT-08（本轮双模式复跑） |
 | A5 | **通过（双模式）** | 改库构造 `expires_at` 过期事件条目 → 执行 maintenance 清理：条目置 `expired`（软过期非删除）；检索与注入均不可见；commitment 类不过期；事件域之外条目（profile/preference）不受影响 | P3-IT-09（本轮双模式复跑） |
 | A6 | **通过（双模式）** | 在途工单 resolved 后：①`open_ticket:{no}` 置 expired（行保留），下一轮注入的待跟进事项中该工单消失；②解决结论条目 active 可被 memory_search 检索到 | P3-IT-01、P3-IT-05（本轮双模式复跑） |
@@ -79,7 +79,7 @@ P3 套件 = `test_memory_events.py` + `test_memory_events_postgres.py` + `test_m
 | # | 核对项 | 判定 | 证据（本轮独立核验） |
 |---|---|---|---|
 | C1 | 检索与注入严格限定当前 tenant + customer，无跨客户泄露（一票否决） | **通过** | ①用例层：P3-UT-11/P3-IT-11 双模式复跑通过——含跨租户/跨客户/过期/profile-preference 诱饵行，双实现（PgVector/TsVector）过滤一致（tenant + customer + active + type=event）；②代码层：工具执行取数只用 run 行上下文 `tenant_id`/`customer_id`（模型仅控制 query 文本，无法指定他人身份，`platform_tools.py` memory_search 分支）；store 两实现 SQL 与 `pending_event_items` 注入查询均为硬过滤；③探测/嵌入写回亦带 tenant 谓词（store.py:179/188） |
-| C2 | 快速体验部署承诺：两容器、无新中间件，降级形态功能完整（一票否决） | **通过** | ①静态核验：`deploy/quickstart/compose.yaml` 仍仅 postgres + app 两服务、无新增服务/中间件，默认镜像 `pgvector/pgvector:pg17`、`POSTGRES_IMAGE` 覆盖口在；生产 compose 零变更（R2：memory-worker 复用后端镜像为 Phase 1 既定拓扑）；②功能层：降级形态 = text 模式全套 49 passed（检索/注入/TTL/事件写入全绿，A4）；根 compose 同步换镜像（非阻断项，R3） |
+| C2 | 快速体验部署承诺：两容器、无新中间件，降级形态功能完整（一票否决） | **通过** | ①静态核验：`deploy/quickstart/compose.yaml` 仍仅 postgres + app 两服务、无新增服务/中间件，默认镜像 `pgvector/pgvector:pg17`、`POSTGRES_IMAGE` 覆盖口在；生产 compose 零变更（R2：memory-worker 复用后端镜像为 Phase 1 既定拓扑）；②功能层：降级形态 = text 模式全套 49 passed（含迁移 2 例；检索/注入/TTL/事件写入全绿，A4）；根 compose 同步换镜像（非阻断项，R3） |
 | C3 | pgvector 镜像变更可独立回滚，回退后不影响服务（按 R17 第 4 条口径：**按 README 文档化流程回退后服务可用、数据保留即通过**） | **通过** | 本轮独立演练（一次性命名卷，真实 `alembic upgrade head` 至 0036，含 vector 扩展 + `embedding vector(1536)` + HNSW 索引 + 带 embedding 的事件数据）：①**破坏性确认**——未清理直接换 alpine：`SELECT` 报 `could not access file "$libdir/vector"`，`DROP COLUMN` 同错、无 SQL 级自救（与 README 警示一致）；②**文档化流程**——pgvector 镜像上执行 `ALTER TABLE memory_items DROP COLUMN embedding; DROP EXTENSION vector;`（HNSW 随列级联删除）后切回 alpine：数据完整保留、新事件行可写、ILIKE 兜底检索命中、探测降级 text（无扩展无列，静默 text 为正确分支）；③双向切换均实测出现 collation version warning，README 的 `REINDEX DATABASE` 注意事项与之一致。升级方向（R16 手工幂等 DDL）由 QA P3-DP-03 真实卷实验覆盖（`06-test-report.md` 附录 C-1），本轮复核 README 步骤与实验逐项吻合。演练容器与卷用后已清理 |
 | C4 | embedding 失败不丢记忆（条目正常写入可检索、可重试） | **通过** | P3-IT-10（vector 模式本轮复跑）：mock embed 持续报错 → 事件条目正常写入、`embedding_failed=true`、event_write 任务本身不失败；重试成功清标记、连续失败保留标记等下轮（每轮限量 50）；事件写入器在 embedding 全停时存活。另 P3-DP-05（R14 形态）：维度不匹配 profile 配置后探测降级 text + 明确 warning 日志 |
 
