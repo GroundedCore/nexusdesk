@@ -40,7 +40,7 @@
 
 文档写 `postgres:16` → `pgvector/pgvector:pg16`。现实：`deploy/quickstart/compose.yaml` 用 `postgres:17-alpine`（`${POSTGRES_IMAGE:-...}` 可覆盖），根 `compose.yaml` 用 `postgres:17`，CI 用 `postgres:17` service。**裁定**：
 - quickstart 默认值改为 `pgvector/pgvector:pg17`（pgvector 官方镜像只有 Debian(bookworm/trixie) 变体，**没有官方 alpine tag**）；`POSTGRES_IMAGE` 环境变量既是镜像源覆盖口、也是回滚口（回退即设回 `postgres:17-alpine`，vector 列残留无害、探测自动降级）。
-- **数据卷就地切换风险（P3-DP-03 必测）**：alpine(musl) → debian(glibc) 同卷切换存在 locale/collation 提供方差异，文本索引可能报 collation version mismatch。切换后应执行 `REINDEX DATABASE`；README 需写明该注意事项，全新部署无此问题。
+- **数据卷就地切换风险（P3-DP-03 必测）**：alpine(musl) → debian(glibc) 同卷切换存在 locale/collation 提供方差异，文本索引可能报 collation version mismatch。切换后应执行 `REINDEX DATABASE`；README 需写明该注意事项，全新部署无此问题。换镜像后的 vector 升级路径另见 R16（不自动升级，需文档化手工步骤）。
 - 生产环境 PG 为外部中间件（production compose 无 postgres 服务），仅需 README 说明"启用 vector 扩展则自动升级为向量模式"。
 - 根 `compose.yaml`（开发库）建议同步换默认镜像，便于本地 vector 模式开发（非阻断项）。
 
@@ -112,6 +112,17 @@
 ### R15 `memory_search` "默认加入"的口径：新 Agent 草稿默认，存量不变
 
 02 FR-5"默认加入"与 03 §上线与回滚"逐 Agent 灰度"存在张力。**裁定**：`memory_search` 登记为内置工具后自动出现在工具选择清单（`registry.BUILTINS` 驱动 `/tools` 列表）；**新建** Agent 草稿的 `initialConfig.tool_names` 默认包含它（前端 T9）；存量 Agent 不变，需在草稿中手动添加并发布——这正是逐 Agent 灰度的操作路径。AC-7（草稿移除后运行时不出现）由 T7 的注册条件保证。注册条件实现于 `PlatformTools.schemas`：`memory_search in allowed` 且 run 行 `customer_id` 非空 且 agent 快照 `memory_enabled!=False`，三者缺一不出现在工具列表（P3-UT-10 四种情形）。
+
+### R16 镜像替换/存量库启用 vector 的升级路径：文档化手工步骤，不做启动自愈
+
+QA 实测（P3-DP-03，2026-10-14）：postgres:17-alpine 同卷换 pgvector/pgvector:pg17 后数据完好、服务正常，但 vector 扩展未安装、`memory_items.embedding` 列不存在——0036 的 DO 探测块**只在迁移当时执行一次**，换镜像不会重跑，探测保持 text；README 原表述"CREATE EXTENSION vector 后下一次启动探测即自动升级为 vector 模式"同样不成立（扩展安装后列仍缺失）。
+
+**裁定：方案 a（文档化手工步骤），实现零新增机制**。否决 b（启动探测自愈 DDL：多副本启动竞态、探测越权做 DDL、迁移职责被穿透）与 c（新增幂等补列迁移/管理命令：Phase 3 范围内不引入新机制，alembic 已执行版本也不会因换镜像重跑）。配套四项分工：
+
+1. **README（dev）**：quickstart 与生产两节写明换镜像/存量库启用 vector 的完整幂等手工步骤——`CREATE EXTENSION IF NOT EXISTS vector;` → `ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(1536);` → `CREATE INDEX IF NOT EXISTS memory_items_embedding ON memory_items USING hnsw (embedding vector_cosine_ops);` → 配置 embedding profile（R4），并附 R3 的 REINDEX 注意事项；删除"自动升级"措辞；
+2. **03 §部署变更（dev）**："纯镜像替换"表述同步修订，指向 README 手工步骤；
+3. **Store 探测加固（dev，小改动）**：探测条件增加 `embedding` 列存在性检查（`information_schema.columns`），保证手工步骤只执行了一半（有扩展无列）时降级 text 并输出 warning，而不是选 vector 后运行期报错；
+4. **04 P3-DP-03 预期（qa）**：改为"同卷替换后数据保留、探测保持 text；按 README 文档化步骤执行幂等 DDL 后探测切换 vector，新条目开始生成 embedding"。P3-DP-04 回退路径不变（换回 postgres 镜像，vector 列残留无害、探测自动降级）。
 
 ### 其他核查结论（无不一致，确认设计可行）
 
