@@ -184,15 +184,18 @@ class MemoryService:
     # ------------------------------------------------------------------
 
     async def add_event_item(
-        self, c, tenant, customer_id, key, content, source_ref, expires_at=None
+        self, c, tenant, customer_id, key, content, source_ref, expires_at=None,
+        clear_embedding=False,
     ):
         """Insert or overwrite one event item inside the caller's transaction.
 
         Same-key upsert semantics mirror extraction: the previous content is
         stashed in ``prev_content`` and human-maintained or deleted rows absorb
         the write (returns ``None``) so staff corrections are never clobbered.
-        A content overwrite also clears the stale embedding so the follow-up
-        ``embed_and_save`` regenerates it.
+        With ``clear_embedding`` (vector mode only — the column does not exist
+        otherwise) a content overwrite also clears the stale embedding so the
+        follow-up ``embed_and_save`` regenerates it instead of ranking on the
+        previous content's vector.
         """
         params = {
             "t": tenant,
@@ -207,7 +210,9 @@ class MemoryService:
             """UPDATE memory_items SET content=:content,prev_content=content,
             confidence=1.0,status='active',source_type='ticket',source_ref=:ref,
             expires_at=:exp,revision=revision+1,last_referenced_at=now(),updated_at=now()
-            WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
+            """
+            + ("embedding=NULL,embedding_failed=false\n            " if clear_embedding else "")
+            + """WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
             AND source_type<>'human' AND status<>'deleted' RETURNING id""",
             **params,
         )

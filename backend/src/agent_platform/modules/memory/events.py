@@ -154,6 +154,10 @@ class EventWriter:
             ttl = None
             if event != "commitment":
                 ttl = datetime.now(UTC) + timedelta(days=self.settings.memory_event_ttl_days)
+            # Vector mode only: a content overwrite must not keep ranking on
+            # the previous content's embedding (the column is absent in text
+            # mode, so the flag travels from the probed store).
+            clear_embedding = self.store.available() == "vector"
             if event == "commitment":
                 note = await self._commitment_note(c, tenant, ticket["id"], log_id)
                 if not note or not note.strip():
@@ -167,6 +171,7 @@ class EventWriter:
                     content,
                     f"{ticket['id']}:{log_id}",
                     expires_at=None,
+                    clear_embedding=clear_embedding,
                 )
                 if item_id:
                     written.append((item_id, content))
@@ -189,6 +194,7 @@ class EventWriter:
                     event_content(ticket_no, event, summary),
                     str(ticket["id"]),
                     expires_at=ttl,
+                    clear_embedding=clear_embedding,
                 )
                 if item_id:
                     written.append((item_id, event_content(ticket_no, event, summary)))
@@ -203,6 +209,7 @@ class EventWriter:
                         summary,
                         str(ticket["id"]),
                         expires_at=ttl,
+                        clear_embedding=clear_embedding,
                     )
                     if open_id:
                         written.append((open_id, summary))
