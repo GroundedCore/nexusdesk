@@ -118,3 +118,16 @@ def test_probe_stays_quiet_when_pgvector_entirely_absent(monkeypatch, caplog):
         picked = asyncio.run(store_module.build_memory_store(None, None, Settings()))
     assert picked.available() == "text"
     assert not caplog.records
+
+
+def test_probe_failure_degrades_instead_of_crashing(monkeypatch, caplog):
+    # D4: a database outage at startup must not crash the lifespan — degrade
+    # to keyword mode with a warning; readiness owns the 503 contract.
+    async def boom(engine):
+        raise ConnectionRefusedError("Connection refused")
+
+    monkeypatch.setattr(store_module, "_has_vector_column", boom)
+    with caplog.at_level(logging.WARNING):
+        picked = asyncio.run(store_module.build_memory_store(None, None, Settings()))
+    assert picked.available() == "text"
+    assert any("Memory store probe failed" in r.message for r in caplog.records)

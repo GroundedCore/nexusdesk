@@ -263,33 +263,49 @@ async def build_memory_store(engine, gateway, settings) -> MemoryStore:
     vector mode with a broken profile surfaces as per-item embedding_failed
     marks, which the retry pass handles). ``auto`` requires the column plus a
     fully resolving embed profile of the right dimension.
+
+    Probe failures (e.g. database unreachable during startup) degrade to
+    keyword mode with a warning instead of crashing the lifespan: the 503
+    contract for outages belongs to the readiness endpoint, and vector mode
+    is re-probed on the next process start.
     """
     configured = settings.memory_vector_enabled
     if configured == "false":
         return TsVectorStore(engine, settings)
-    if not await _has_vector_column(engine):
+    try:
+        if not await _has_vector_column(engine):
+            if configured == "true":
+                logger.warning(
+                    "memory_vector_enabled=true but memory_items.embedding is absent "
+                    "(no pgvector at migration time); using keyword mode"
+                )
+            elif await _has_vector_extension(engine):
+                # R16: the manual enable steps were only half done — the
+                # extension is installed but the column/index DDL never ran.
+                # The probe must not pick vector mode (every query would fail
+                # at runtime), so degrade with a loud pointer instead.
+                logger.warning(
+                    "vector extension is installed but memory_items.embedding is "
+                    "missing (manual enable steps incomplete); using keyword mode — "
+                    "run the idempotent DDL documented in deploy/README.md to "
+                    "enable vector mode"
+                )
+            return TsVectorStore(engine, settings)
         if configured == "true":
+            return PgVectorStore(engine, gateway, settings)
+        ready, reason = await _embedding_ready(gateway, settings)
+        if not ready:
             logger.warning(
-                "memory_vector_enabled=true but memory_items.embedding is absent "
-                "(no pgvector at migration time); using keyword mode"
+                "Memory vector search unavailable: %s; using TSVECTOR keyword mode",
+                reason,
             )
-        elif await _has_vector_extension(engine):
-            # R16: the manual enable steps were only half done — the extension
-            # is installed but the column/index DDL never ran. The probe must
-            # not pick vector mode (every query would fail at runtime), so
-            # degrade with a loud pointer at the documented steps instead.
-            logger.warning(
-                "vector extension is installed but memory_items.embedding is missing "
-                "(manual enable steps incomplete); using keyword mode — run the "
-                "idempotent DDL documented in deploy/README.md to enable vector mode"
-            )
-        return TsVectorStore(engine, settings)
-    if configured == "true":
+            return TsVectorStore(engine, settings)
         return PgVectorStore(engine, gateway, settings)
-    ready, reason = await _embedding_ready(gateway, settings)
-    if not ready:
+    except Exception as exc:  # noqa: BLE001 - outage must not crash startup (D4)
         logger.warning(
-            "Memory vector search unavailable: %s; using TSVECTOR keyword mode", reason
+            "Memory store probe failed (%s: %s); using keyword mode "
+            "until next restart",
+            type(exc).__name__,
+            exc,
         )
         return TsVectorStore(engine, settings)
-    return PgVectorStore(engine, gateway, settings)
