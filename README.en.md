@@ -2,17 +2,78 @@
 
 [简体中文](README.md) · English · [Website](https://www.aidet.top/en/index.html)
 
-[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
+[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCore/nexusdesk)](https://github.com/GroundedCore/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
 
 **An AI agent-powered platform for intelligent customer service and service collaboration.**
 
-NexusDesk connects knowledge retrieval, business tool invocation, human collaboration, and ticket handling into a single customer service flow, helping teams build agents that can answer questions, execute tasks, and follow up on outcomes.
+For teams that must keep customer service data on their own network, this is a **self-hosted, lighter-weight alternative to Intercom / Zendesk** (Apache-2.0; most projects in this space are AGPL-3.0).
 
-Built with Python, LangGraph, and React. It supports a two-container quickstart experience as well as production deployments that use dedicated workers and external middleware.
+NexusDesk connects knowledge retrieval, business tool invocation, human collaboration, and ticket handling into a single customer service flow, helping teams build agents that can answer questions, execute tasks, and follow up on outcomes. Built with Python, LangGraph, and React.
 
-[Quickstart](#quickstart) · [Production deployment](#production-deployment) · [Documentation](#documentation) · [Contributing](#contributing) · [Website](https://www.aidet.top/en/index.html)
+**No Redis. No Kubernetes.** One Postgres handles both storage and the job queue; a single Compose file brings the stack up.
+
+![NexusDesk quickstart: ask a question → retrieval → draft a ticket → human confirms → ticket created](docs/assets/quickstart-demo.gif)
+
+The demo follows one path: ask a question → hit a knowledge citation → the agent drafts a ticket → a human confirms → the ticket is created. The quickstart uses a mock model and illustrates the flow only; it does not represent real answer quality.
+
+```bash
+sh nexusdesk quickstart    # two containers, no model key required
+```
+
+Then open **https://localhost:8080** and select the `sample-support` conversation:
+
+- Enter `发货需要多久？` ("How long does shipping take?") to try knowledge Q&A.
+- Enter `帮我创建工单` ("Help me create a ticket") to try the draft, confirm, and create flow.
+
+> The quickstart ships its own self-signed certificate; the first visit warns about it, and importing `/data/tls/ca.crt` from the container removes the warning (see [Quickstart](#quickstart)).
+
+[Quickstart](#quickstart) · [Production deployment](#production-deployment) · [Why NexusDesk](#why-nexusdesk) · [Documentation](#documentation) · [Contributing](#contributing)
 
 > The project is under continuous development and already has a working core customer service flow. Current capabilities and planned work are described separately; the scope of deployment validation is recorded in the [validation record](deploy/validation-20260923.md).
+
+## Why NexusDesk
+
+These are not feature bullets — they are architectural trade-offs we made on purpose.
+
+| Trade-off | How it works | Who cares |
+| --- | --- | --- |
+| **A smaller operational surface** | Postgres serves as datastore, job queue, and cross-process message channel. No Redis. | Teams deploying into a customer's internal network, facing a security review per component, with limited ops headcount. Every middleware you drop is one less review, one less runbook, one less failure mode. |
+| **Writes are gated by a human** | Agents cannot perform irreversible business actions. For ticket creation, an agent can only **draft**; a human confirms before anything is written. A conversation can also be handed to a person at any point. | Teams that will not let an AI change business systems on its own. |
+| **Every change is traceable** | Agent configuration is draft / publish / rollback with version diffing; model calls are quota-metered; runs emit event logs and operations are audited. | Compliance and security reviews that require changes to be reversible. |
+
+## Channels and integrations
+
+| Category | Supported |
+| --- | --- |
+| Channel access | Embedded chat widget, channel API (HMAC signatures + message-ID deduplication), open platform API (signed webhooks with retries, idempotency keys, SSE streaming) |
+| Messaging platforms | WeCom, WeChat Customer Service, Feishu, DingTalk, Slack, Telegram, Discord (native adapters) |
+| Enterprise identity | OIDC, WeCom, DingTalk, Feishu |
+| Model access | Any OpenAI-compatible service; Chat / Embedding / Rerank / OCR / speech, with connections and versioned profiles managed in one place |
+| Knowledge sources | External parser (PDF, Office, images, depending on the parser implementation), plain TXT / Markdown; Milvus vector index and MinIO / S3 archival (opt-in) |
+| Middleware | **PostgreSQL only** is required; Milvus and S3 are opt-in, **Redis is not used** |
+| Deployment shape | Docker Compose: 2 containers for the quickstart / 6 long-running services plus a one-shot migration task in production; no Kubernetes or Helm yet |
+| UI languages | Simplified Chinese, Traditional Chinese, English, Hindi |
+
+## How it differs
+
+| Dimension | NexusDesk | General-purpose LLM app platforms | Knowledge-base Q&A platforms | Open-source helpdesk systems |
+| --- | --- | --- | --- | --- |
+| Focus | Customer service and collaboration | General app orchestration | Knowledge-base Q&A | Human ticket handling |
+| Ticket and handoff loop | Built in | Build it yourself | Build it yourself | Built in |
+| Writes require human confirmation | Built in | Build it yourself | Build it yourself | Not applicable |
+| Is Redis required | No | Yes | Yes | Yes |
+| Agent versioning and rollback | Built in | Partial | Partial | Not applicable |
+| Model quota and metering | Built in | Partial | Partial | Not applicable |
+| License | Apache-2.0 | See each project | See each project | See each project |
+
+Information about other projects should be checked against their own documentation; this table only illustrates differences in design orientation and is not an assessment of any product.
+
+### Current implementation status (honest notes)
+
+- Retrieval: the runtime defaults to **keyword search**. Vector search requires your own Milvus and is not yet validated end to end.
+- The quickstart uses a **mock model**. It does not represent real answer quality and connects to no real business system.
+- Deployment: **Docker Compose** only. No Kubernetes or Helm charts yet.
+- The project is under continuous development and **is not production ready**. See the [module delivery notes](docs/modules-delivery.md).
 
 ## Product preview
 
@@ -82,6 +143,8 @@ Only two containers (App + PostgreSQL) are started, and no model key is required
 
 > **Keep the two demo inputs above in Chinese.** The mock model triggers on hard-coded Chinese phrases (`工单` selects the ticket tool), and the seeded demo documents are Chinese, so translated inputs will not exercise the same paths.
 
+> **Security note**: the quickstart entry point injects no identity, and requests without credentials are rejected by the API outright. But the login credentials `admin / nexusdesk` are published in this repository, so that line of defence only stops scanners and accidental visitors — it is not an authentication boundary. Keep the default `127.0.0.1` bind, and if you must expose it, restrict the port to trusted IPs with a security group or firewall.
+
 ## Production deployment
 
 Copy the configuration template, fill in the role tokens and the external PostgreSQL connection, configure Milvus / S3 as needed, then start:
@@ -102,7 +165,7 @@ Copy-Item deploy/production/.env.example deploy/production/.env
 
 The default entry point is **http://localhost:8080**; enter the configured role token under "Access and Policy". The platform can start without a default model: configure and publish a Chat profile in the model gateway, bind it to an agent, and conversations can begin.
 
-The production topology separates Web, API, Runtime Worker, and Knowledge Worker, and runs migrations as a dedicated one-shot task. Before reusing an existing database, restore the original credential master key; see the [deployment manual](deploy/README.md) for HTTPS, backup, upgrade, and external access configuration.
+The production topology separates six long-running services — API, Runtime Worker, Channel Worker, Knowledge Worker, Memory Worker, and Web — and runs migrations as a dedicated one-shot task. Before reusing an existing database, restore the original credential master key; see the [deployment manual](deploy/README.md) for HTTPS, backup, upgrade, and external access configuration.
 
 ## Architecture overview
 
@@ -180,9 +243,9 @@ Contact options and pricing are on the [website](https://www.aidet.top/en/contac
 
 Contributions are welcome through issue reports, documentation improvements, test cases, and code.
 
-1. When reporting an issue, describe the usage scenario, reproduction steps, deployment mode, and sanitized logs.
-2. Before developing, read [Local development](docs/local-development.md) and [Module development guidelines](docs/module-development.md).
-3. When submitting a change, describe the problem it solves, the scope of impact, and the validation results; update documentation and migrations when interfaces or data structures change.
+- Please use the [issue templates](https://github.com/GroundedCore/nexusdesk/issues/new/choose) and describe the usage scenario, reproduction steps, deployment mode, and sanitized logs.
+- Before contributing code, read the [contributing guide](CONTRIBUTING.md) — it covers the development environment, pre-submit checks, and a few project conventions.
+- For design-level discussion, use [Discussions](https://github.com/GroundedCore/nexusdesk/discussions).
 
 Do not include API keys, access tokens, or customer privacy data in issue reports, screenshots, or code.
 

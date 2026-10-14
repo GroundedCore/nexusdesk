@@ -1,0 +1,84 @@
+name: 部署问题
+description: 安装、启动、升级或中间件相关的问题
+title: "[部署] "
+labels: ["deployment"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        部署问题有九成与**环境或配置**有关，请尽量填完整。
+        ⚠️ **请勿粘贴真实凭据**（API Key、角色 Token、数据库密码、`master.key`），日志请先脱敏。
+
+        动手排查前建议先看：
+        - [Docker 部署手册](https://github.com/GroundedCore/nexusdesk/blob/main/deploy/README.md)
+        - [中间件说明](https://github.com/GroundedCore/nexusdesk/blob/main/docs/middleware.md)
+        - [本地开发](https://github.com/GroundedCore/nexusdesk/blob/main/docs/local-development.md)
+  - type: dropdown
+    id: path
+    attributes:
+      label: 部署路径
+      options:
+        - quickstart 本地构建（sh nexusdesk quickstart）
+        - quickstart 预构建镜像（docker compose up -d）
+        - 生产部署（nexusdesk deploy）
+        - 本地开发环境（uvicorn + vite）
+        - 从源码自行构建镜像
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象与报错
+      description: 哪一步失败？完整的报错信息是什么？
+      placeholder: |
+        例如：执行 .\nexusdesk.ps1 quickstart 后，容器启动但在 healthcheck 阶段反复重启。
+        报错：...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本或镜像标签
+      placeholder: 例如：NEXUSDESK_VERSION=latest / v0.1.0 / 本地构建
+    validations:
+      required: false
+  - type: textarea
+    id: host
+    attributes:
+      label: 主机环境
+      description: 操作系统与版本、Docker 与 Compose 版本、CPU 架构、可用内存
+      placeholder: |
+        例如：Windows Server 2022 / Docker Desktop 4.x（Linux 容器模式）
+        或：Ubuntu 24.04 / Docker 27.x / Compose v2.30 / x86_64 / 8GB
+    validations:
+      required: true
+  - type: textarea
+    id: middleware
+    attributes:
+      label: 中间件配置
+      description: PostgreSQL 是容器内还是外部？是否启用 Milvus / S3 / 外部 Parser？版本分别是什么？
+      placeholder: |
+        例如：外部 PostgreSQL 17（Supabase pooler，5432 session 模式）
+        Milvus 未启用；S3 未启用；Parser 未配置
+    validations:
+      required: true
+  - type: dropdown
+    id: logs-available
+    attributes:
+      label: 能否提供容器日志
+      options:
+        - 可以，已附在下方（已脱敏）
+        - 可以，但需要我进一步说明怎么取
+        - 暂时无法提供
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      description: |
+        `docker compose logs --tail=200 <服务名>`
+        迁移日志：`docker compose logs migrate`
+      render: text
+    validations:
+      required: false
