@@ -4,7 +4,7 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/0032_memory_events.py` | `memory_items` 加 embedding/tsvector 列；`ticket_process_log` 加 `is_commitment` 列 |
+| 迁移 | `backend/migrations/versions/0036_memory_events.py` | `memory_items` 加 embedding/tsvector 列；`ticket_process_log` 加 `is_commitment` 列 |
 | 新模块 | `modules/memory/store.py` | `MemoryStore` 接口 + pgvector / tsvector 双实现 |
 | 新模块 | `modules/memory/events.py` | 工单事件 → 记忆条目的写入器 |
 | 工具 | `integrations/business_tools/platform_tools.py` | 新增 `memory_search` 内置工具 |
@@ -13,7 +13,7 @@
 | Worker | `modules/memory/worker.py` | 新增 `event_write` / `event_embed_retry` / 每日 TTL 清理 |
 | 部署 | `compose.yaml` / `deploy/` | postgres 镜像 → `pgvector/pgvector`（可选，推荐） |
 
-## 数据模型（迁移 `0032_memory_events.py`）
+## 数据模型（迁移 `0036_memory_events.py`）
 
 ```sql
 -- 检索支持（pgvector 存在时建 vector 列，否则跳过——迁移内用 DO 块探测）
@@ -136,8 +136,8 @@ memory_search_half_life_days: int = 30   # 检索排序的时间衰减半衰期�
 
 ## 部署变更
 
-- `compose.yaml`（quickstart）与 `deploy/production`：`postgres:16` → `pgvector/pgvector:pg16`（同名服务，数据卷兼容，纯镜像替换）；
-- `deploy/production`：新增 `memory-worker` 常驻服务（Phase 1 部署形态 2026-10-10 修订引入：生产独立容器、复用后端镜像、可多副本伸缩；quickstart 不变，仍内嵌于 API 进程）；
+- `compose.yaml`（quickstart）：默认镜像 `postgres:17-alpine` → `pgvector/pgvector:pg17`（`POSTGRES_IMAGE` 可覆盖/回退）；`deploy/production` 的 PostgreSQL 为外部中间件，Compose 零变更，在目标库启用 vector 扩展即自动升级为向量模式；
+- `deploy/production`：memory-worker 增加 event_write/TTL/重试任务处理能力，部署形态不变（该服务自 Phase 1 起已存在：生产独立容器、复用后端镜像、可多副本伸缩；quickstart 不变，仍内嵌于 API 进程）；
 - 不换镜像的存量部署：迁移照常通过，自动降级 TSVECTOR，文档（`deploy/README.md`）补一节说明差异；
 - 生产备份/升级流程不变（pgvector 数据随 PG dump 走）。
 
