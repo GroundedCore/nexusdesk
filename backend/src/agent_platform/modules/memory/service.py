@@ -30,6 +30,13 @@ INJECT_MAX_TOKENS = 1000
 PROFILE_HEADER = "【客户画像】"
 PREFERENCE_HEADER = "【客户偏好】"
 
+# Phase 3 event items. The in-flight injection keys (open tickets and pending
+# commitments) share the items table with plain event records; the key prefix
+# is what makes an item appear in the 【待跟进事项】 section.
+EVENT_HEADER = "【待跟进事项】"
+OPEN_TICKET_PREFIX = "open_ticket:"
+COMMITMENT_PREFIX = "commitment:"
+
 # Confidence routing (FR-2): high confidence takes effect immediately, medium
 # waits for human confirmation, low is dropped. Thresholds are settings.
 def route_confidence(confidence, auto_threshold, pending_threshold):
@@ -72,6 +79,22 @@ def render_memory_injection(items):
             lines = "\n".join(f"- {item['key']}: {item['content']}" for item in groups[item_type])
             sections.append(f"{header}\n{lines}")
     return "\n\n".join(sections) if sections else None
+
+
+def render_event_injection(items):
+    """Render the high-priority event section (FR-3), appended after the
+    profile/preference rendering so the injection order stays
+    summary → profile/preference → pending events. ``None`` means "inject
+    nothing", matching ``render_memory_injection``.
+    """
+    lines = []
+    for item in items:
+        key = item["key"]
+        if key.startswith(OPEN_TICKET_PREFIX):
+            lines.append(f"- 工单 {key[len(OPEN_TICKET_PREFIX):]} 处理中：{item['content']}")
+        elif key.startswith(COMMITMENT_PREFIX):
+            lines.append(f"- 承诺待兑现：{item['content']}")
+    return f"{EVENT_HEADER}\n" + "\n".join(lines) if lines else None
 
 
 class MemoryService:
@@ -154,6 +177,82 @@ class MemoryService:
         """Service-layer trimming: count and token budgets applied here (FR-3)."""
         items = await self.active_items(tenant, customer_id, limit=max_items)
         return trim_items(items, max_items, max_tokens)
+
+    # ------------------------------------------------------------------
+    # Phase 3 event items (FR-1/FR-3/FR-4). Event rows are written by the
+    # event_write worker, never by the synchronous ticket path.
+    # ------------------------------------------------------------------
+
+    async def add_event_item(
+        self, c, tenant, customer_id, key, content, source_ref, expires_at=None
+    ):
+        """Insert or overwrite one event item inside the caller's transaction.
+
+        Same-key upsert semantics mirror extraction: the previous content is
+        stashed in ``prev_content`` and human-maintained or deleted rows absorb
+        the write (returns ``None``) so staff corrections are never clobbered.
+        A content overwrite also clears the stale embedding so the follow-up
+        ``embed_and_save`` regenerates it.
+        """
+        params = {
+            "t": tenant,
+            "c": customer_id,
+            "key": key,
+            "content": content,
+            "ref": source_ref,
+            "exp": expires_at,
+        }
+        row = await one(
+            c,
+            """UPDATE memory_items SET content=:content,prev_content=content,
+            confidence=1.0,status='active',source_type='ticket',source_ref=:ref,
+            expires_at=:exp,revision=revision+1,last_referenced_at=now(),updated_at=now()
+            WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
+            AND source_type<>'human' AND status<>'deleted' RETURNING id""",
+            **params,
+        )
+        if not row:
+            row = await one(
+                c,
+                """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
+                status,source_type,source_ref,expires_at)
+                VALUES(:t,:c,'event',:key,:content,1.0,'active','ticket',:ref,:exp)
+                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                **params,
+            )
+        return row["id"] if row else None
+
+    async def expire_open_ticket(self, c, tenant, customer_id, ticket_no):
+        """Soft-expire the in-flight injection row for one ticket (AC-6).
+
+        The row is kept (not deleted) so the audit trail survives; returns the
+        expired row id or ``None`` when there was nothing to expire.
+        """
+        row = await one(
+            c,
+            """UPDATE memory_items SET status='expired',updated_at=now()
+            WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
+            AND status='active' RETURNING id""",
+            t=tenant,
+            c=customer_id,
+            key=OPEN_TICKET_PREFIX + ticket_no,
+        )
+        return row["id"] if row else None
+
+    async def pending_event_items(self, tenant, customer_id, limit):
+        """In-flight injection items: open tickets and pending commitments,
+        newest first (FR-3)."""
+        async with self.engine.connect() as c:
+            return await many(
+                c,
+                """SELECT id,type,key,content,updated_at FROM memory_items
+                WHERE tenant_id=:t AND customer_id=:c AND type='event' AND status='active'
+                AND (key LIKE 'open_ticket:%' OR key LIKE 'commitment:%')
+                ORDER BY updated_at DESC,id DESC LIMIT :lim""",
+                t=tenant,
+                c=customer_id,
+                lim=limit,
+            )
 
     async def apply_extracted(self, c, tenant, customer_id, ops, source_ref, auto, pending):
         """Apply validated extraction ops inside the caller's transaction.
