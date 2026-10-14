@@ -8,6 +8,7 @@ after the database transaction commits: a model failure must never roll back
 the memory write itself.
 """
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -42,6 +43,26 @@ def event_content(ticket_no, event, summary):
     """Content templates for the three lifecycle events (FR-1, P3-UT-06)."""
     verbs = {"created": "已创建", "resolved": "已解决", "closed": "已关闭"}
     return f"工单 {ticket_no} {verbs[event]}：{summary}"
+
+
+async def enqueue_event_task(conn, tenant, ticket_id, event, log_id=None):
+    """Insert one ``event_write`` task inside the caller's transaction.
+
+    The synchronous ticket path only ever does this INSERT (milliseconds);
+    the payload is the minimal set and the writer re-reads ticket state, so
+    events are replay-idempotent through the same-key upsert.
+    """
+    row = await one(
+        conn,
+        """INSERT INTO memory_tasks(tenant_id,kind,payload)
+        VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
+        t=tenant,
+        kind=EVENT_KIND,
+        payload=json.dumps(
+            {"ticket_id": str(ticket_id), "event": event, "log_id": log_id}
+        ),
+    )
+    return row["id"]
 
 
 class EventWriter:

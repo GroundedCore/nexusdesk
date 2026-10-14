@@ -99,6 +99,9 @@ class TicketUpdate(Input):
     status: Literal["open", "in_progress", "waiting_customer", "resolved", "closed"]
     note: str = Field(default="", max_length=8000)
     revision: int = Field(ge=1)
+    # Phase 3: marking a remark as a commitment records it in the customer's
+    # event memory (only meaningful with a non-empty note).
+    is_commitment: bool = False
 
 
 class ChannelInput(NameInput):
@@ -509,7 +512,7 @@ async def tickets(request: Request, user: Reader):
 @router.patch("/tickets/{tid}")
 async def ticket(tid: UUID, body: TicketUpdate, request: Request, user: Operator):
     return await services(request).customer.update_ticket(
-        user.tenant, user.actor, tid, body.status, body.note, body.revision
+        user.tenant, user.actor, tid, body.status, body.note, body.revision, body.is_commitment
     )
 
 
