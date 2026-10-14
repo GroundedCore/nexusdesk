@@ -79,7 +79,7 @@ P3 套件 = `test_memory_events.py`（QA）+ `test_memory_events_postgres.py`（
 | 编号 | 用例 | 测试位置/方式 | 结果 |
 |---|---|---|---|
 | P3-DP-01 | pgvector 镜像全新部署 | `test_memory_event_migrations.py::test_0036_probe_block_matches_server_capability`（pgvector 容器）：迁移建 `embedding vector(1536)`（atttypmod=1536 实测）+ HNSW 索引 + `content_tsv` GIN + `embedding_failed` + `ticket_process_log.is_commitment`；P3-UT-01 探测 vector | 通过 |
-| P3-DP-02 | 普通 postgres 镜像部署 | 同测试（alpine 容器）：0036 迁移正常通过、无 vector 列/索引；探测降级 text；text 模式全套 46 passed（检索/注入/TTL 全绿） | 通过 |
+| P3-DP-02 | 普通 postgres 镜像部署 | 同测试（alpine 容器）：0036 迁移正常通过、无 vector 列/索引；探测降级 text；text 模式全套 47 passed（检索/注入/TTL 全绿） | 通过 |
 | P3-DP-03 | 镜像替换升级（postgres→pgvector 同卷，按 R16） | 真实 Docker 卷替换实验（附录 C-1）：数据保留、服务可用、替换后探测保持 text（DO 块只在迁移当时执行一次）；按 README 执行幂等 DDL（`CREATE EXTENSION IF NOT EXISTS vector` → `ADD COLUMN IF NOT EXISTS embedding vector(1536)` → `CREATE INDEX IF NOT EXISTS ... hnsw`）+ 配置 embedding profile 后探测切 vector、新条目生成 embedding。迁移级数据保留由 `test_0036_preserves_existing_rows_and_downgrades` 固化 | 通过 |
 | P3-DP-04 | 镜像回退（pgvector→postgres，按 R17） | 真实 Docker 卷回退实验（附录 C-2）：在 pgvector 镜像上先执行清理 DDL（`DROP COLUMN embedding` → `DROP EXTENSION vector`）后切换——服务可用、探测 text、数据保留。**未清理直接回退的破坏性实测确认**：memory_items 全表不可读写（`could not access file "$libdir/vector"`），alpine 上 DROP COLUMN/INDEX 同样失败、无 SQL 级自救——README 已据此把清理 DDL 标为强制步骤 | 通过（风险如实记录） |
 | P3-DP-05 | embedding 维度校验（按 R14：探测降级 + warning） | `test_p3_dp_05_probe_text_with_warning_on_dimension_mismatch`：绑定维度 ≠1536 的 embed profile 后探测降级 text 并输出明确 warning 日志（断言 `available()='text'` + caplog） | 通过（pgvector 容器） |
