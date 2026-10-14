@@ -18,20 +18,28 @@ cannot be re-claimed forever.
 
 import asyncio
 import logging
+import time
 from uuid import uuid4
 
+from agent_platform.modules.memory.events import EVENT_KIND
 from agent_platform.modules.memory.summary import SummaryError, backoff_seconds
-from agent_platform.platform.persistence.store import audit, execute, one
+from agent_platform.platform.persistence.store import audit, execute, many, one
 
 logger = logging.getLogger(__name__)
 
 LEASE_SECONDS = 120
 HEARTBEAT_SECONDS = 30
+# Idle-cycle maintenance (R11): no scheduler — when the queue is empty and at
+# least scan_interval_seconds passed since the last pass, the worker runs the
+# TTL sweep and the embedding retry batch. The first pass runs at startup.
+SCAN_INTERVAL_SECONDS = 24 * 3600
+EMBED_RETRY_BATCH = 50
 
 # Permanent-failure audit action per task kind (Phase 1 summary, Phase 2 extraction).
 FAILURE_AUDIT = {
     "conversation_summary": "memory.summary.failed",
     "memory_extract": "memory.extract.failed",
+    EVENT_KIND: "memory.event.failed",
 }
 
 
@@ -44,11 +52,18 @@ class MemoryWorker:
         poll_seconds=0.5,
         lease_seconds=LEASE_SECONDS,
         heartbeat_seconds=HEARTBEAT_SECONDS,
+        store=None,
+        scan_interval_seconds=SCAN_INTERVAL_SECONDS,
     ):
         self.engine, self.service, self.settings = engine, service, settings
         self.poll_seconds = poll_seconds
         self.lease_seconds = lease_seconds
         self.heartbeat_seconds = heartbeat_seconds
+        # Phase 3 store: needed for the embedding retry pass; None disables
+        # retrying (unit tests and legacy wirings keep working).
+        self.store = store
+        self.scan_interval_seconds = scan_interval_seconds
+        self.last_scan = None
         self.owner = uuid4()
         self.stopping = asyncio.Event()
 
@@ -188,6 +203,48 @@ class MemoryWorker:
             await self._finish(task, "done")
         return True
 
+    def maintenance_due(self):
+        """Idle-cycle maintenance gate: first pass at startup, then daily."""
+        return (
+            self.last_scan is None
+            or time.monotonic() - self.last_scan >= self.scan_interval_seconds
+        )
+
+    async def maintenance(self):
+        """One maintenance pass: TTL soft-expiry plus bounded embedding retry.
+
+        Both statements are single-tenant and idempotent, so concurrent
+        replicas can run them safely (R11). The pass is attempt-stamped up
+        front: a persistently failing pass retries at the next interval, not
+        on every idle cycle.
+        """
+        self.last_scan = time.monotonic()
+        tenant = self.settings.tenant_id
+        async with self.engine.begin() as c:
+            expired = await many(
+                c,
+                """UPDATE memory_items SET status='expired',updated_at=now()
+                WHERE tenant_id=:t AND type='event' AND status='active'
+                AND expires_at<now() RETURNING id""",
+                t=tenant,
+            )
+            if expired:
+                logger.info("Memory TTL pass expired %d event items", len(expired))
+            retry = []
+            if self.store is not None and self.store.available() == "vector":
+                retry = await many(
+                    c,
+                    """SELECT id,content FROM memory_items
+                    WHERE tenant_id=:t AND embedding_failed AND status='active'
+                    ORDER BY updated_at LIMIT :lim""",
+                    t=tenant,
+                    lim=EMBED_RETRY_BATCH,
+                )
+        # Embedding runs outside the sweep transaction; per-item failures keep
+        # the embedding_failed flag and wait for the next pass (P3-IT-10).
+        for row in retry:
+            await self.store.embed_and_save(row["id"], row["content"])
+
     async def reset_running(self):
         """Graceful shutdown: tasks claimed by this worker become claimable again."""
         async with self.engine.begin() as c:
@@ -204,6 +261,8 @@ class MemoryWorker:
             while not self.stopping.is_set():
                 try:
                     if not await self.run_once():
+                        if self.maintenance_due():
+                            await self.maintenance()
                         await asyncio.sleep(self.poll_seconds)
                 except asyncio.CancelledError:
                     raise

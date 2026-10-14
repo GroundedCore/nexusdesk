@@ -11,6 +11,7 @@ from agent_platform.modules.agent_runtime.notify import Listener, Notifier
 from agent_platform.modules.agent_runtime.repository import RunRepository
 from agent_platform.modules.agent_runtime.worker import RuntimeWorker
 from agent_platform.modules.evaluation.service import EvaluationService
+from agent_platform.modules.memory.store import build_memory_store
 from agent_platform.modules.model_gateway.service import build_model
 from agent_platform.modules.tool_gateway.service import HttpTool, ToolGateway
 from agent_platform.platform.persistence.database import create_engine
@@ -80,6 +81,12 @@ async def runtime_services(settings):
             runtime = RuntimeEngine(model, tools, settings)
             repository = RunRepository(engine)
             platform = PlatformServices(engine, repository, settings, snapshot, specs, model_client)
+            # Phase 3: probe the memory store once at startup (pgvector vs
+            # keyword fallback); the runtime worker, the memory worker and the
+            # memory_search tool all share this one instance.
+            platform.memory_store = await build_memory_store(
+                engine, platform.gateway, settings
+            )
             platform.channels.bind_listener(listener)
             factory = RuntimeFactory(runtime, platform, client, settings, tools.limit)
             platform.evaluation = EvaluationService(engine, platform.agents, factory)
