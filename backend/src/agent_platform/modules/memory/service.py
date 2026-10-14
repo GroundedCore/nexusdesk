@@ -211,7 +211,7 @@ class MemoryService:
             confidence=1.0,status='active',source_type='ticket',source_ref=:ref,
             expires_at=:exp,revision=revision+1,last_referenced_at=now(),updated_at=now()
             """
-            + ("embedding=NULL,embedding_failed=false\n            " if clear_embedding else "")
+            + (",embedding=NULL,embedding_failed=false\n            " if clear_embedding else "")
             + """WHERE tenant_id=:t AND customer_id=:c AND type='event' AND key=:key
             AND source_type<>'human' AND status<>'deleted' RETURNING id""",
             **params,
