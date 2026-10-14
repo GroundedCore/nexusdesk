@@ -14,7 +14,7 @@ from agent_platform.platform.persistence.store import (
 )
 from agent_platform.platform.secrets.vault import CredentialVault
 
-BUILTINS = {"knowledge_search", "propose_ticket", "ticket_lookup"}
+BUILTINS = {"knowledge_search", "propose_ticket", "ticket_lookup", "memory_search"}
 
 
 class ToolRegistry:

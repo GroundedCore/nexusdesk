@@ -271,6 +271,7 @@ class ToolWorkspace:
                 "knowledge_search",
                 "propose_ticket",
                 "ticket_lookup",
+                "memory_search",
             }:
                 raise DomainError("reserved_tool_name")
             if body.auth_mode != "custom":
