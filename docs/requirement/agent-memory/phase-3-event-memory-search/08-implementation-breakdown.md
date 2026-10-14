@@ -39,7 +39,7 @@
 ### R3 镜像版本：postgres:17-alpine → `pgvector/pgvector:pg17`
 
 文档写 `postgres:16` → `pgvector/pgvector:pg16`。现实：`deploy/quickstart/compose.yaml` 用 `postgres:17-alpine`（`${POSTGRES_IMAGE:-...}` 可覆盖），根 `compose.yaml` 用 `postgres:17`，CI 用 `postgres:17` service。**裁定**：
-- quickstart 默认值改为 `pgvector/pgvector:pg17`（pgvector 官方镜像只有 Debian(bookworm/trixie) 变体，**没有官方 alpine tag**）；`POSTGRES_IMAGE` 环境变量既是镜像源覆盖口、也是回滚口（回退即设回 `postgres:17-alpine`，vector 列残留无害、探测自动降级）。
+- quickstart 默认值改为 `pgvector/pgvector:pg17`（pgvector 官方镜像只有 Debian(bookworm/trixie) 变体，**没有官方 alpine tag**）；`POSTGRES_IMAGE` 环境变量是镜像源覆盖口。~~回退即设回镜像、vector 列残留无害~~ **此假设已被 DP-04 实测推翻，回退必须先在 pgvector 镜像上执行清理 DDL，见 R17**。
 - **数据卷就地切换风险（P3-DP-03 必测）**：alpine(musl) → debian(glibc) 同卷切换存在 locale/collation 提供方差异，文本索引可能报 collation version mismatch。切换后应执行 `REINDEX DATABASE`；README 需写明该注意事项，全新部署无此问题。换镜像后的 vector 升级路径另见 R16（不自动升级，需文档化手工步骤）。
 - 生产环境 PG 为外部中间件（production compose 无 postgres 服务），仅需 README 说明"启用 vector 扩展则自动升级为向量模式"。
 - 根 `compose.yaml`（开发库）建议同步换默认镜像，便于本地 vector 模式开发（非阻断项）。
@@ -122,7 +122,18 @@ QA 实测（P3-DP-03，2026-10-14）：postgres:17-alpine 同卷换 pgvector/pgv
 1. **README（dev）**：quickstart 与生产两节写明换镜像/存量库启用 vector 的完整幂等手工步骤——`CREATE EXTENSION IF NOT EXISTS vector;` → `ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(1536);` → `CREATE INDEX IF NOT EXISTS memory_items_embedding ON memory_items USING hnsw (embedding vector_cosine_ops);` → 配置 embedding profile（R4），并附 R3 的 REINDEX 注意事项；删除"自动升级"措辞；
 2. **03 §部署变更（dev）**："纯镜像替换"表述同步修订，指向 README 手工步骤；
 3. **Store 探测加固（dev，小改动）**：探测条件增加 `embedding` 列存在性检查（`information_schema.columns`），保证手工步骤只执行了一半（有扩展无列）时降级 text 并输出 warning，而不是选 vector 后运行期报错；
-4. **04 P3-DP-03 预期（qa）**：改为"同卷替换后数据保留、探测保持 text；按 README 文档化步骤执行幂等 DDL 后探测切换 vector，新条目开始生成 embedding"。P3-DP-04 回退路径不变（换回 postgres 镜像，vector 列残留无害、探测自动降级）。
+4. **04 P3-DP-03 预期（qa）**：改为"同卷替换后数据保留、探测保持 text；按 README 文档化步骤执行幂等 DDL 后探测切换 vector，新条目开始生成 embedding"。~~P3-DP-04 回退路径不变~~ P3-DP-04 预期按 R17 修订（回退有强制前置清理 DDL）。
+
+### R17 镜像回退路径：清理 DDL 是强制前置，"vector 列残留无害"不成立
+
+QA 实测（P3-DP-04，2026-10-15）：pgvector 镜像部署、写入带 embedding 数据后同卷换回 postgres:17-alpine——PG 能启动，但 `memory_items` **全表不可用**：任何 SELECT（含不含 embedding 列的投影）都在规划期报 `could not access file "$libdir/vector"`（alpine 无 vector 二进制，而表挂 vector 类型列 + HNSW 索引）；且 `DROP COLUMN` / `DROP INDEX` 在 alpine 上同样报该错，**无 SQL 级自救手段**。后果：回退后检索/注入/抽取/事件写入全断（注入有 try/except 不阻断对话，但记忆功能整体瘫痪）。03 §上线与回滚、R3、README 的"vector 列残留无害"措辞均错误。
+
+**裁定：方案 a（与 R16 同一原则：文档化步骤，实现零改动）**。已验证的正确回退流程（数据完好）：**先在 pgvector 镜像上执行清理 DDL——`ALTER TABLE memory_items DROP COLUMN embedding; DROP EXTENSION vector;`（HNSW 索引随列级联删除）——再切换 alpine 镜像**；切换后读写正常、探测 text。方案 b（工程手段消除扩展二进制依赖）Phase 3 范围内不现实，否决。配套分工：
+
+1. **README（dev）**：回退一节整体改写——删除"残留无害"，写明强制前置清理 DDL + 切换步骤；升级（R16）与回退两个方向的步骤都附 collation version warning 说明与 `REINDEX DATABASE` 注意事项（QA 实测 alpine↔debian 双向切换均出现该 warning）；
+2. **03 §上线与回滚（dev）**："pgvector 镜像变更可独立回滚（换回 postgres 镜像，vector 列残留无害，探测自动降级）"修订为"按 README 文档化流程回退：pgvector 镜像上先执行清理 DDL，再切回 postgres 镜像，探测自动降级"；
+3. **04 P3-DP-04 预期（qa）**：改为"回退前按 README 在 pgvector 镜像上执行清理 DDL（DROP COLUMN + DROP EXTENSION），切换后服务可用、探测 text、数据保留"；
+4. **05 合规 C3（验收阶段注意）**："可独立回滚、回退后不影响服务"的判读以文档化流程为前提——按 README 流程执行回退后服务可用、数据保留即判定通过（验收代理执行时按此口径）。
 
 ### 其他核查结论（无不一致，确认设计可行）
 
