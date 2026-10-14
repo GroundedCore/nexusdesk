@@ -13,7 +13,8 @@ interface Props {
   onBack: () => void;
 }
 
-const memoryTypes = ['profile', 'preference'];
+const memoryTypes = ['profile', 'preference', 'event'];
+const typeTitles = (): Record<string, string> => ({ profile: t('客户画像'), preference: t('客户偏好'), event: t('事件') });
 
 export function CustomerDetail({ customerId, operator, onBack }: Props) {
   const detail = useResource<Detail>(`/memory/customers/${customerId}`);
@@ -94,7 +95,7 @@ export function CustomerDetail({ customerId, operator, onBack }: Props) {
         />
       </Card>
       {memoryTypes.map(type => (
-        <Card key={type} title={type === 'profile' ? t('客户画像') : t('客户偏好')} data-type={type}>
+        <Card key={type} title={typeTitles()[type] || type} data-type={type}>
           <MemoryItemTable
             items={itemsOf(type)}
             operator={operator}

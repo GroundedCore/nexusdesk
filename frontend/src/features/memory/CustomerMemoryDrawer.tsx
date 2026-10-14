@@ -12,9 +12,10 @@ interface Props {
 const sections: { type: string; title: () => string }[] = [
   { type: 'profile', title: () => t('客户画像') },
   { type: 'preference', title: () => t('客户偏好') },
+  { type: 'event', title: () => t('事件') },
 ];
 
-/** Read-only profile/preference snapshot for the conversation workbench (US-3). */
+/** Read-only profile/preference/event snapshot for the conversation workbench (US-3). */
 export function CustomerMemoryDrawer({ customerId, open, onClose }: Props) {
   const detail = useResource<MemoryCustomerDetail>(open ? `/memory/customers/${customerId}` : null);
   const activeOf = (type: string) => (detail.data?.items || []).filter(item => item.type === type && item.status === 'active');
