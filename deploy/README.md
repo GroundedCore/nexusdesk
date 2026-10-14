@@ -126,7 +126,7 @@ PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Mi
 | 触发条件 | 扩展可用，且配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度须为 1536） | 任一条件不满足即降级，启动日志给出 warning |
 | 检索方式 | 向量余弦相关度 × 时间衰减 | 关键词（TSVECTOR，中文以 ILIKE 兜底）× 同一时间衰减 |
 | 结果质量 | 语义相近即可命中 | 依赖词汇重叠，中文召回质量较低 |
-| embedding 失败 | 条目标记 `embedding_failed`，每日维护任务限量重试；期间仍走关键词兜底 | 不适用 |
+| embedding 失败 | 条目标记 `embedding_failed`，每日维护任务限量重试；重试成功前该条目不参与召回 | 不适用 |
 
 功能开关与检索模式无关：`memory_search` 工具、待跟进事项注入、事件 TTL（`AGENT_MEMORY_EVENT_TTL_DAYS`，默认 180 天）在两种模式下行为一致；`AGENT_MEMORY_VECTOR_ENABLED=false` 可在有 pgvector 的环境强制 text 模式（对比测试用），`AGENT_MEMORY_EVENT_ENABLED=false` 只停止新事件写入。
 
@@ -139,7 +139,7 @@ CREATE INDEX IF NOT EXISTS memory_items_embedding
     ON memory_items USING hnsw (embedding vector_cosine_ops);
 ```
 
-然后配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度 1536）并重启服务；启动探测即切换 vector 模式，新写入的事件条目开始生成 embedding。步骤可重复执行（全部幂等）。只执行一半（例如装了扩展但没建列）时探测保持 text 模式并输出 warning 日志，不会运行期报错。启用前已存在的存量条目没有 embedding，不参与 vector 召回，仍走关键词兜底；被覆写后会自动补上 embedding。
+然后配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度 1536）并重启服务；启动探测即切换 vector 模式，新写入的事件条目开始生成 embedding。步骤可重复执行（全部幂等）。只执行一半（例如装了扩展但没建列）时探测保持 text 模式并输出 warning 日志，不会运行期报错。启用前已存在的存量条目没有 embedding，不参与召回（vector 检索含 `embedding IS NOT NULL` 硬条件，关键词兜底只在查询 embedding 失败时整查询降级），直到被覆写补上 embedding。
 
 **回退到普通镜像（清理 DDL 是强制前置）**：从 pgvector 镜像回退 `postgres:17-alpine` 时，**必须先在 pgvector 镜像上**执行清理 DDL，再切换镜像：
 
