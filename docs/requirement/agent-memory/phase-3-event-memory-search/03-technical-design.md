@@ -155,6 +155,6 @@ memory_search_half_life_days: int = 30   # 检索排序的时间衰减半衰期�
 
 ## 上线与回滚
 
-- 全部能力由 `memory_tasks` 异步驱动，关闭 `memory_extract_enabled`（复用 Phase 2 总开关，或拆分 `memory_event_enabled`）即停止新事件写入；
+- 全部能力由 `memory_tasks` 异步驱动，关闭 `memory_event_enabled`（R10 拆分的独立开关）即停止新事件写入；
 - 检索工具可通过 Agent 草稿移除，逐 Agent 灰度；
 - pgvector 镜像变更按 `deploy/README.md` 文档化流程回退：先在 pgvector 镜像上执行清理 DDL（`DROP COLUMN embedding` + `DROP EXTENSION vector`），再切回 postgres 镜像，探测自动降级（R17——"列残留无害"不成立，跳过清理直接换镜像会导致 `memory_items` 全表不可用）。
