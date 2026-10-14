@@ -113,6 +113,25 @@ API 就绪检查为 `/api/v1/ready`；它不代表模型调用一定成功。Wor
 
 PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Milvus 内部推理/索引所需资源另行评估；生产 Compose 是部署拓扑，不等于高可用、SSO、监控、备份恢复等生产验收全部完成。
 
+## 记忆检索：pgvector 与降级模式
+
+事件记忆（工单事件、待办承诺）的语义检索依赖 PostgreSQL 的 pgvector 扩展。quickstart 的默认 PostgreSQL 镜像为 `pgvector/pgvector:pg17`（pgvector 官方只提供 Debian 变体，没有 alpine tag）；`POSTGRES_IMAGE` 既是镜像源覆盖口，也是回滚口——设回 `postgres:17-alpine` 即退回普通镜像，残留的 vector 列无害，启动探测会自动降级。
+
+两种检索模式的行为差异：
+
+| | vector 模式（有 pgvector） | text 模式（无 pgvector 或未配置向量模型） |
+| --- | --- | --- |
+| 触发条件 | 扩展可用，且配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度须为 1536） | 任一条件不满足即降级，启动日志给出 warning |
+| 检索方式 | 向量余弦相关度 × 时间衰减 | 关键词（TSVECTOR，中文以 ILIKE 兜底）× 同一时间衰减 |
+| 结果质量 | 语义相近即可命中 | 依赖词汇重叠，中文召回质量较低 |
+| embedding 失败 | 条目标记 `embedding_failed`，每日维护任务限量重试；期间仍走关键词兜底 | 不适用 |
+
+功能开关与检索模式无关：`memory_search` 工具、待跟进事项注入、事件 TTL（`AGENT_MEMORY_EVENT_TTL_DAYS`，默认 180 天）在两种模式下行为一致；`AGENT_MEMORY_VECTOR_ENABLED=false` 可在有 pgvector 的环境强制 text 模式（对比测试用），`AGENT_MEMORY_EVENT_ENABLED=false` 只停止新事件写入。
+
+**就地切换镜像的数据卷注意事项**：同一数据卷从 alpine（musl）镜像切换到 Debian（glibc）镜像时，glibc 的 locale/collation 提供方与 musl 不同，文本索引可能报 collation version mismatch。切换后应对该库执行一次 `REINDEX DATABASE`（例如 `docker compose exec postgres psql -U nexusdesk -d nexusdesk -c 'REINDEX DATABASE nexusdesk'`）；全新部署无此问题。反方向（Debian → alpine）同理。
+
+生产环境的 PostgreSQL 是外部中间件（生产 Compose 不含 postgres 服务，零变更）：在目标库安装 vector 扩展（`CREATE EXTENSION vector`，需 superuser）后，下一次启动探测即自动升级为 vector 模式；不安装则保持 text 模式，功能完整可用。pgvector 数据随普通 PG dump 备份，备份/升级流程不变。生产 memory-worker 的部署形态不变，仅通过代码获得 event_write / TTL / 重试任务处理能力。
+
 ## 自动部署（GitHub Actions CI/CD）
 
 `.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
