@@ -35,7 +35,7 @@
 | P3-DP-04 卷回退实验（清理 DDL 后 pgvector→postgres） | 通过（服务可用、探测 text、数据保留）；未清理直接回退的破坏性如实记录 | 附录 C-2 |
 | quickstart/根 compose 静态核验 | 默认 `pgvector/pgvector:pg17`、`POSTGRES_IMAGE` 可覆盖、两容器形态不变、无新中间件 | 附录 C-3 |
 
-P3 套件 = `test_memory_events.py`（QA）+ `test_memory_events_postgres.py`（QA）+ `test_memory_event_migrations.py`（QA）+ `test_memory_event_render.py`（dev）+ `test_memory_search_tool.py`（dev）+ `test_memory_store.py`（dev），双容器各执行一遍。
+P3 套件 = `test_memory_events.py`（QA）+ `test_memory_events_postgres.py`（QA）+ `test_memory_event_migrations.py`（QA）+ `test_memory_event_render.py`（dev）+ `test_memory_search_tool.py`（dev）+ `test_memory_store.py`（dev），双容器各执行一遍。注：附录 A-2/A-3 批次为五个非迁移文件（未含 `test_memory_event_migrations.py`），迁移文件批次见 A-4；两批合计 text 49 / vector 60 passed。
 
 ## 3. 单元测试（P3-UT）逐条结果
 
