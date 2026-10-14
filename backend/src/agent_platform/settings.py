@@ -88,6 +88,28 @@ class Settings(BaseSettings):
     # Injection cap: at most this many active items enter the prompt (the
     # 1000-token budget is a fixed module constant in memory.service).
     memory_inject_max_items: int = Field(default=20, ge=1, le=100)
+    # Event memory (Phase 3). Kill switch for the write side only: when off,
+    # the ticket hooks stop dispatching event_write tasks; already queued
+    # tasks still run to completion and search/injection stay available.
+    memory_event_enabled: bool = True
+    # Retention for event items; the worker's daily scan soft-expires them.
+    # Commitment items are the exception and never expire on TTL.
+    memory_event_ttl_days: int = Field(default=180, ge=1, le=3650)
+    # Upper bound for one memory_search call (the tool default is 5).
+    memory_search_limit_max: int = Field(default=10, ge=1, le=50)
+    # Search mode: auto probes pgvector plus the embedding profile at startup,
+    # false forces keyword (TSVECTOR) mode, true forces vector mode.
+    memory_vector_enabled: Literal["auto", "true", "false"] = "auto"
+    # High-priority event items (open tickets, pending commitments) injected
+    # after the profile/preference section of every customer-bound run.
+    memory_event_inject_max: int = Field(default=5, ge=1, le=20)
+    # Half-life of the search ranking decay, based on last_referenced_at.
+    memory_search_half_life_days: int = Field(default=30, ge=1, le=365)
+    # Deployment-level embedding profile binding for memory vectors. Unset (or
+    # not resolving to an embed profile of dimension 1536) degrades the store
+    # to keyword mode with a warning — that is the P3-DP-05 "rejection".
+    memory_embedding_profile_id: str | None = None
+    memory_embedding_profile_version: int | None = None
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None
