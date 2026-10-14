@@ -4,7 +4,10 @@ from uuid import uuid4
 
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
-from agent_platform.modules.memory.service import render_memory_injection
+from agent_platform.modules.memory.service import (
+    render_event_injection,
+    render_memory_injection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +107,12 @@ class RuntimeWorker:
     async def _customer_memory(self, row):
         """Fetch and render the customer's active memories for injection (FR-3).
 
-        Gated by the per-agent ``memory_enabled`` switch (a legacy run without
-        an agent snapshot defaults to on). A lookup failure must never break
-        the run itself, so it degrades to no injection with a warning.
+        One system message, sections in a fixed order: profile/preference
+        first, then the Phase 3 pending-events section (open tickets and
+        unfulfilled commitments). Gated by the per-agent ``memory_enabled``
+        switch (a legacy run without an agent snapshot defaults to on). A
+        lookup failure must never break the run itself, so it degrades to no
+        injection with a warning.
         """
         if self.memory is None or not row.get("customer_id"):
             return None
@@ -117,6 +123,9 @@ class RuntimeWorker:
             items = await self.memory.injection_items(
                 row["tenant_id"], row["customer_id"], self.settings.memory_inject_max_items
             )
+            events = await self.memory.pending_event_items(
+                row["tenant_id"], row["customer_id"], self.settings.memory_event_inject_max
+            )
         except Exception:
             logger.warning(
                 "Customer memory lookup failed for run %s; continuing without it",
@@ -124,7 +133,15 @@ class RuntimeWorker:
                 exc_info=True,
             )
             return None
-        return render_memory_injection(items)
+        sections = [
+            section
+            for section in (
+                render_memory_injection(items),
+                render_event_injection(events),
+            )
+            if section
+        ]
+        return "\n\n".join(sections) or None
 
     def _memory_context(self, row, dropped):
         """Memory-task dispatch gates for finish().
