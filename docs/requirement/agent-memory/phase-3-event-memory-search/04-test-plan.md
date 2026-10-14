@@ -2,7 +2,8 @@
 
 > 状态：待实施（本阶段开发完成后执行）
 > 创建：2026-10-10
-> 依据：`02-requirements.md`（FR-1~FR-5、AC-1~AC-7）、`03-technical-design.md`（迁移 `0032`、MemoryStore 双实现、事件写入、TTL）
+> 修订：2026-10-14（按 `08-implementation-breakdown.md` 裁定：迁移号 0032→`0036`；P3-DP-05 判定形态改为探测降级 + warning 日志，见 R14；P3-DP-03/04 改为文档化手工步骤口径，见 R16/R17）
+> 依据：`02-requirements.md`（FR-1~FR-5、AC-1~AC-7）、`03-technical-design.md`（迁移 `0036`、MemoryStore 双实现、事件写入、TTL）、`08-implementation-breakdown.md`（R1~R15 裁定）
 
 ## 1. 测试范围与原则
 
@@ -66,10 +67,10 @@
 | 编号 | 用例 | 预期 |
 |---|---|---|
 | P3-DP-01 | pgvector 镜像全新部署 | 迁移建 vector 列与 HNSW 索引；Store 探测为 vector |
-| P3-DP-02 | 普通 postgres 镜像部署 | `0032` 迁移正常通过、无 vector 列；探测降级 text；检索/注入/TTL 用例在 text 模式全绿 |
-| P3-DP-03 | 镜像替换升级（postgres → pgvector，同数据卷） | 数据保留；替换后探测切换 vector，新条目开始生成 embedding |
-| P3-DP-04 | 镜像回退（pgvector → postgres） | 服务可用，自动降级 text，vector 列残留无害 |
-| P3-DP-05 | embedding 维度校验 | 输出维度与迁移默认（1536）不一致的 Embedding profile 在配置校验时拒绝绑定 |
+| P3-DP-02 | 普通 postgres 镜像部署 | `0036` 迁移正常通过、无 vector 列；探测降级 text；检索/注入/TTL 用例在 text 模式全绿 |
+| P3-DP-03 | 镜像替换升级（postgres → pgvector，同数据卷；按 R16 修订） | 数据保留、服务可用；替换后探测保持 text（迁移 DO 块只在迁移当时执行一次）；按 README 文档化步骤执行幂等 DDL（`CREATE EXTENSION IF NOT EXISTS vector` → `ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(1536)` → `CREATE INDEX IF NOT EXISTS ... hnsw` → 配置 embedding profile）后探测切换 vector，新条目开始生成 embedding |
+| P3-DP-04 | 镜像回退（pgvector → postgres；按 R17 修订） | 回退前必须按 README 在 pgvector 镜像上执行清理 DDL（`ALTER TABLE memory_items DROP COLUMN embedding; DROP EXTENSION vector;`，HNSW 索引随列级联删除）——未清理直接换镜像会导致 memory_items 全表不可读写（alpine 无 vector 二进制）且无 SQL 级自救；清理后切换：服务可用、探测 text、数据保留 |
+| P3-DP-05 | embedding 维度校验（按 R14 修订） | 输出维度与迁移默认（1536）不一致的 Embedding profile 配置后，Store 探测降级 text 模式并输出明确 warning 日志（断言 `available()='text'` + 日志）；embedding 绑定为部署级配置，不存在"绑定时的配置校验"入口 |
 
 ## 6. 通用核对项（本阶段适用）
 
