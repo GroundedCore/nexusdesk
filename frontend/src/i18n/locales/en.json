@@ -691,6 +691,8 @@
   "待接管": "Awaiting takeover",
   "返回": "Back",
   "全部会话": "All conversations",
+  "全部 Agent": "All agents",
+  "按 Agent 筛选": "Filter by agent",
   "会话总数": "Total conversations",
   "暂无 Agent": "No agents",
   "查看所有 Agent 的会话": "View conversations for all agents",
