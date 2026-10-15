@@ -32,7 +32,7 @@ TICKET_VIEW = """SELECT t.*,d.description,d.resolution,
 
 
 class CustomerService:
-    def __init__(self, engine, repository, agents, handoffs, settings, snapshot):
+    def __init__(self, engine, repository, agents, handoffs, settings, snapshot, memory=None):
         self.engine, self.repository, self.agents, self.handoffs = (
             engine,
             repository,
@@ -40,6 +40,9 @@ class CustomerService:
             handoffs,
         )
         self.settings, self.snapshot = settings, snapshot
+        # Phase 4 (R13): optional memory service for the blacklist auto
+        # handoff; None keeps every legacy wiring unchanged.
+        self.memory = memory
 
     async def send(self, tenant, actor, cid, message, connection=None):
         async with transaction(self.engine, connection) as c:
@@ -76,6 +79,26 @@ class CustomerService:
                     ),
                 )
                 return {"conversation_id": cid, "run": None}
+            # Phase 4 (R13): a blacklisted customer goes straight to a human.
+            # The message is recorded and the handoff requested inside this
+            # transaction — no run is submitted. Default-off switch, so
+            # existing behaviour is unchanged unless a deployment opts in.
+            if (
+                self.memory is not None
+                and getattr(self.settings, "memory_blacklist_auto_handoff", False)
+                and conv["customer_id"]
+            ):
+                flags = await self.memory.active_flags(
+                    tenant,
+                    conv["customer_id"],
+                    getattr(self.settings, "memory_flag_inject_max", 3),
+                )
+                if any(flag["key"] == "blacklist" for flag in flags):
+                    await add_message(c, cid, "user", message)
+                    handoff = await self.handoffs.request(
+                        tenant, actor, cid, "黑名单客户自动转人工", c
+                    )
+                    return {"conversation_id": cid, "run": None, "handoff": handoff}
             snapshot = dict(self.snapshot)
             if conv["agent_id"]:
                 snapshot["agent"] = await self.agents.snapshot(tenant, conv["agent_id"], c)
