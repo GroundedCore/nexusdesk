@@ -27,8 +27,14 @@ class TicketProposal(BaseModel):
 TICKET_VIEW = """SELECT t.*,d.description,d.resolution,
     COALESCE((SELECT l.content FROM ticket_process_log l WHERE l.ticket_id=t.id
         AND l.tenant_id=t.tenant_id AND l.action_type IN ('remark','legacy_note')
-        ORDER BY l.id DESC LIMIT 1),'') AS note
+        ORDER BY l.id DESC LIMIT 1),'') AS note,
+    EXISTS(SELECT 1 FROM memory_customers mc
+        WHERE mc.tenant_id=t.tenant_id AND mc.id::text=t.customer_id) AS customer_active
     FROM tickets t JOIN tickets_detail d ON d.ticket_id=t.id AND d.tenant_id=t.tenant_id """
+
+# Sentinel for "the caller did not mention due_at" — distinct from an
+# explicit None, which clears the column (R12).
+UNSET = object()
 
 
 class CustomerService:
@@ -310,7 +316,7 @@ class CustomerService:
                 "ticket_not_found",
             )
 
-    async def update_ticket(self, tenant, actor, tid, status, note, revision, is_commitment=False):
+    async def update_ticket(self, tenant, actor, tid, status, note, revision, is_commitment=False, due_at=UNSET):
         transitions = {
             "open": {"in_progress", "closed"},
             "in_progress": {"waiting_customer", "resolved", "closed"},
@@ -364,6 +370,30 @@ class CustomerService:
                     old=row["status"],
                     new=status,
                     note=note,
+                )
+            # Phase 4 (R12): operators may set or clear due_at; the built-in
+            # complaint-risk rule scans this column. Every change is logged
+            # with the field-change action type.
+            if due_at is not UNSET and due_at != row["due_at"]:
+                await execute(
+                    c,
+                    "UPDATE tickets SET due_at=:due WHERE id=:id AND tenant_id=:t",
+                    due=due_at,
+                    id=tid,
+                    t=tenant,
+                )
+                await execute(
+                    c,
+                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content)
+                    VALUES(:t,:id,'staff',:actor,'detail_changed',:content)""",
+                    t=tenant,
+                    id=tid,
+                    actor=actor,
+                    content=(
+                        "设置响应期限 " + due_at.isoformat()
+                        if due_at is not None
+                        else "清除响应期限"
+                    ),
                 )
             if note.strip():
                 remark = await one(

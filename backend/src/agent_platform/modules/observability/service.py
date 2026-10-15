@@ -118,6 +118,112 @@ class ObservabilityService:
             )
             return {"models": models, "tools": tools, "known_usage": usage, "window_hours": 24}
 
+    async def memory_summary(self, tenant):
+        """Phase 4 memory observability (FR-7, R20).
+
+        Extraction volume aggregates the ``memory.extract.applied`` audit
+        details (same-key upserts rewrite item rows, so the row table cannot
+        reconstruct the added/updated/pending/dropped split); the hit rate
+        divides customer-bound runs with a ``memory.injected`` event by all
+        customer-bound runs; governance/decay counts group the R17 audit
+        actions; reinforcement reads the ``reinforce`` task queue. Windows
+        follow the existing observability style: 24h for rates and counters,
+        7d for the daily extraction and recovery trends.
+        """
+        async with self.engine.connect() as c:
+            extraction_daily = await many(
+                c,
+                """SELECT date_trunc('day', created_at)::text AS day,
+                count(*)::int AS runs,
+                COALESCE(sum(CAST(details->>'added' AS int)),0)::int AS added,
+                COALESCE(sum(CAST(details->>'updated' AS int)),0)::int AS updated,
+                COALESCE(sum(CAST(details->>'pending' AS int)),0)::int AS pending,
+                COALESCE(sum(CAST(details->>'dropped' AS int)),0)::int AS dropped,
+                COALESCE(sum(CAST(details->>'pii_masked' AS int)),0)::int AS pii_masked
+                FROM audit_records
+                WHERE tenant_id=:t AND action='memory.extract.applied'
+                AND created_at>now()-interval '7 days'
+                GROUP BY 1 ORDER BY 1""",
+                t=tenant,
+            )
+            hit_rate = await one(
+                c,
+                """SELECT count(*)::int AS customer_runs,
+                count(*) FILTER (WHERE EXISTS (
+                    SELECT 1 FROM runtime_events e
+                    WHERE e.run_id=r.id AND e.type='memory.injected'))::int AS injected_runs
+                FROM runtime_runs r
+                JOIN runtime_conversations cv ON cv.id=r.conversation_id
+                WHERE r.tenant_id=:t AND cv.customer_id IS NOT NULL
+                AND r.created_at>now()-interval '24 hours'""",
+                t=tenant,
+            )
+            backlog = await one(
+                c,
+                """SELECT count(*)::int AS pending,
+                EXTRACT(EPOCH FROM max(now()-updated_at))::bigint AS oldest_age_seconds
+                FROM memory_items WHERE tenant_id=:t AND status='pending'""",
+                t=tenant,
+            )
+            governance = await many(
+                c,
+                """SELECT action, count(*)::int AS n FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%'
+                AND created_at>now()-interval '24 hours'
+                GROUP BY action ORDER BY action""",
+                t=tenant,
+            )
+            pii = await one(
+                c,
+                """SELECT COALESCE(sum(CAST(details->>'pii_masked' AS int)),0)::int AS n
+                FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%'
+                AND created_at>now()-interval '24 hours'""",
+                t=tenant,
+            )
+            reinforce = await one(
+                c,
+                """SELECT count(*) FILTER (WHERE status='done')::int AS tasks_done,
+                count(*) FILTER (WHERE status='failed')::int AS tasks_failed,
+                COALESCE(sum(jsonb_object_length(payload->'hits'))
+                    FILTER (WHERE status='done'),0)::int AS ids_refreshed
+                FROM memory_tasks
+                WHERE tenant_id=:t AND kind='reinforce'
+                AND created_at>now()-interval '24 hours'""",
+                t=tenant,
+            )
+            decay = await one(
+                c,
+                """SELECT count(*) FILTER (WHERE action='memory.decay_pending')::int AS decay_pending,
+                count(*) FILTER (WHERE action='memory.decay_expired')::int AS decay_expired,
+                count(*) FILTER (WHERE action='memory.evicted')::int AS evicted,
+                count(*) FILTER (WHERE action='memory.item.restored'
+                    AND details->>'old_status'='expired')::int AS expired_restored
+                FROM audit_records
+                WHERE tenant_id=:t AND created_at>now()-interval '7 days'""",
+                t=tenant,
+            )
+            search = await one(
+                c,
+                """SELECT count(*)::int AS calls,
+                count(*) FILTER (WHERE CAST(e.data->>'hits' AS int)=0)::int AS empty
+                FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id
+                WHERE r.tenant_id=:t AND e.type='memory_search.completed'
+                AND e.created_at>now()-interval '24 hours'""",
+                t=tenant,
+            )
+            return {
+                "window_hours": 24,
+                "extraction_daily": extraction_daily,
+                "hit_rate": hit_rate,
+                "backlog": backlog,
+                "governance": governance,
+                "pii_masked": pii["n"],
+                "reinforce": reinforce,
+                "decay": decay,
+                "search": search,
+            }
+
     async def trace(self, tenant, rid):
         async with self.engine.connect() as c:
             row = required(

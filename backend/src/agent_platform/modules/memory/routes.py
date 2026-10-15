@@ -24,6 +24,16 @@ class ItemEdit(BaseModel):
     content: str = Field(min_length=1, max_length=1000)
 
 
+class FlagUpsert(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    content: str = Field(min_length=1, max_length=500)
+
+
+class CustomerMerge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_customer_id: UUID
+
+
 @router.get("/customers")
 async def customers(
     request: Request,
@@ -38,6 +48,33 @@ async def customers(
 @router.get("/customers/{cid}")
 async def customer(cid: UUID, request: Request, user: Reader):
     return await services(request).customer_detail(user.tenant, cid)
+
+
+@router.delete("/customers/{cid}")
+async def delete_customer(cid: UUID, request: Request, user: Operator):
+    # FR-4. The probed store rides along for the (currently no-op)
+    # out-of-band index cleanup hook (R16).
+    store = request.app.state.runtime.platform.memory_store
+    return await services(request).delete_customer(user.tenant, user.actor, cid, store=store)
+
+
+@router.post("/customers/{cid}/merge")
+async def merge_customer(cid: UUID, body: CustomerMerge, request: Request, user: Operator):
+    # FR-5: source (cid) merges into the target; source == target is a 400.
+    return await services(request).merge_customers(
+        user.tenant, user.actor, cid, body.target_customer_id
+    )
+
+
+@router.put("/customers/{cid}/flags/{key}")
+async def upsert_flag(cid: UUID, key: str, body: FlagUpsert, request: Request, user: Operator):
+    # FR-2: key must be one of vip/complaint_risk/blacklist (400 otherwise).
+    return await services(request).upsert_flag(user.tenant, user.actor, cid, key, body.content)
+
+
+@router.delete("/customers/{cid}/flags/{key}")
+async def remove_flag(cid: UUID, key: str, request: Request, user: Operator):
+    return await services(request).remove_flag(user.tenant, user.actor, cid, key)
 
 
 @router.get("/pending")
@@ -63,6 +100,12 @@ async def delete_item(iid: UUID, request: Request, user: Operator):
 @router.post("/items/{iid}/restore")
 async def restore_item(iid: UUID, request: Request, user: Operator):
     return await services(request).restore_item(user.tenant, user.actor, iid)
+
+
+@router.post("/items/{iid}/release")
+async def release_item(iid: UUID, request: Request, user: Operator):
+    # FR-1: return a human-protected item to automatic management.
+    return await services(request).release_item(user.tenant, user.actor, iid)
 
 
 @router.post("/items/{iid}/confirm")
