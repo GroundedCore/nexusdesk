@@ -215,3 +215,41 @@ def test_p4_cm_02_governance_settings_defaults_and_env_override(monkeypatch):
     assert overridden.memory_decay_min_confidence == pytest.approx(0.5)
     assert overridden.memory_max_items_per_customer == 100
     assert overridden.memory_reinforce_sample_rate == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# R23b: reinforce dispatch gated on memory_decay_enabled (AC-13)
+# ---------------------------------------------------------------------------
+
+
+def test_r23b_reinforce_dispatch_follows_decay_switch():
+    from agent_platform.modules.agent_runtime.worker import RuntimeWorker
+
+    row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 2}}
+    # Decay on (default): collected reference hits become a reinforce task
+    # (extraction switched off here to isolate the reinforce gate).
+    on = RuntimeWorker(None, None, Settings(_env_file=None, memory_extract_enabled=False), "fp")
+    assert on._memory_context(row, [])["reinforce"] == row["_memory_reinforce"]
+    # Decay off: no reinforce dispatch (L2/L3 must not refresh
+    # last_referenced_at), and with nothing else to dispatch the context
+    # collapses to None — the Phase 3 fallback (AC-13).
+    off = RuntimeWorker(
+        None,
+        None,
+        Settings(_env_file=None, memory_decay_enabled=False, memory_extract_enabled=False),
+        "fp",
+    )
+    assert off._memory_context(row, []) is None
+
+
+def test_r23b_sample_rate_zero_still_suppresses_reinforce():
+    from agent_platform.modules.agent_runtime.worker import RuntimeWorker
+
+    row = {"config": {}, "_memory_reinforce": {"00000000-0000-0000-0000-000000000001": 1}}
+    worker = RuntimeWorker(
+        None,
+        None,
+        Settings(_env_file=None, memory_extract_enabled=False, memory_reinforce_sample_rate=0.0),
+        "fp",
+    )
+    assert worker._memory_context(row, []) is None

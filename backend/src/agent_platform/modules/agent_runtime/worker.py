@@ -185,6 +185,12 @@ class RuntimeWorker:
         memory_search become a reinforce task — sampled here at dispatch time
         (``memory_reinforce_sample_rate=0`` never writes) — and the injected
         section counts become the ``memory.injected`` runtime event.
+        Reinforce dispatch is additionally gated on ``memory_decay_enabled``
+        (R23b): reinforcement refreshes ``last_referenced_at``, which would
+        change the Phase 3 search ranking even with decay "off", breaking the
+        AC-13 fallback promise. L1 (same-key upsert refresh) is Phase 2
+        behaviour and stays ungated; the executor does not re-check (single
+        dispatch-side gate, same side as the R11 sampling).
         """
         agent = row["config"].get("agent") or {}
         config = agent.get("config") or {}
@@ -200,7 +206,11 @@ class RuntimeWorker:
             memory["extract"] = True
             memory["extract_debounce"] = self.settings.memory_extract_debounce_seconds
         hits = row.get("_memory_reinforce")
-        if hits and random.random() < getattr(self.settings, "memory_reinforce_sample_rate", 1.0):
+        if (
+            getattr(self.settings, "memory_decay_enabled", False)
+            and hits
+            and random.random() < getattr(self.settings, "memory_reinforce_sample_rate", 1.0)
+        ):
             memory["reinforce"] = hits
         if row.get("_memory_injected"):
             memory["injected"] = row["_memory_injected"]

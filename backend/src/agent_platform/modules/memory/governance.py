@@ -49,10 +49,14 @@ async def upsert_flag(
 ):
     """Insert or refresh one flag inside the caller's transaction.
 
-    Returns the flag row id, or ``None`` when a human-maintained flag absorbed
-    a rule write. Flag notes are free text written by staff, so they go
-    through the same PII masking as every other write point (R5); the hit
-    count rides in the audit details.
+    Returns the flag row id on a real write, or ``None`` when nothing
+    changed: a human-maintained flag absorbing a rule write, or an
+    idempotent retry whose masked content, source type and source_ref all
+    match the active row (D5 — callers counting "new writes", like the
+    rule scan's ``marked``, must not count no-ops). Flag notes are free
+    text written by staff, so they go through the same PII masking as
+    every other write point (R5); the hit count rides in the audit
+    details.
     """
     if key not in FLAG_KEYS:
         raise DomainError("memory_flag_key_invalid")
@@ -83,8 +87,9 @@ async def upsert_flag(
     ):
         # Idempotent write (QA D3): the rule scan re-runs every interval, so
         # an upsert that would change nothing must not bump the revision or
-        # append yet another memory.flag.upserted audit row.
-        return existing["id"]
+        # append yet another memory.flag.upserted audit row. None signals
+        # the no-op to counting callers (D5).
+        return None
     params = {
         "t": tenant,
         "c": customer_id,
@@ -240,7 +245,7 @@ def _keep_source(source_item, target_item):
 
 
 async def merge_customers(engine, tenant, actor, source_id, target_id):
-    """Merge ``source_id`` into ``target_id`` (FR-5, R16).
+    """Merge ``source_id`` into ``target_id`` (FR-5, R16/R22).
 
     Identities re-point (their unique key is per external key, not per
     customer, so re-pointing cannot collide); active/pending items move
@@ -248,7 +253,9 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
     the same (type, key) — the loser is physically deleted and listed in the
     audit. Source rows already deleted/expired stay put and disappear with
     the source customer's cascade. Conversations re-point so the source row
-    can be deleted under the plain FK.
+    can be deleted under the plain FK; tickets (VARCHAR link, no FK) re-point
+    in the same transaction (R22) so their memory entry point, lifecycle
+    events and the rule scan follow the surviving customer.
     """
     if str(source_id) == str(target_id):
         raise DomainError("memory_merge_same_customer")
@@ -326,6 +333,21 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
             t=tenant,
             source=source_id,
         )
+        # R22: merge re-points the source's tickets (VARCHAR, no FK, so a
+        # plain string compare in the str(UUID) shape) — otherwise the
+        # surviving customer would look "deleted" on old tickets, their
+        # lifecycle events would be silently skipped by the writer's
+        # customer-exists check, and the rule scan would ignore them.
+        # delete_customer deliberately keeps tickets.customer_id untouched:
+        # the "客户已删除" degradation is the right semantics there (R16).
+        tickets = await many(
+            c,
+            """UPDATE tickets SET customer_id=:target
+            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            target=str(target_id),
+            t=tenant,
+            source=str(source_id),
+        )
         await execute(
             c,
             "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t",
@@ -343,12 +365,14 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
             conflicts=conflicts,
             identities_moved=len(identities),
             conversations_moved=len(conversations),
+            tickets_relinked=len(tickets),
         )
         return {
             "moved": moved,
             "conflicts": conflicts,
             "identities_moved": len(identities),
             "conversations_moved": len(conversations),
+            "tickets_relinked": len(tickets),
         }
 
 

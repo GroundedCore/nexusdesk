@@ -59,11 +59,14 @@ def embedded_memory_worker(services, settings):
     """Assemble the API-embedded claim loop when the deployment opted in.
 
     Returns ``None`` unless the embedded worker mode and at least one memory
-    feature (summary, extraction or events) are enabled, so the caller simply
-    skips starting the loop. The Phase 1 gate is unchanged (P1-UT-12): a
-    quickstart with all three write features off runs no embedded loop, so
-    the Phase 4 timers (decay/rule scan) and reinforce claiming are dormant
-    there as well; the standalone production worker is unaffected.
+    feature is enabled, so the caller simply skips starting the loop. The
+    gate follows the Phase 3 R10 extension precedent: Phase 1-3 write
+    features (summary/extraction/events) plus, since Phase 4 (R23a), the
+    periodic jobs — ``memory_decay_enabled`` and the rule scan
+    (``memory_rule_scan_interval_minutes>0``). Both default on, so a
+    quickstart that turned off only the write features still runs the
+    timers it never asked to disable; the standalone production worker is
+    unaffected either way.
     """
     if not (
         settings.embedded_worker
@@ -71,6 +74,8 @@ def embedded_memory_worker(services, settings):
             settings.summary_enabled
             or settings.memory_extract_enabled
             or settings.memory_event_enabled
+            or getattr(settings, "memory_decay_enabled", False)
+            or getattr(settings, "memory_rule_scan_interval_minutes", 0) > 0
         )
     ):
         return None

@@ -874,6 +874,20 @@ class MemoryService:
                 actor=actor,
                 settings=self.settings,
             )
+            if flag_id is None:
+                # D5: governance returns None for no-op writes (identical
+                # active flag); the row exists, so re-read it for the
+                # response instead of reporting a phantom id.
+                flag_id = required(
+                    await one(
+                        c,
+                        """SELECT id FROM memory_items
+                        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key""",
+                        t=tenant,
+                        c=customer_id,
+                        key=key,
+                    )
+                )["id"]
             return {"id": str(flag_id)}
 
     async def remove_flag(self, tenant, actor, customer_id, key):
