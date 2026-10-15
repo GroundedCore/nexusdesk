@@ -66,6 +66,25 @@ async def upsert_flag(
     if _masking_enabled(settings):
         content, pii_hits = mask(content)
     protected = source_type == "human"
+    existing = await one(
+        c,
+        """SELECT id,status,source_type,content,source_ref FROM memory_items
+        WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND key=:key""",
+        t=tenant,
+        c=customer_id,
+        key=key,
+    )
+    if (
+        existing
+        and existing["status"] == "active"
+        and existing["source_type"] == source_type
+        and existing["content"] == content
+        and (existing["source_ref"] or None) == (source_ref or None)
+    ):
+        # Idempotent write (QA D3): the rule scan re-runs every interval, so
+        # an upsert that would change nothing must not bump the revision or
+        # append yet another memory.flag.upserted audit row.
+        return existing["id"]
     params = {
         "t": tenant,
         "c": customer_id,
