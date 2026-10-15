@@ -13,6 +13,7 @@ to the shared queue; the dispatcher routes each claimed row to its service by
 new task kinds purely through code.
 """
 
+from agent_platform.modules.memory.decay import REINFORCE_KIND, ReinforceService
 from agent_platform.modules.memory.events import EVENT_KIND, EventWriter
 from agent_platform.modules.memory.extraction import EXTRACT_KIND, ExtractionService
 from agent_platform.modules.memory.service import MemoryService
@@ -24,14 +25,17 @@ from agent_platform.modules.memory.worker import MemoryWorker
 class MemoryDispatcher:
     """Route claimed tasks to the service that owns their kind."""
 
-    def __init__(self, summary, extraction, events=None):
+    def __init__(self, summary, extraction, events=None, reinforce=None):
         self.summary, self.extraction, self.events = summary, extraction, events
+        self.reinforce = reinforce
 
     async def execute(self, task):
         if task["kind"] == EXTRACT_KIND:
             return await self.extraction.execute(task)
         if task["kind"] == EVENT_KIND and self.events is not None:
             return await self.events.execute(task)
+        if task["kind"] == REINFORCE_KIND and self.reinforce is not None:
+            return await self.reinforce.execute(task)
         return await self.summary.execute(task)
 
 
@@ -46,6 +50,7 @@ def build_memory_worker(services, settings):
         SummaryService(engine, gateway, settings),
         ExtractionService(engine, gateway, settings, MemoryService(engine, settings)),
         EventWriter(engine, store, settings),
+        ReinforceService(engine, settings),
     )
     return MemoryWorker(engine, dispatcher, settings, store=store)
 
@@ -55,7 +60,10 @@ def embedded_memory_worker(services, settings):
 
     Returns ``None`` unless the embedded worker mode and at least one memory
     feature (summary, extraction or events) are enabled, so the caller simply
-    skips starting the loop.
+    skips starting the loop. The Phase 1 gate is unchanged (P1-UT-12): a
+    quickstart with all three write features off runs no embedded loop, so
+    the Phase 4 timers (decay/rule scan) and reinforce claiming are dormant
+    there as well; the standalone production worker is unaffected.
     """
     if not (
         settings.embedded_worker
