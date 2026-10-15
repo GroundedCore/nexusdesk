@@ -59,7 +59,7 @@ class PlatformServices:
         self.conversations = ConversationService(engine, settings.history_turns, self.memory)
         self.handoffs = HandoffService(engine, repository)
         self.customer = CustomerService(
-            engine, repository, self.agents, self.handoffs, settings, snapshot
+            engine, repository, self.agents, self.handoffs, settings, snapshot, self.memory
         )
         self.channels = ChannelService(
             engine, self.conversations, self.customer, self.agents, settings

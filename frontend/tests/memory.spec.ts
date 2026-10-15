@@ -134,6 +134,199 @@ test('ticket detail links to customer memory', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '客户详情' })).toBeVisible();
 });
 
+// Phase 4 governance console: flag card group, protected/expired item actions,
+// delete and merge customer (both with a second confirmation).
+function governanceItems() {
+  return [
+    { id: 'item-p', type: 'profile', key: 'name', content: '张三', confidence: 1.0, status: 'active', source_type: 'human', source_ref: null, revision: 3, protected: true, last_referenced_at: '2026-10-10T10:00:00Z', reference_count: 4, effective_confidence: 1.0, updated_at: '2026-10-01T10:00:00Z' },
+    { id: 'item-x', type: 'preference', key: 'language', content: '用英文回复', confidence: 0.92, status: 'expired', source_type: 'extracted', source_ref: 'conv-1', revision: 1, protected: false, last_referenced_at: null, reference_count: 0, effective_confidence: 0.21, updated_at: '2026-10-02T10:00:00Z' },
+    { id: 'flag-vip', type: 'flag', key: 'vip', content: '年框客户', confidence: 1.0, status: 'active', source_type: 'human', source_ref: null, revision: 1, protected: true, last_referenced_at: null, reference_count: 0, effective_confidence: 1.0, updated_at: '2026-10-03T10:00:00Z' },
+  ];
+}
+
+function governanceRoutes(items: any[], hooks: { onDeleted?: () => void; onMerged?: (target: string) => void } = {}) {
+  return async (route: any) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'operator', tenant: '测试企业' } });
+    if (path.endsWith('/memory/customers') && request.method() === 'GET') return route.fulfill({ json: { items: [customer], total: 1, page: 1, page_size: 20 } });
+    const flagAction = path.match(/\/memory\/customers\/cust-1\/flags\/(\w+)$/);
+    if (flagAction) {
+      const key = flagAction[1];
+      const existing = items.find(row => row.type === 'flag' && row.key === key);
+      if (request.method() === 'PUT') {
+        const content = request.postDataJSON().content;
+        if (existing) Object.assign(existing, { content, status: 'active', source_type: 'human' });
+        else items.push({ id: `flag-${key}`, type: 'flag', key, content, confidence: 1.0, status: 'active', source_type: 'human', source_ref: null, revision: 1, protected: true, updated_at: '2026-10-11T10:00:00Z' });
+        return route.fulfill({ json: { id: existing?.id || `flag-${key}` } });
+      }
+      if (request.method() === 'DELETE') {
+        if (existing) existing.status = 'deleted';
+        return route.fulfill({ json: { id: existing?.id } });
+      }
+    }
+    if (path.endsWith('/memory/customers/cust-1/merge')) {
+      hooks.onMerged?.(request.postDataJSON().target_customer_id);
+      return route.fulfill({ json: { merged: true } });
+    }
+    if (path.endsWith('/memory/customers/cust-1')) {
+      if (request.method() === 'DELETE') {
+        hooks.onDeleted?.();
+        return route.fulfill({ json: { items: items.length } });
+      }
+      return route.fulfill({ json: { id: 'cust-1', created_at: customer.created_at, identities: [identity], items } });
+    }
+    const itemAction = path.match(/\/memory\/items\/([^/]+)\/(release|restore)$/);
+    if (itemAction) {
+      const item = items.find(row => row.id === itemAction[1]);
+      if (!item) return route.fulfill({ status: 404, json: { detail: 'memory_item_not_found' } });
+      if (itemAction[2] === 'release') Object.assign(item, { protected: false, source_type: 'extracted' });
+      if (itemAction[2] === 'restore') item.status = 'active';
+      return route.fulfill({ json: item });
+    }
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  };
+}
+
+test('memory governance: flags, protected release, expired restore, delete customer', async ({ page }) => {
+  const items = governanceItems();
+  await page.route('**/api/v1/**', governanceRoutes(items));
+  await page.goto('/#/memory/customers/cust-1');
+  await expect(page.getByRole('heading', { name: '客户详情' })).toBeVisible();
+
+  // Flag card: existing VIP flag plus the two unflagged keys.
+  await expect(page.getByText('服务标记')).toBeVisible();
+  await expect(page.getByText('年框客户')).toBeVisible();
+  await expect(page.getByText('未标记').nth(1)).toBeVisible();
+
+  // Upsert a complaint_risk flag with a note.
+  await page.locator('tr').filter({ hasText: '投诉风险' }).getByRole('button', { name: /打\s*标/ }).click();
+  await page.getByLabel('标记说明').fill('上月两次超时未响应');
+  await page.getByRole('dialog').getByRole('button', { name: /保\s*存/ }).click();
+  await expect(page.getByText('标记已保存')).toBeVisible();
+  await expect(page.getByRole('cell', { name: '上月两次超时未响应' })).toBeVisible();
+
+  // Edit then remove the VIP flag (Popconfirm is the second confirmation).
+  await page.locator('tr').filter({ hasText: '年框客户' }).getByRole('button', { name: '编辑说明' }).click();
+  await page.getByLabel('标记说明').fill('年框客户（2026 续约）');
+  await page.getByRole('dialog').getByRole('button', { name: /保\s*存/ }).click();
+  await expect(page.getByRole('cell', { name: '年框客户（2026 续约）' })).toBeVisible();
+  await page.locator('tr').filter({ hasText: '年框客户（2026 续约）' }).getByRole('button', { name: /解\s*除/ }).click();
+  await expect(page.getByText('确认解除「VIP 客户」标记？')).toBeVisible();
+  await page.locator('.ant-popover').getByRole('button', { name: /确\s*认/ }).click();
+  await expect(page.getByText('标记已解除')).toBeVisible();
+
+  // Protected human item: badge + release back to automatic management.
+  const protectedRow = page.locator('tr').filter({ hasText: '张三' });
+  await expect(protectedRow.getByText('人工保护')).toBeVisible();
+  await protectedRow.getByRole('button', { name: '恢复自动管理' }).click();
+  await page.locator('.ant-popover').getByRole('button', { name: /确\s*认/ }).click();
+  await expect(page.getByText('已恢复自动管理')).toBeVisible();
+  await expect(protectedRow.getByText('人工保护')).toHaveCount(0);
+
+  // Expired item can be restored (refreshing its decay clock server-side).
+  await page.locator('tr').filter({ hasText: '用英文回复' }).getByRole('button', { name: /恢\s*复/ }).click();
+  await expect(page.getByText('记忆已恢复')).toBeVisible();
+
+  // Delete customer: danger button then Popconfirm (second confirmation).
+  await page.getByRole('button', { name: '删除客户' }).click();
+  await expect(page.getByText('确认删除该客户及其全部记忆？此操作不可撤销')).toBeVisible();
+  await page.locator('.ant-popover').getByRole('button', { name: '确认删除' }).click();
+  await expect(page.getByText('客户已删除')).toBeVisible();
+  await expect(page).toHaveURL(/#\/memory$/);
+});
+
+test('memory governance: merge customer with confirmation dialog', async ({ page }) => {
+  const items = governanceItems();
+  let mergedTarget = '';
+  await page.route('**/api/v1/**', governanceRoutes(items, { onMerged: target => { mergedTarget = target; } }));
+  await page.goto('/#/memory/customers/cust-1');
+  await page.getByRole('button', { name: '合并到…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('合并后当前客户的身份与记忆将迁移到目标客户，当前客户将被删除。此操作不可撤销')).toBeVisible();
+  await dialog.getByLabel('目标客户 ID').fill('cust-2');
+  await dialog.getByRole('button', { name: '确认合并' }).click();
+  await expect(page.getByText('客户已合并')).toBeVisible();
+  expect(mergedTarget).toBe('cust-2');
+  await expect(page).toHaveURL(/#\/memory$/);
+});
+
+test('pending queue marks :suggested rows as protected-update suggestions', async ({ page }) => {
+  let pending: any[] = [
+    { id: 'pend-2', customer_id: 'cust-1', customer_external_keys: ['sha256:abc'], type: 'preference', key: 'contact_channel:suggested', content: '偏好电话联系', confidence: 0.7, status: 'pending', source_type: 'extracted', source_ref: 'conv-1', revision: 1, updated_at: '2026-10-04T10:00:00Z' },
+  ];
+  await page.route('**/api/v1/**', async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'operator', tenant: '测试企业' } });
+    if (path.endsWith('/memory/pending')) return route.fulfill({ json: { items: pending, total: pending.length, page: 1, page_size: 20 } });
+    if (path.endsWith('/memory/items/pend-2/confirm')) {
+      pending = [];
+      return route.fulfill({ json: { id: 'pend-2', status: 'active' } });
+    }
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/#/memory/pending');
+  const row = page.locator('tr').filter({ hasText: '偏好电话联系' });
+  await expect(row.getByText('建议更新（人工保护）')).toBeVisible();
+  await expect(row.getByText('contact_channel', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: /确\s*认/ }).click();
+  await expect(page.getByText('确认后将更新人工维护的原条目')).toBeVisible();
+  await page.locator('.ant-popover').getByRole('button', { name: /确\s*认/ }).click();
+  await expect(page.getByText('暂无待确认的记忆')).toBeVisible();
+});
+
+test('ticket detail degrades to 客户已删除 when the memory customer is gone', async ({ page }) => {
+  const ticket = { id: 'ticket-1', ticket_no: 'TK-100', title: '设备无法启动', description: '客户反馈开机无响应', status: 'open', note: '', revision: 1, priority: 2, customer_id: 'cust-1', customer_active: false, updated_at: '2026-10-05T10:00:00Z' };
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'admin', tenant: '测试企业' } });
+    if (path.endsWith('/tickets')) return route.fulfill({ json: [ticket] });
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/#/tickets');
+  await page.getByRole('button', { name: '设备无法启动' }).click();
+  await expect(page.getByText('客户已删除')).toBeVisible();
+  await expect(page.getByRole('link', { name: '查看客户记忆' })).toHaveCount(0);
+});
+
+test('observability page renders the memory governance section', async ({ page }) => {
+  const memory = {
+    window_hours: 24,
+    extraction_daily: [{ day: '2026-10-14 00:00:00+00:00', runs: 2, added: 5, updated: 3, pending: 1, dropped: 0, pii_masked: 2 }],
+    hit_rate: { customer_runs: 2, injected_runs: 1 },
+    backlog: { pending: 3, oldest_age_seconds: 7200 },
+    governance: [{ action: 'memory.flag.upserted', n: 4 }],
+    pii_masked: 7,
+    reinforce: { tasks_done: 5, tasks_failed: 1, ids_refreshed: 42 },
+    decay: { decay_pending: 6, decay_expired: 2, evicted: 9, expired_restored: 1 },
+    search: { calls: 8, empty: 3 },
+  };
+  await page.route('**/api/v1/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'viewer', tenant: '测试企业' } });
+    if (path.endsWith('/observability/memory')) return route.fulfill({ json: memory });
+    if (path.endsWith('/observability/summary')) return route.fulfill({ json: {} });
+    if (path.endsWith('/observability/runs')) return route.fulfill({ json: [] });
+    if (path.endsWith('/observability/gateways')) return route.fulfill({ json: { models: [], tools: [], known_usage: [] } });
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/#/observability');
+  await expect(page.getByText('记忆观测')).toBeVisible();
+  await expect(page.getByText('记忆注入命中率')).toBeVisible();
+  await expect(page.getByText('50% (1/2)')).toBeVisible();
+  await expect(page.getByText('待确认积压')).toBeVisible();
+  await page.getByText('治理操作（近 24 小时）').click();
+  await expect(page.getByText('memory.flag.upserted')).toBeVisible();
+  await page.getByText('记忆抽取量（近 7 天）').click();
+  await expect(page.getByRole('cell', { name: '2026-10-14' })).toBeVisible();
+});
+
 test('conversation workbench shows customer profile drawer (US-3)', async ({ page }) => {
   const conversation = { id: 'conv-1', external_id: 'sess-abc', mode: 'bot', agent_id: null, assigned_to: null, customer_id: 'cust-1', revision: 1, source: 'business', updated_at: '2026-10-05T10:00:00Z' };
   await page.route('**/api/v1/**', async route => {

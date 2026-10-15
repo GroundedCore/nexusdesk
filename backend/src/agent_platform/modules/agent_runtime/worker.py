@@ -1,11 +1,14 @@
 import asyncio
 import logging
+import random
 from uuid import uuid4
 
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
 from agent_platform.modules.memory.service import (
+    overlap_ids,
     render_event_injection,
+    render_flag_injection,
     render_memory_injection,
 )
 
@@ -107,12 +110,18 @@ class RuntimeWorker:
     async def _customer_memory(self, row):
         """Fetch and render the customer's active memories for injection (FR-3).
 
-        One system message, sections in a fixed order: profile/preference
-        first, then the Phase 3 pending-events section (open tickets and
-        unfulfilled commitments). Gated by the per-agent ``memory_enabled``
-        switch (a legacy run without an agent snapshot defaults to on). A
-        lookup failure must never break the run itself, so it degrades to no
-        injection with a warning.
+        One system message, sections in a fixed order: flags first (Phase 4
+        FR-2, 【服务标记】 ahead of the profile), then profile/preference,
+        then the Phase 3 pending-events section. With no flags the message
+        body stays byte-identical to Phase 3. Gated by the per-agent
+        ``memory_enabled`` switch (a legacy run without an agent snapshot
+        defaults to on). A lookup failure must never break the run itself, so
+        it degrades to no injection with a warning.
+
+        Phase 4 side collections on the shared run dict (R10/R11): injected
+        items overlapping the user input count as L3 references for the
+        reinforce task, and the injected-section counts ride to finish() for
+        the ``memory.injected`` runtime event.
         """
         if self.memory is None or not row.get("customer_id"):
             return None
@@ -126,6 +135,11 @@ class RuntimeWorker:
             events = await self.memory.pending_event_items(
                 row["tenant_id"], row["customer_id"], self.settings.memory_event_inject_max
             )
+            flags = await self.memory.active_flags(
+                row["tenant_id"],
+                row["customer_id"],
+                getattr(self.settings, "memory_flag_inject_max", 3),
+            )
         except Exception:
             logger.warning(
                 "Customer memory lookup failed for run %s; continuing without it",
@@ -133,14 +147,28 @@ class RuntimeWorker:
                 exc_info=True,
             )
             return None
+        # L3 reference signal: an injected profile/preference/event item whose
+        # key/content overlaps the user input counts as a reference (flags are
+        # decay-immune and never need reinforcement).
+        reinforce = row.setdefault("_memory_reinforce", {})
+        for item_id in overlap_ids([*items, *events], row.get("input") or ""):
+            key = str(item_id)
+            reinforce[key] = reinforce.get(key, 0) + 1
         sections = [
             section
             for section in (
+                render_flag_injection(flags),
                 render_memory_injection(items),
                 render_event_injection(events),
             )
             if section
         ]
+        if sections:
+            row["_memory_injected"] = {
+                "items": len(items),
+                "flags": len(flags),
+                "events": len(events),
+            }
         return "\n\n".join(sections) or None
 
     def _memory_context(self, row, dropped):
@@ -152,6 +180,17 @@ class RuntimeWorker:
         per-agent ``memory_write``, with example agents kept out of the
         pipeline entirely; the customer link and playground exclusion are
         checked in ``finish()`` where the conversation row is locked.
+
+        Phase 4 (R10/R11): the reference hits collected during injection and
+        memory_search become a reinforce task — sampled here at dispatch time
+        (``memory_reinforce_sample_rate=0`` never writes) — and the injected
+        section counts become the ``memory.injected`` runtime event.
+        Reinforce dispatch is additionally gated on ``memory_decay_enabled``
+        (R23b): reinforcement refreshes ``last_referenced_at``, which would
+        change the Phase 3 search ranking even with decay "off", breaking the
+        AC-13 fallback promise. L1 (same-key upsert refresh) is Phase 2
+        behaviour and stays ungated; the executor does not re-check (single
+        dispatch-side gate, same side as the R11 sampling).
         """
         agent = row["config"].get("agent") or {}
         config = agent.get("config") or {}
@@ -166,6 +205,15 @@ class RuntimeWorker:
         ):
             memory["extract"] = True
             memory["extract_debounce"] = self.settings.memory_extract_debounce_seconds
+        hits = row.get("_memory_reinforce")
+        if (
+            getattr(self.settings, "memory_decay_enabled", False)
+            and hits
+            and random.random() < getattr(self.settings, "memory_reinforce_sample_rate", 1.0)
+        ):
+            memory["reinforce"] = hits
+        if row.get("_memory_injected"):
+            memory["injected"] = row["_memory_injected"]
         return memory or None
 
     def _done(self, task):

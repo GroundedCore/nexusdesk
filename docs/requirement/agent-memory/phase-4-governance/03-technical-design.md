@@ -4,17 +4,17 @@
 
 | 层 | 文件 | 改动 |
 |---|---|---|
-| 迁移 | `backend/migrations/versions/0033_memory_governance.py` | `memory_items` 加审计辅助列；审计复用 audit_records（见决策） |
+| 迁移 | `backend/migrations/versions/0037_memory_governance.py`（R1：0033/0034 已被渠道集成占用，0035/0036 属 Phase 2/3） | `memory_items` 加审计辅助列；审计复用 audit_records（见决策） |
 | 抽取 | `modules/memory/extraction.py` | 人工保护逻辑；flag 拒绝；PII 脱敏调用 |
 | 新模块 | `modules/memory/pii.py` | 脱敏纯函数集 |
 | 新模块 | `modules/memory/governance.py` | 删除 / 合并 / 打标 / 内置规则 |
 | 新模块 | `modules/memory/decay.py` | 衰退：effective_confidence 计算、状态迁移、容量淘汰、强化落库 |
 | API | `modules/memory/routes.py` | 删除、合并、flag、恢复自动管理端点 |
-| 注入 | `modules/agent_runtime/engine.py` | flag 小节注入（最高优先级）；注入/检索查询带 effective_confidence 过滤 |
+| 注入 | `modules/agent_runtime/worker.py`（R15：注入取数渲染在 `_customer_memory`，engine.py 零改动） | flag 小节注入（最高优先级）；注入查询带 effective_confidence 过滤 |
 | 观测 | `modules/observability/service.py` | 记忆维度指标（含衰退指标） |
-| Worker | `modules/memory/worker.py` | 规则扫描任务；每日衰退迁移/淘汰任务；强化批量落库；memory_tasks 租约/reaper（见 §4，多副本前置项） |
+| Worker | `modules/memory/worker.py` | 规则扫描任务；每日衰退迁移/淘汰任务；强化批量落库（memory_tasks 租约/reaper 已随 Phase 1 落地，见 §4） |
 
-## 数据模型（迁移 `0033_memory_governance.py`）
+## 数据模型（迁移 `0037_memory_governance.py`）
 
 ```sql
 -- 治理辅助列
@@ -27,7 +27,21 @@ ALTER TABLE memory_items ADD CONSTRAINT memory_items_flag_key_check
     CHECK (type <> 'flag' OR key IN ('vip', 'complaint_risk', 'blacklist'));
 ```
 
-审计决策：**复用现有 `audit_records` 表**（ObservabilityService.audit 已在流式读取），不建新表。记忆治理事件作为新的 action 类别写入：`memory.delete_customer` / `memory.merge` / `memory.flag` / `memory.edit` / `memory.pii_masked`，payload 记录操作明细。
+审计决策：**复用现有 `audit_records` 表**（ObservabilityService.audit 已在流式读取），不建新表。记忆治理 action 命名沿用既有 `memory.*` 点分风格（R17）：
+
+| 事件 | action |
+|---|---|
+| 客户删除 | `memory.customer.deleted` |
+| 客户合并 | `memory.customer.merged` |
+| 打标/更新标记 | `memory.flag.upserted` |
+| 解除标记（人工/规则） | `memory.flag.removed` |
+| 恢复自动管理 | `memory.item.released` |
+| 衰退 profile→pending | `memory.decay_pending` |
+| 衰退 preference→expired | `memory.decay_expired` |
+| 容量淘汰 | `memory.evicted` |
+| reinforce 任务终败 | `memory.reinforce.failed` |
+
+编辑/删除/恢复/确认/拒绝沿用既有 `memory.item.*` 不变；PII 命中不独立成行，内嵌各事件 details `pii_masked=n`（R5）；payload 只记操作明细（操作者、key、计数），永远不含原值或记忆内容（合规 C4）。
 
 ## 核心组件
 
@@ -57,12 +71,12 @@ def mask(text: str) -> tuple[str, int]:
     # 邮箱: 本地名保留首字符 + ***@域名
 ```
 
-调用点：`MemoryService.upsert_item()` 统一入口（抽取与人工编辑都走它），命中次数写入审计（`memory.pii_masked`，不含原值）。
+调用点（R5，不做"统一 upsert_item"重构）：四个写入点分别调用 `pii.mask()`——`apply_extracted`（抽取 content 落库前）、`add_event_item`（事件，R6：summarize 截断后再脱敏）、`edit_item`（人工编辑保存前）、governance 的 flag upsert（标记说明）。开关 `memory_pii_masking_enabled=false` 时原样透传；命中计数不新增独立审计 action，内嵌既有审计 details `pii_masked=n`（批次/单次同口径），观测 SQL 以 `sum(CAST(details->>'pii_masked' AS int))` 聚合。
 
 ### 3. 标记记忆与注入
 
-- flag CRUD 走 `governance.py`，强制 `source_type in ('human','rule')`；`upsert_item` 对 `type='flag' AND source_type='extracted'` 直接抛错（纵深防御，抽取器输出侧也过滤）；
-- 注入（engine.py，置于画像段之前）：
+- flag CRUD 走 `governance.py`，强制 `source_type in ('human','rule')`；`upsert_flag` 对 `source_type='extracted'` 直接抛错（纵深防御，抽取器输出侧也过滤，flags 永不来自抽取 P0）；
+- 注入（`agent_runtime/worker.py::_customer_memory`，置于画像段之前，R15）：
 
 ```
 【服务标记】
@@ -82,12 +96,9 @@ def scan_overdue_tickets(tenant):
     # （人工打的标不受规则解除影响：仅处理 source_type='rule' 的条目）
 ```
 
-**memory_tasks 租约与 reaper（承接 Phase 1 R3/L3，生产多副本前置项）**：
+**memory_tasks 租约与 reaper：已随 Phase 1（2026-10-10）落地，本阶段零新增（R2）**：
 
-- 背景：Phase 1 部署形态已修订为生产独立 `memory-worker` 容器且可多副本伸缩（见 `../phase-1-conversation-summary/03-technical-design.md` §核心流程3，2026-10-10 修订）；硬杀时 running 任务卡死的问题（Phase 1 测试报告 R3 / 验收报告 L3）在多副本下必须解决。
-- 设计：`memory_tasks` claim 引入租约——认领时写 `owner`（实例标识）与 `lease_expires_at = now() + 120s`，执行期间心跳续约；Worker 周期 reaper 将 `status='running' AND lease_expires_at < now()` 的任务重置为 `pending`；其中 `attempts` 已达上限的任务直接置 `failed`（`error='memory_worker_lost'`），避免确定性硬杀（如 OOM）的任务被无限「重置→重认领→再硬杀」。
-- 先例：直接借鉴知识库 Worker 的 SKIP LOCKED + 120 秒租约 + reap 模式（`docs/modules-delivery.md`），保持平台内 worker 语义一致；reaper 的 attempts 上限兜底（知识库为 `attempts>=3 → failed`，error_code 记录 worker lost）一并沿用。
-- 排期：该项**随 memory-worker 独立容器落地提前实施**（生产多副本部署前置），不必等到 Phase 4 整体排期。
+迁移 0030 的 `memory_tasks` 表已含 `owner` / `lease_expires_at` / `attempts` / `max_attempts` 列；`modules/memory/worker.py` 已实现 claim 写 owner + 120s 租约、30s 心跳续约、claim 前置 reaper（过期 running → pending；`attempts>=max_attempts` → `failed('memory_worker_lost')`）与 `_finish` owner 守卫；覆盖用例 P1-IT-15~21 已在 Phase 1 测试/验收报告中关闭（R3/L3 均"已关闭 2026-10-10"）。本阶段仅将 P1-IT-15~21 纳入回归红线，无新增代码与排期。
 
 ### 5. 客户删除（`governance.py`）
 
@@ -124,7 +135,7 @@ def merge_customers(tenant_id, source_id, target_id, operator):
 **计算策略：查询时算分 + 周期任务改状态，effective_confidence 不落库**（避免每日批量重写全表）。
 
 ```python
-HALF_LIFE_DAYS = {"profile": 365, "preference": 90, "event": 30}   # flag 不衰减
+HALF_LIFE_DAYS = {"profile": 365, "preference": 90, "event": 30}   # 由 settings 三标量组装（R9）；flag 不衰减
 
 def effective_confidence(item) -> float:
     if item.protected or item.type == "flag":
@@ -133,7 +144,7 @@ def effective_confidence(item) -> float:
     return item.confidence * 2 ** (-age_s / (HALF_LIFE_DAYS[item.type] * 86400))
 ```
 
-**(a) 查询时过滤**（实时、无批量写）：注入查询（`MemoryService.active_items`）与 `MemoryStore.search` 增加阈值条件，SQL 内联衰减公式：
+**(a) 查询时过滤**（实时、无批量写）：阈值条件**只加在注入查询**（`MemoryService.active_items`，R7）——`MemoryStore.search`（event 检索）不参与置信度过滤，其可见性由 Phase 3 既有 TTL 与排序衰减管理，避免同一内容在"注入"与"检索"两个入口表现不一致之外的二次收窄。SQL 内联衰减公式（`>=` 等号保留，恰在阈值的条目仍注入）：
 
 ```sql
 WHERE status='active'
@@ -141,10 +152,12 @@ WHERE status='active'
       >= :min_confidence
 ```
 
-**(b) 每日状态迁移任务**（Worker 周期扫描，与 TTL 清理同车）：
+**(b) 每日状态迁移任务**（Worker 周期扫描，与 TTL 清理同车；R8 按 02 FR-6.1 收敛路由）：
 - profile 跌破阈值 → `status='pending'`（被动再确认队列，复用 Phase 2 的 pending 语义）；
-- preference/event 跌破阈值 → `status='expired'`；
-- 容量淘汰：单客户条目超 `memory_max_items_per_customer`，按 effective_confidence 升序淘汰至上限（跳过 protected）；
+- preference 跌破阈值 → `status='expired'`；
+- **event 不参与置信度迁移**，仅走 Phase 3 既有 180 天 TTL 软过期（若按 30 天半衰期迁移，confidence=1.0 的事件约 52 天即跌破 0.3，180 天留存形同虚设）；
+- flag / protected 免疫（SQL 条件 `protected=false AND type IN ('profile','preference')` 双重保证）；
+- 容量淘汰：单客户条目超 `memory_max_items_per_customer`，按 effective_confidence 升序淘汰至 `expired`（跳过 protected 与 flag，可恢复）；
 - 每次变迁写审计（`memory.decay_expired` / `memory.decay_pending` / `memory.evicted`，含变迁前分值）。
 
 **(c) 引用强化（异步批量，不在 run 热路径写库）**：
@@ -163,8 +176,8 @@ WHERE status='active'
 
 聚合 SQL 直查 memory_items / memory_tasks / audit_records：
 
-- 按日抽取量：`source_type='extracted'` 的 created_at 分布 + status 分布；
-- 命中率：`runtime_runs` 中注入了记忆的占比（Phase 2 注入时在 run config 记录 `memory_injected=true` 标记，此处统计）；
+- 按日抽取量：聚合 `memory.extract.applied` 审计 details（added/updated/pending/dropped/pii_masked）——同键 upsert 会改写条目行，行表无法还原新增/更新分布（R20）；
+- 命中率：24h 内有 `memory.injected` runtime event 的 run 数 / 同期 customer 绑定 run 数（`runtime_runs JOIN runtime_conversations ON customer_id IS NOT NULL`）。`memory.injected` 为本阶段新增记录点（R10：`runtime_runs` 无 customer_id 列，Phase 2 也从未写过 `memory_injected` 标记），由 `repository.finish` 在 run 完成时同事务写入，data 含 `{items, flags, events}` 三段条数；`memory_search` 调用另写 `memory_search.completed`（data `{hits}`），聚合调用量与空结果率；
 - 积压：pending 计数与 max(age)；
 - 治理：audit_records 按 `memory.*` action 计数；
 - 衰退：按日统计 `memory.decay_*` / `memory.evicted` 审计量、强化刷新量（`reinforce` 任务计数）、expired 恢复率（恢复操作数 / 衰退过期数）。
@@ -181,7 +194,9 @@ memory_flag_inject_max: int = 3
 memory_blacklist_auto_handoff: bool = False   # true 时黑名单客户进线自动转人工
 # 衰退机制
 memory_decay_enabled: bool = True
-memory_decay_half_life_days: dict = {"profile": 365, "preference": 90, "event": 30}
+memory_decay_half_life_days_profile: int = 365     # R9：三标量而非 dict，沿用 AGENT_ 前缀标量惯例
+memory_decay_half_life_days_preference: int = 90
+memory_decay_half_life_days_event: int = 30        # 供容量淘汰的 effective_confidence 排序（R8：event 不做置信度迁移）
 memory_decay_min_confidence: float = 0.3      # 跌破即按类型路由 pending / expired
 memory_max_items_per_customer: int = 200      # 容量硬上限
 memory_reinforce_sample_rate: float = 1.0     # 强化写库采样率，写放大失控时限流
@@ -194,7 +209,7 @@ memory_reinforce_sample_rate: float = 1.0     # 强化写库采样率，写放�
 | 单测 pii | 四类模式的脱敏正确性、误伤率（订单号 TK-123、纯数字上下文不误脱） |
 | 单测 protection | protected 条目的 update 转 pending 建议；解除保护后正常覆盖 |
 | 单测 governance | 删除的级联完整性；合并的冲突取舍矩阵（人工>抽取、新>旧） |
-| 单测 decay | effective_confidence 各类型/边界计算；protected 与 flag 免疫；阈值路由（profile→pending，preference/event→expired） |
+| 单测 decay | effective_confidence 各类型/边界计算；protected 与 flag 免疫；阈值路由（profile→pending，preference→expired，event 仅 TTL，R8） |
 | 集成 decay | 构造超龄条目跑每日任务：状态迁移正确、审计完整、恢复后时钟刷新 |
 | 集成 强化 | mock reinforce 任务：批量 UPDATE 聚合正确；采样率 0 时不落库 |
 | 集成 容量 | 构造 210 条超限，任务执行后 200 条且被淘汰的是分值最低者（protected 跳过） |

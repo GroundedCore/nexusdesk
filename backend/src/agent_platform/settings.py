@@ -110,6 +110,38 @@ class Settings(BaseSettings):
     # to keyword mode with a warning — that is the P3-DP-05 "rejection".
     memory_embedding_profile_id: str | None = None
     memory_embedding_profile_version: int | None = None
+    # Governance, decay and flag memories (Phase 4). All scalar (AGENT_ env
+    # prefix), matching the Phase 1-3 configuration convention (R9).
+    # PII masking on the write paths (extraction, event items, human edits,
+    # flag notes). Off passes content through unchanged; already-masked data
+    # is not recoverable (R21).
+    memory_pii_masking_enabled: bool = True
+    # Built-in rule scan cadence in minutes (overdue tickets -> complaint_risk
+    # flags). 0 disables the scan entirely.
+    memory_rule_scan_interval_minutes: int = Field(default=15, ge=0, le=1440)
+    # Flag memories are injected ahead of the profile section, capped
+    # independently of memory_inject_max_items and the token budget.
+    memory_flag_inject_max: int = Field(default=3, ge=1, le=10)
+    # When on, an inbound message from a blacklisted customer is handed off
+    # to a human immediately instead of submitting a run (R13).
+    memory_blacklist_auto_handoff: bool = False
+    # Decay master switch: off keeps every Phase 3 behaviour bit-identical
+    # (no status migration, no capacity eviction, no injection threshold).
+    memory_decay_enabled: bool = True
+    # Half-lives per item type, in days (R9: three scalars, not a dict).
+    memory_decay_half_life_days_profile: int = Field(default=365, ge=1, le=3650)
+    memory_decay_half_life_days_preference: int = Field(default=90, ge=1, le=3650)
+    memory_decay_half_life_days_event: int = Field(default=30, ge=1, le=3650)
+    # Below this effective confidence a profile turns pending and a
+    # preference expires on the daily migration (R8); the injection query
+    # filters in real time at the same threshold (R7, equality kept).
+    memory_decay_min_confidence: float = Field(default=0.3, ge=0, le=1)
+    # Hard per-customer item cap; the daily pass evicts the lowest
+    # effective-confidence rows down to this limit (protected rows skipped).
+    memory_max_items_per_customer: int = Field(default=200, ge=10, le=10000)
+    # Reference-reinforcement write sampling at dispatch time: 1.0 records
+    # every run's hits, 0 disables reinforcement writes entirely (R11).
+    memory_reinforce_sample_rate: float = Field(default=1.0, ge=0, le=1)
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None

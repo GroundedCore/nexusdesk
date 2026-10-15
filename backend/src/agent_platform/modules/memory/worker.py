@@ -21,7 +21,9 @@ import logging
 import time
 from uuid import uuid4
 
+from agent_platform.modules.memory.decay import REINFORCE_KIND, daily_migration
 from agent_platform.modules.memory.events import EVENT_KIND
+from agent_platform.modules.memory.governance import scan_overdue_tickets
 from agent_platform.modules.memory.summary import SummaryError, backoff_seconds
 from agent_platform.platform.persistence.store import audit, execute, many, one
 
@@ -40,6 +42,7 @@ FAILURE_AUDIT = {
     "conversation_summary": "memory.summary.failed",
     "memory_extract": "memory.extract.failed",
     EVENT_KIND: "memory.event.failed",
+    REINFORCE_KIND: "memory.reinforce.failed",
 }
 
 
@@ -64,6 +67,9 @@ class MemoryWorker:
         self.store = store
         self.scan_interval_seconds = scan_interval_seconds
         self.last_scan = None
+        # Phase 4 (R14): the built-in rule scan runs on its own timer,
+        # independent of the daily maintenance pass; first pass at startup.
+        self.last_rule_scan = None
         self.owner = uuid4()
         self.stopping = asyncio.Event()
 
@@ -210,13 +216,34 @@ class MemoryWorker:
             or time.monotonic() - self.last_scan >= self.scan_interval_seconds
         )
 
+    def rule_scan_due(self):
+        """Built-in rule scan gate (R14): 0 minutes disables the scan."""
+        interval = getattr(self.settings, "memory_rule_scan_interval_minutes", 15)
+        if interval <= 0:
+            return False
+        return (
+            self.last_rule_scan is None
+            or time.monotonic() - self.last_rule_scan >= interval * 60
+        )
+
+    async def rule_scan(self):
+        """One built-in rule pass: overdue tickets become complaint-risk flags.
+
+        Attempt-stamped up front like the maintenance pass, so a failing scan
+        retries at the next interval rather than on every idle cycle.
+        """
+        self.last_rule_scan = time.monotonic()
+        await scan_overdue_tickets(self.engine, self.settings)
+
     async def maintenance(self):
         """One maintenance pass: TTL soft-expiry plus bounded embedding retry.
 
         Both statements are single-tenant and idempotent, so concurrent
         replicas can run them safely (R11). The pass is attempt-stamped up
         front: a persistently failing pass retries at the next interval, not
-        on every idle cycle.
+        on every idle cycle. Phase 4 (R14): the daily decay migration and
+        capacity eviction ride along, gated by ``memory_decay_enabled`` —
+        with the switch off the pass is exactly the Phase 3 one (AC-13).
         """
         self.last_scan = time.monotonic()
         tenant = self.settings.tenant_id
@@ -244,6 +271,9 @@ class MemoryWorker:
         # the embedding_failed flag and wait for the next pass (P3-IT-10).
         for row in retry:
             await self.store.embed_and_save(row["id"], row["content"])
+        # Phase 4 decay rides the same daily window (R14).
+        if getattr(self.settings, "memory_decay_enabled", False):
+            await daily_migration(self.engine, self.settings)
 
     async def reset_running(self):
         """Graceful shutdown: tasks claimed by this worker become claimable again."""
@@ -261,6 +291,10 @@ class MemoryWorker:
             while not self.stopping.is_set():
                 try:
                     if not await self.run_once():
+                        # Rule scan first (R14): the cheaper, more frequent
+                        # timer; the daily maintenance pass follows.
+                        if self.rule_scan_due():
+                            await self.rule_scan()
                         if self.maintenance_due():
                             await self.maintenance()
                         await asyncio.sleep(self.poll_seconds)

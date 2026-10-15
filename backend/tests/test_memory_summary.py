@@ -134,12 +134,16 @@ def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
     # Production form: the API process never assembles the loop.
     assert embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=False)) is None
     # Feature switched off: nothing to run even in the embedded form. Since
-    # Phase 3 the loop serves three kinds, so all three features must be off.
+    # Phase 4 (R23a) the loop also serves the decay pass and the rule scan,
+    # so the "all off" case must switch those off explicitly too — this is
+    # the gate-semantics extension, not a regression break.
     all_features_off = Settings(
         _env_file=None,
         summary_enabled=False,
         memory_extract_enabled=False,
         memory_event_enabled=False,
+        memory_decay_enabled=False,
+        memory_rule_scan_interval_minutes=0,
     )
     assert embedded_memory_worker(services, all_features_off) is None
     # Summary off but extraction on still assembles the loop (Phase 2).
@@ -150,6 +154,24 @@ def test_p1_ut_12_embedded_worker_assembly_follows_deployment_flags():
         _env_file=None, summary_enabled=False, memory_extract_enabled=False
     )
     assert embedded_memory_worker(services, events_only) is not None
+    # Phase 4 (R23a): the decay pass alone or the rule scan alone (both on by
+    # default) also assembles the loop, even with all write features off.
+    decay_only = Settings(
+        _env_file=None,
+        summary_enabled=False,
+        memory_extract_enabled=False,
+        memory_event_enabled=False,
+        memory_rule_scan_interval_minutes=0,
+    )
+    assert embedded_memory_worker(services, decay_only) is not None
+    rule_scan_only = Settings(
+        _env_file=None,
+        summary_enabled=False,
+        memory_extract_enabled=False,
+        memory_event_enabled=False,
+        memory_decay_enabled=False,
+    )
+    assert embedded_memory_worker(services, rule_scan_only) is not None
     # Quickstart/development form: embedded mode assembles the claim loop.
     worker = embedded_memory_worker(services, Settings(_env_file=None, embedded_worker=True))
     assert isinstance(worker, MemoryWorker) and worker.stopping.is_set() is False

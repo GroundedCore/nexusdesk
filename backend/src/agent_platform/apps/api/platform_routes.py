@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent_platform.modules.agent_config.service import AgentDraft
 from agent_platform.modules.channel.service import IncomingMessage
+from agent_platform.modules.customer_service.service import UNSET
 from agent_platform.modules.evaluation.scoring import ProfileRef, ScoringOptions
 from agent_platform.modules.evaluation.service import EvaluationCase
 from agent_platform.modules.knowledge.chunking import ChunkingPolicy, chunk_document
@@ -102,6 +104,10 @@ class TicketUpdate(Input):
     # Phase 3: marking a remark as a commitment records it in the customer's
     # event memory (only meaningful with a non-empty note).
     is_commitment: bool = False
+    # Phase 4 (R12): operators may set a response deadline (or clear it with
+    # an explicit null); the built-in complaint-risk rule scans this column.
+    # Omitted means "leave unchanged".
+    due_at: datetime | None = None
 
 
 class ChannelInput(NameInput):
@@ -511,8 +517,12 @@ async def tickets(request: Request, user: Reader):
 
 @router.patch("/tickets/{tid}")
 async def ticket(tid: UUID, body: TicketUpdate, request: Request, user: Operator):
+    # due_at only travels when the field was sent explicitly (set or clear);
+    # an omitted field keeps the stored deadline.
+    due_at = body.due_at if "due_at" in body.model_fields_set else UNSET
     return await services(request).customer.update_ticket(
-        user.tenant, user.actor, tid, body.status, body.note, body.revision, body.is_commitment
+        user.tenant, user.actor, tid, body.status, body.note, body.revision, body.is_commitment,
+        due_at=due_at,
     )
 
 
@@ -644,6 +654,13 @@ async def summary(request: Request, user: Reader):
 @router.get("/observability/gateways")
 async def gateway_metrics(request: Request, user: Reader):
     return await services(request).observability.gateways(user.tenant)
+
+
+@router.get("/observability/memory")
+async def memory_metrics(request: Request, user: Reader):
+    # Phase 4 (FR-7): extraction volume, injection hit rate, pending backlog,
+    # governance/decay counters, reinforcement and memory_search telemetry.
+    return await services(request).observability.memory_summary(user.tenant)
 
 
 @router.get("/observability/runs/{rid}/trace")

@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from agent_platform.modules.memory.service import MemoryService
-from agent_platform.platform.persistence.store import one
+from agent_platform.platform.persistence.store import audit, one
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,10 @@ class EventWriter:
             logger.warning("event_write task %s has an invalid payload; dropped", task["id"])
             return "skipped"
         written = []
+        # Phase 4 (R5/R6): PII hit counts collected across this task's writes
+        # and folded into the memory.event.written audit details; the payload
+        # never carries the original values.
+        pii_hits = []
         async with self.engine.begin() as c:
             ticket = await self._ticket(c, tenant, payload.get("ticket_id"))
             # R6: tickets.customer_id is the only dispatch/write criterion; a
@@ -172,6 +176,7 @@ class EventWriter:
                     f"{ticket['id']}:{log_id}",
                     expires_at=None,
                     clear_embedding=clear_embedding,
+                    pii_hits=pii_hits,
                 )
                 if item_id:
                     written.append((item_id, content))
@@ -195,6 +200,7 @@ class EventWriter:
                     str(ticket["id"]),
                     expires_at=ttl,
                     clear_embedding=clear_embedding,
+                    pii_hits=pii_hits,
                 )
                 if item_id:
                     written.append((item_id, event_content(ticket_no, event, summary)))
@@ -210,11 +216,25 @@ class EventWriter:
                         str(ticket["id"]),
                         expires_at=ttl,
                         clear_embedding=clear_embedding,
+                        pii_hits=pii_hits,
                     )
                     if open_id:
                         written.append((open_id, summary))
                 else:
                     await self.memory.expire_open_ticket(c, tenant, customer_id, ticket_no)
+            if written:
+                # R5: one audit row per event task; counts and references
+                # only, never content.
+                await audit(
+                    c,
+                    tenant,
+                    "memory",
+                    "memory.event.written",
+                    payload.get("ticket_id"),
+                    event=event,
+                    items_written=len(written),
+                    pii_masked=sum(pii_hits),
+                )
         # Embedding is post-commit: a model outage degrades items to
         # keyword-searchable (embedding_failed=true) instead of losing them.
         for item_id, content in written:
