@@ -10,7 +10,7 @@ import { MessageList } from './components/MessageList';
 import { MessageComposer } from './components/MessageComposer';
 import { ProposalPanel } from './components/ProposalPanel';
 import { RunInspector } from './components/RunInspector';
-import { AgentStatsPage } from './AgentStatsPage';
+import { AgentStatsPage, type AgentCounts } from './AgentStatsPage';
 import './conversations.css';
 
 interface SendResponse {
@@ -70,6 +70,11 @@ function ConversationWorkbench({ agentId, focus, onBack }: {
     5000,
   );
   const agents = useResource<Agent[]>('/agents?include_archived=true');
+  // Same source as the workbench entry page: agents that have conversations.
+  const counts = useResource<AgentCounts>('/agents/counts', 10000);
+  const homeAgentIds = counts.data
+    ? (counts.data.items || []).filter(item => item.agent_id).map(item => item.agent_id || '')
+    : null;
   const action = useAction();
   const { operator } = useAccess();
 
@@ -219,6 +224,7 @@ function ConversationWorkbench({ agentId, focus, onBack }: {
           status={status}
           activeAgentId={agentId}
           filterAgentId={filterAgentId}
+          homeAgentIds={homeAgentIds}
           onBack={onBack}
           onStatusChange={next => { setPage(1); setStatus(next); }}
           onFilterAgentChange={id => { setPage(1); setFilterAgentId(id); setSelected(''); }}
