@@ -11,12 +11,14 @@ interface Props {
   pageSize: number;
   status: string;
   activeAgentId?: string | null;
+  filterAgentId?: string;
   selected: string;
   operator: boolean;
   agents: Agent[] | null;
   busy: boolean;
   onBack?: () => void;
   onStatusChange: (status: string) => void;
+  onFilterAgentChange?: (id: string) => void;
   onCreate: (agentId: string | null) => Promise<void>;
   onSelect: (id: string) => void;
   onPageChange: (page: number) => void;
@@ -29,12 +31,14 @@ export function ConversationSidebar({
   pageSize,
   status,
   activeAgentId,
+  filterAgentId,
   selected,
   operator,
   agents,
   busy,
   onBack,
   onStatusChange,
+  onFilterAgentChange,
   onCreate,
   onSelect,
   onPageChange,
@@ -74,6 +78,16 @@ export function ConversationSidebar({
         </form>
       )}
       {locked && <p className="hint">{t('当前仅查看 {{v0}} 的会话', { v0: lockedName })}</p>}
+      {!locked && onFilterAgentChange && (
+        <Field label={t('按 Agent 筛选')}>
+          <select value={filterAgentId || ''} onChange={event => onFilterAgentChange(event.target.value)} aria-label={t('按 Agent 筛选')}>
+            <option value="">{t('全部 Agent')}</option>
+            {(agents || []).map(agent => (
+              <option value={agent.id} key={agent.id}>{agent.name}</option>
+            ))}
+          </select>
+        </Field>
+      )}
       <div className="c-filter-tabs">
         {statusOptions.map(([value, label]) => (
           <button

@@ -62,8 +62,11 @@ function ConversationWorkbench({ agentId, focus, onBack }: {
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState('all');
   const [pageSize] = useState(10);
+  // In "all conversations" mode the user picks a filter agent in the sidebar.
+  const [filterAgentId, setFilterAgentId] = useState('');
+  const listAgentId = agentId || filterAgentId;
   const conversations = useResource<ConversationPage>(
-    `/conversations?page=${page}&page_size=${pageSize}${agentId ? `&agent_id=${encodeURIComponent(agentId)}` : ''}&status=${status}`,
+    `/conversations?page=${page}&page_size=${pageSize}${listAgentId ? `&agent_id=${encodeURIComponent(listAgentId)}` : ''}&status=${status}`,
     5000,
   );
   const agents = useResource<Agent[]>('/agents?include_archived=true');
@@ -215,8 +218,10 @@ function ConversationWorkbench({ agentId, focus, onBack }: {
           pageSize={pageSize}
           status={status}
           activeAgentId={agentId}
+          filterAgentId={filterAgentId}
           onBack={onBack}
           onStatusChange={next => { setPage(1); setStatus(next); }}
+          onFilterAgentChange={id => { setPage(1); setFilterAgentId(id); setSelected(''); }}
           onCreate={createConversation}
           onSelect={selectConversation}
           onPageChange={setPage}
