@@ -185,7 +185,7 @@ class ObservabilityService:
                 c,
                 """SELECT count(*) FILTER (WHERE status='done')::int AS tasks_done,
                 count(*) FILTER (WHERE status='failed')::int AS tasks_failed,
-                COALESCE(sum(jsonb_object_length(payload->'hits'))
+                COALESCE(sum((SELECT count(*) FROM jsonb_object_keys(payload->'hits')))
                     FILTER (WHERE status='done'),0)::int AS ids_refreshed
                 FROM memory_tasks
                 WHERE tenant_id=:t AND kind='reinforce'
