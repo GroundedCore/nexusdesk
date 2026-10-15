@@ -9,8 +9,18 @@ database.
 """
 
 import logging
+import re
+from datetime import UTC, datetime
 from uuid import uuid4
 
+from agent_platform.modules.memory import governance
+from agent_platform.modules.memory.decay import (
+    DEFAULT_HALF_LIVES,
+    effective_confidence,
+    half_lives,
+    injection_filter_sql,
+)
+from agent_platform.modules.memory.pii import mask
 from agent_platform.platform.persistence.store import (
     DomainError,
     audit,
@@ -29,6 +39,21 @@ CHARS_PER_TOKEN = 2
 INJECT_MAX_TOKENS = 1000
 PROFILE_HEADER = "【客户画像】"
 PREFERENCE_HEADER = "【客户偏好】"
+
+# Phase 4 flag memories (FR-2): injected ahead of the profile section under
+# their own cap (settings.memory_flag_inject_max), outside the token budget.
+FLAG_HEADER = "【服务标记】"
+FLAG_LABELS = {"vip": "VIP 客户", "complaint_risk": "投诉风险", "blacklist": "黑名单"}
+# Fixed instruction appended whenever a blacklist flag is present (R15).
+BLACKLIST_INSTRUCTION = "谨慎服务，涉承诺一律转人工确认"
+
+# Human-protection suggestion rows (R4): an extraction update against a
+# protected row becomes a pending "<key>:suggested" item instead of an
+# overwrite. The key column is VARCHAR(100); the base key is truncated to 89
+# characters so the 10-character suffix always fits (collisions are absorbed
+# by the same-key unique constraint, keeping the upsert idempotent).
+SUGGESTED_SUFFIX = ":suggested"
+SUGGESTED_BASE_MAX = 89
 
 # Phase 3 event items. The in-flight injection keys (open tickets and pending
 # commitments) share the items table with plain event records; the key prefix
@@ -97,9 +122,62 @@ def render_event_injection(items):
     return f"{EVENT_HEADER}\n" + "\n".join(lines) if lines else None
 
 
+def render_flag_injection(flags):
+    """Render the flag section (FR-2), placed ahead of the profile section
+    (R15). ``None`` means "inject nothing" — with no flags the message body
+    stays byte-identical to Phase 3. A blacklist flag appends the fixed
+    instruction line.
+    """
+    if not flags:
+        return None
+    lines = [f"- {FLAG_LABELS.get(flag['key'], flag['key'])}：{flag['content']}" for flag in flags]
+    if any(flag["key"] == "blacklist" for flag in flags):
+        lines.append(f"- {BLACKLIST_INSTRUCTION}")
+    return f"{FLAG_HEADER}\n" + "\n".join(lines)
+
+
+# L3 reference signal (R11): an injected item counts as referenced when its
+# key/content shares a token with the current user input. Latin/digit words
+# plus CJK bigrams keep the tokenizer language-neutral and unit-testable.
+_WORD_TOKEN = re.compile(r"[A-Za-z0-9_]+")
+_CJK_CHAR = re.compile(r"[一-鿿]")
+
+
+def text_tokens(text):
+    """Token set for overlap detection: lowercase words plus CJK bigrams."""
+    if not text:
+        return set()
+    tokens = {word.lower() for word in _WORD_TOKEN.findall(text)}
+    cjk = "".join(_CJK_CHAR.findall(text))
+    tokens.update(cjk[i : i + 2] for i in range(len(cjk) - 1))
+    if len(cjk) == 1:
+        tokens.add(cjk)
+    return tokens
+
+
+def overlap_ids(items, input_text):
+    """Ids of injected items whose key/content overlaps the user input (L3)."""
+    query = text_tokens(input_text)
+    if not query:
+        return []
+    return [
+        item["id"]
+        for item in items
+        if item.get("id") and text_tokens(f"{item['key']} {item['content']}") & query
+    ]
+
+
 class MemoryService:
     def __init__(self, engine, settings=None):
         self.engine, self.settings = engine, settings
+
+    def _masking_enabled(self):
+        # Default-on when no settings object is wired (safe direction: the
+        # original value never persists).
+        return getattr(self.settings, "memory_pii_masking_enabled", True)
+
+    def _decay_enabled(self):
+        return getattr(self.settings, "memory_decay_enabled", False)
 
     async def resolve_customer(self, c, tenant, source, external_key):
         """Resolve (or create) the customer for one external identity (P2-UT-01/02/03).
@@ -159,17 +237,42 @@ class MemoryService:
         return row["customer_id"]
 
     async def active_items(self, tenant, customer_id, types=("profile", "preference"), limit=20):
-        """Active items for injection, newest first, count-capped by the caller."""
+        """Active items for injection, newest first, count-capped by the caller.
+
+        Phase 4 (R7): with decay enabled the profile/preference rows also
+        pass the inline effective-confidence threshold; event search never
+        gets this filter. With decay off the query is exactly the Phase 3
+        one.
+        """
+        clause, decay_params = "", {}
+        if self._decay_enabled():
+            clause, decay_params = injection_filter_sql(self.settings)
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
                 prev_content,revision,updated_at FROM memory_items
-                WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type=ANY(:types)
-                ORDER BY updated_at DESC,id DESC LIMIT :lim""",
+                WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type=ANY(:types)"""
+                + clause
+                + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
                 t=tenant,
                 c=customer_id,
                 types=list(types),
+                lim=limit,
+                **decay_params,
+            )
+
+    async def active_flags(self, tenant, customer_id, limit):
+        """Active flag items for injection (FR-2), newest first."""
+        async with self.engine.connect() as c:
+            return await many(
+                c,
+                """SELECT id,customer_id,type,key,content,source_type,source_ref,updated_at
+                FROM memory_items
+                WHERE tenant_id=:t AND customer_id=:c AND type='flag' AND status='active'
+                ORDER BY updated_at DESC,id DESC LIMIT :lim""",
+                t=tenant,
+                c=customer_id,
                 lim=limit,
             )
 
@@ -185,7 +288,7 @@ class MemoryService:
 
     async def add_event_item(
         self, c, tenant, customer_id, key, content, source_ref, expires_at=None,
-        clear_embedding=False,
+        clear_embedding=False, pii_hits=None,
     ):
         """Insert or overwrite one event item inside the caller's transaction.
 
@@ -196,7 +299,16 @@ class MemoryService:
         otherwise) a content overwrite also clears the stale embedding so the
         follow-up ``embed_and_save`` regenerates it instead of ranking on the
         previous content's vector.
+
+        Phase 4 (R6): event content is PII-masked here — callers summarize
+        first, then this masks, so a truncated half-number cannot slip past
+        the patterns. When ``pii_hits`` (a list) is passed, the mask hit
+        count is appended so the caller can fold it into its audit details.
         """
+        if self._masking_enabled():
+            content, hits = mask(content)
+            if pii_hits is not None:
+                pii_hits.append(hits)
         params = {
             "t": tenant,
             "c": customer_id,
@@ -259,6 +371,44 @@ class MemoryService:
                 lim=limit,
             )
 
+    async def _upsert_suggestion(self, c, tenant, customer_id, op, content, source_ref):
+        """Park an extraction update as a pending suggestion row (FR-1, R4).
+
+        Human-maintained rows are never overwritten by the model; the update
+        becomes a ``<key>:suggested`` pending item instead, upserted so a
+        repeated extraction refreshes the same suggestion in place (the
+        same-key unique constraint keeps it idempotent). A previously
+        rejected (deleted) suggestion is not resurrected.
+        """
+        suggested_key = op["key"][:SUGGESTED_BASE_MAX] + SUGGESTED_SUFFIX
+        params = {
+            "t": tenant,
+            "c": customer_id,
+            "type": op["type"],
+            "key": suggested_key,
+            "content": content,
+            "confidence": op["confidence"],
+            "ref": source_ref,
+        }
+        row = await one(
+            c,
+            """UPDATE memory_items SET content=:content,confidence=:confidence,
+            source_type='extracted',source_ref=:ref,updated_at=now()
+            WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+            AND status='pending' RETURNING id""",
+            **params,
+        )
+        if not row:
+            row = await one(
+                c,
+                """INSERT INTO memory_items(tenant_id,customer_id,type,key,content,confidence,
+                status,source_type,source_ref)
+                VALUES(:t,:c,:type,:key,:content,:confidence,'pending','extracted',:ref)
+                ON CONFLICT (tenant_id,customer_id,type,key) DO NOTHING RETURNING id""",
+                **params,
+            )
+        return row
+
     async def apply_extracted(self, c, tenant, customer_id, ops, source_ref, auto, pending):
         """Apply validated extraction ops inside the caller's transaction.
 
@@ -269,22 +419,35 @@ class MemoryService:
           also refreshes ``last_referenced_at`` (P2-UT-08).
         - Human-edited or deleted rows are protected from extraction updates:
           a human correction must never be silently clobbered by the model.
+          Phase 4 (FR-1, R4): an update against a protected row is parked as
+          a pending ``:suggested`` item instead of vanishing.
+        - Phase 4 (R5): content is PII-masked before it persists; the batch
+          hit count rides back in ``counts['pii_masked']`` for the audit.
         """
-        counts = {"added": 0, "updated": 0, "pending": 0, "dropped": 0, "noop": 0}
+        counts = {"added": 0, "updated": 0, "pending": 0, "dropped": 0, "noop": 0, "pii_masked": 0}
         for op in ops:
             if op["op"] == "noop":
                 counts["noop"] += 1
+                continue
+            # Defence in depth (P0): only profile/preference may ever be
+            # written by extraction; validate_item already enforces this.
+            if op["type"] not in ("profile", "preference"):
+                counts["dropped"] += 1
                 continue
             status = route_confidence(op["confidence"], auto, pending)
             if status is None:
                 counts["dropped"] += 1
                 continue
+            content = op["content"]
+            if self._masking_enabled():
+                content, hits = mask(content)
+                counts["pii_masked"] += hits
             params = {
                 "t": tenant,
                 "c": customer_id,
                 "type": op["type"],
                 "key": op["key"],
-                "content": op["content"],
+                "content": content,
                 "confidence": op["confidence"],
                 "status": status,
                 "ref": source_ref,
@@ -299,6 +462,18 @@ class MemoryService:
                     **params,
                 )
             else:  # update: overwrite, or insert when the key is new
+                existing = await one(
+                    c,
+                    """SELECT id,protected,status FROM memory_items
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key""",
+                    **{k: params[k] for k in ("t", "c", "type", "key")},
+                )
+                if existing and existing["protected"] and existing["status"] != "deleted":
+                    row = await self._upsert_suggestion(
+                        c, tenant, customer_id, op, content, source_ref
+                    )
+                    counts["pending" if row else "noop"] += 1
+                    continue
                 row = await one(
                     c,
                     """UPDATE memory_items SET content=:content,prev_content=content,
@@ -390,11 +565,28 @@ class MemoryService:
             customer["items"] = await many(
                 c,
                 """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
-                prev_content,revision,updated_at FROM memory_items
+                prev_content,revision,protected,last_referenced_at,reference_count,updated_at
+                FROM memory_items
                 WHERE customer_id=:id AND tenant_id=:t ORDER BY type,key""",
                 id=customer_id,
                 t=tenant,
             )
+            # Phase 4 (FR-6.4): the console shows the live decayed score; the
+            # formula matches the injection filter and the daily migration.
+            table = half_lives(self.settings) if self.settings else DEFAULT_HALF_LIVES
+            now = datetime.now(UTC)
+            for item in customer["items"]:
+                item["effective_confidence"] = round(
+                    effective_confidence(
+                        item["confidence"],
+                        item["type"],
+                        item["protected"],
+                        item["last_referenced_at"],
+                        now,
+                        table,
+                    ),
+                    6,
+                )
             return customer
 
     async def pending_items(self, tenant, page=1, page_size=20):
@@ -439,7 +631,15 @@ class MemoryService:
         )
 
     async def edit_item(self, tenant, actor, item_id, content):
-        """Human edit: content replaced, previous value kept in prev_content."""
+        """Human edit: content replaced, previous value kept in prev_content.
+
+        Phase 4 (R5/R18): the edit goes through PII masking (hit count in the
+        audit details) and marks the row ``protected`` alongside
+        ``source_type='human'``, keeping the two in lockstep.
+        """
+        pii_hits = 0
+        if self._masking_enabled():
+            content, pii_hits = mask(content)
         async with self.engine.begin() as c:
             item = await self._item(c, tenant, item_id, lock=True)
             if item["status"] == "deleted":
@@ -447,7 +647,7 @@ class MemoryService:
             row = await one(
                 c,
                 """UPDATE memory_items SET content=:content,prev_content=content,
-                source_type='human',confidence=1.0,source_ref=:actor,
+                source_type='human',protected=true,confidence=1.0,source_ref=:actor,
                 revision=revision+1,updated_at=now()
                 WHERE id=:id AND tenant_id=:t RETURNING *""",
                 id=item_id,
@@ -464,11 +664,45 @@ class MemoryService:
                 customer_id=str(item["customer_id"]),
                 type=item["type"],
                 key=item["key"],
+                pii_masked=pii_hits,
+            )
+            return row
+
+    async def release_item(self, tenant, actor, item_id):
+        """Release a protected row back to automatic management (FR-1).
+
+        The row keeps its content and status; only the ownership markers flip
+        (``protected=false, source_type='extracted'`` — R18's invariant), so
+        extraction updates apply to it again and decay treats it normally.
+        """
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] == "deleted":
+                raise DomainError("memory_item_deleted", 409)
+            if not item["protected"]:
+                raise DomainError("memory_item_not_protected", 409)
+            row = await one(
+                c,
+                """UPDATE memory_items SET protected=false,source_type='extracted',
+                updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *""",
+                id=item_id,
+                t=tenant,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "memory.item.released",
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
             )
             return row
 
     async def _set_status(
-        self, tenant, actor, item_id, action, allowed, target, conflict, repeat_ok=False
+        self, tenant, actor, item_id, action, allowed, target, conflict, repeat_ok=False,
+        refresh_on=(),
     ):
         async with self.engine.begin() as c:
             item = await self._item(c, tenant, item_id, lock=True)
@@ -482,7 +716,11 @@ class MemoryService:
                 raise DomainError(conflict, 409)
             row = await one(
                 c,
-                "UPDATE memory_items SET status=:status,updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *",
+                "UPDATE memory_items SET status=:status,updated_at=now()"
+                # R19: reviving an expired row resets its reference clock so
+                # the daily pass does not immediately re-expire it.
+                + (",last_referenced_at=now()" if item["status"] in refresh_on else "")
+                + " WHERE id=:id AND tenant_id=:t RETURNING *",
                 id=item_id,
                 t=tenant,
                 status=target,
@@ -514,26 +752,88 @@ class MemoryService:
         )
 
     async def restore_item(self, tenant, actor, item_id):
+        # R19: expired rows restore to active as well, with a fresh clock.
         return await self._set_status(
             tenant,
             actor,
             item_id,
             "memory.item.restored",
-            {"deleted"},
+            {"deleted", "expired"},
             "active",
             "memory_item_not_deleted",
+            refresh_on={"expired"},
         )
 
     async def confirm_item(self, tenant, actor, item_id):
-        return await self._set_status(
-            tenant,
-            actor,
-            item_id,
-            "memory.item.confirmed",
-            {"pending"},
-            "active",
-            "memory_item_not_pending",
-        )
+        """Confirm a pending item; refreshes the reference clock (R19).
+
+        R4 merge semantics: confirming a ``:suggested`` row applies the
+        suggested content onto the human-maintained base row (prev_content
+        stashed, revision bumped, ownership untouched) and physically removes
+        the suggestion. When the base row no longer exists the confirm
+        degrades to an ordinary activation.
+        """
+        async with self.engine.begin() as c:
+            item = await self._item(c, tenant, item_id, lock=True)
+            if item["status"] != "pending":
+                raise DomainError("memory_item_not_pending", 409)
+            if item["key"].endswith(SUGGESTED_SUFFIX):
+                base_key = item["key"][: -len(SUGGESTED_SUFFIX)]
+                base = await one(
+                    c,
+                    """SELECT * FROM memory_items
+                    WHERE tenant_id=:t AND customer_id=:c AND type=:type AND key=:key
+                    AND status<>'deleted' FOR UPDATE""",
+                    t=tenant,
+                    c=item["customer_id"],
+                    type=item["type"],
+                    key=base_key,
+                )
+                if base:
+                    row = await one(
+                        c,
+                        """UPDATE memory_items SET content=:content,prev_content=:prev,
+                        revision=revision+1,last_referenced_at=now(),updated_at=now()
+                        WHERE id=:id RETURNING *""",
+                        id=base["id"],
+                        content=item["content"],
+                        prev=base["content"],
+                    )
+                    await execute(c, "DELETE FROM memory_items WHERE id=:id", id=item["id"])
+                    await audit(
+                        c,
+                        tenant,
+                        actor,
+                        "memory.item.confirmed",
+                        base["id"],
+                        customer_id=str(item["customer_id"]),
+                        type=item["type"],
+                        key=base_key,
+                        old_status="pending",
+                        new_status="active",
+                        merged_from=str(item["id"]),
+                    )
+                    return row
+            row = await one(
+                c,
+                """UPDATE memory_items SET status='active',last_referenced_at=now(),
+                updated_at=now() WHERE id=:id AND tenant_id=:t RETURNING *""",
+                id=item_id,
+                t=tenant,
+            )
+            await audit(
+                c,
+                tenant,
+                actor,
+                "memory.item.confirmed",
+                item_id,
+                customer_id=str(item["customer_id"]),
+                type=item["type"],
+                key=item["key"],
+                old_status="pending",
+                new_status="active",
+            )
+            return row
 
     async def reject_item(self, tenant, actor, item_id):
         return await self._set_status(
@@ -545,3 +845,44 @@ class MemoryService:
             "deleted",
             "memory_item_not_pending",
         )
+
+    # ------------------------------------------------------------------
+    # Phase 4 governance (FR-2/FR-4/FR-5). Thin wrappers owning the
+    # transaction boundary; the logic lives in governance.py.
+    # ------------------------------------------------------------------
+
+    async def upsert_flag(self, tenant, actor, customer_id, key, content):
+        """Create or update one human-sourced flag (FR-2)."""
+        async with self.engine.begin() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    id=customer_id,
+                    t=tenant,
+                ),
+                "memory_customer_not_found",
+            )
+            flag_id = await governance.upsert_flag(
+                c,
+                tenant,
+                customer_id,
+                key,
+                content,
+                "human",
+                source_ref=actor,
+                actor=actor,
+                settings=self.settings,
+            )
+            return {"id": str(flag_id)}
+
+    async def remove_flag(self, tenant, actor, customer_id, key):
+        return await governance.remove_flag(self.engine, tenant, actor, customer_id, key)
+
+    async def delete_customer(self, tenant, actor, customer_id, store=None):
+        return await governance.delete_customer(
+            self.engine, tenant, actor, customer_id, store=store
+        )
+
+    async def merge_customers(self, tenant, actor, source_id, target_id):
+        return await governance.merge_customers(self.engine, tenant, actor, source_id, target_id)
