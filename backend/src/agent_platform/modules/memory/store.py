@@ -31,6 +31,7 @@ EMBEDDING_DIMENSION = 1536
 
 
 class MemoryHit(TypedDict):
+    id: UUID
     content: str
     key: str
     updated_at: datetime
@@ -45,6 +46,15 @@ class MemoryStore(Protocol):
     async def search(
         self, tenant_id: str, customer_id: UUID, query: str, limit: int
     ) -> list[MemoryHit]: ...
+
+    async def delete_customer(self, customer_id: UUID) -> None:
+        """Drop one customer's out-of-band index data (R16, interface first).
+
+        Both current implementations are no-ops: pgvector embeddings live on
+        the item row and disappear with it, keyword mode has no side data. A
+        future Milvus store deletes the customer's collection rows here.
+        """
+        ...
 
 
 def decay_factor(last_referenced_at: datetime, half_life_days: int, now: datetime) -> float:
@@ -66,14 +76,19 @@ def decay_factor(last_referenced_at: datetime, half_life_days: int, now: datetim
 def rank_hits(rows, half_life_days, limit) -> list[MemoryHit]:
     """Apply the shared decay to raw relevance rows and keep the top ``limit``.
 
-    ``rows`` carry ``content``/``key``/``updated_at``/``last_referenced_at``/
-    ``relevance``. Ranking lives in Python so both stores literally share
-    :func:`decay_factor`; the candidate set is one customer's active events,
-    which the TTL scan keeps small.
+    ``rows`` carry ``id``/``content``/``key``/``updated_at``/
+    ``last_referenced_at``/``relevance``. Ranking lives in Python so both
+    stores literally share :func:`decay_factor`; the candidate set is one
+    customer's active events, which the TTL scan keeps small. The ``id`` rides
+    along for Phase 4 reference reinforcement (R11) — it is internal only and
+    never reaches the model-facing tool output.
     """
     now = datetime.now(UTC)
     hits = [
         MemoryHit(
+            # .get keeps legacy unit-test rows (built without an id) working;
+            # both real SELECTs always provide it.
+            id=row.get("id"),
             content=row["content"],
             key=row["key"],
             updated_at=row["updated_at"],
@@ -93,7 +108,7 @@ def escape_like(query: str) -> str:
 
 # Shared filter: one tenant, one customer, active event items only. This is
 # the P0 tenant/customer isolation boundary for every search path.
-_TEXT_MATCH = """SELECT key,content,updated_at,last_referenced_at,
+_TEXT_MATCH = """SELECT id,key,content,updated_at,last_referenced_at,
     ts_rank(content_tsv, plainto_tsquery('simple', :q)) AS relevance
     FROM memory_items
     WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type='event'
@@ -106,6 +121,10 @@ class BaseStore:
 
     def __init__(self, engine, settings):
         self.engine, self.settings = engine, settings
+
+    async def delete_customer(self, customer_id: UUID) -> None:
+        """No-op on both current stores (R16): pgvector embeddings live on the
+        item row and disappear with it; keyword mode keeps no side data."""
 
     def _limit(self, limit) -> int:
         return max(1, min(int(limit), self.settings.memory_search_limit_max))
@@ -203,7 +222,7 @@ class PgVectorStore(BaseStore):
         async with self.engine.connect() as c:
             rows = await many(
                 c,
-                """SELECT key,content,updated_at,last_referenced_at,
+                """SELECT id,key,content,updated_at,last_referenced_at,
                 1 - (embedding <=> CAST(:v AS vector)) AS relevance
                 FROM memory_items
                 WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type='event'
