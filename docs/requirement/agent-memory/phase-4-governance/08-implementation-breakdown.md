@@ -156,6 +156,19 @@ dev 在 T13 修订 03 §8 措辞。
 
 03 §8 写"按日抽取量：`source_type='extracted'` 的 created_at 分布 + status 分布"。现实：同键 upsert 会覆写行（created_at 不变、status 可变），"新增/更新/pending/丢弃"四类口径从行表无法还原。**裁定**：抽取量取自 `audit_records` 的 `memory.extract.applied` details（已含 added/updated/pending/dropped/noop 计数）按日聚合；积压（pending 计数 + 最老年龄）直查 memory_items；治理/衰退计数按 R17 action 聚合；强化刷新量取 `reinforce` 任务计数（done）与 payload 内 id 数。`memory_summary()` 全部聚合 SQL 直查，24h/7d 窗口与现有 observability 风格一致。
 
+### R22 客户合并必须级联改写 `tickets.customer_id`（不接受"客户已删除"降级）
+
+dev 实现核查（`governance.merge_customers`，779cca9 之后）：identities 改挂、items 按冲突矩阵归并、conversations 改挂均已实现，但 `tickets.customer_id`（VARCHAR(100) 无 FK）保持源 ID 不改写。由此三个实际后果：① 旧工单"客户记忆"入口按 R16 的 `customer_active` 降级显示"客户已删除"——对合并场景是**事实错误**（客户在目标侧存续），误导运营；② 源客户在途工单的后续事件（resolved/closed/commitment）被 `EventWriter._customer_exists` 存在性校验静默跳过（warning + skipped）——**记忆丢失**，违背 US-4/FR-5"记忆归并不丢失"；③ 规则扫描对这些工单跳过（死 customer 保护），超时未响应不再打标到存续客户。**裁定**：不接受降级——merge 事务内追加一条 `UPDATE tickets SET customer_id=:target WHERE tenant_id=:t AND customer_id=:source`（字符串比较，`str(UUID)` 形态），审计 details 增 `tickets_relinked` 计数；成本单条 SQL，与 conversations 改挂同一事务保证原子性。**场景区分**：删除（R16）保持 `tickets.customer_id` 不变 + 前端"客户已删除"降级——那才是删除场景的正确展示；合并必须改写。dev 在 T4 补充，qa 在 P4-IT-08 增断言（合并后旧工单 `customer_id`=目标、这些工单后续事件正常写入目标客户、规则扫描覆盖）。
+
+### R23 embedded worker 门控扩展纳入 Phase 4 开关 + reinforce 投递挂 `memory_decay_enabled`
+
+dev 实现核查（`bootstrap.embedded_memory_worker`）：门保持 Phase 3 R10 形态（summary/extract/event 任一开启即启动），docstring 已注明"三开关全关时 Phase 4 计时器与 reinforce 认领休眠"。**裁定两点**：
+
+- **(a) 门控扩展，不接受休眠语义**：启动条件扩展为 summary/extract/event/**decay**（`memory_decay_enabled`）/**rule-scan**（`memory_rule_scan_interval_minutes>0`）任一开启即启动（Phase 3 R10 对同一门加 `memory_event_enabled` 的扩展先例）。理由：`memory_decay_enabled` 与规则扫描**默认开启**，三写开关全关的 quickstart 会静默休眠运维从未关闭的 Phase 4 功能——开关语义对运维撒谎；生产独立 memory-worker 容器无门控不受影响。P1-UT-12 的"全关不启动"场景相应显式置 `memory_decay_enabled=false` + `memory_rule_scan_interval_minutes=0`——这是门控语义扩展的测试更新而非回归破坏，dev 更新用例并在提交信息注明，qa 复跑确认。
+- **(b) reinforce 投递（L2/L3）加 `memory_decay_enabled` 门控**：核查发现 `_memory_context` 的 reinforce 投递仅受 `memory_reinforce_sample_rate` 门控。AC-13 要求 `memory_decay_enabled=false` 时行为与 Phase 3 一致，而 reinforcement 刷新 `last_referenced_at` 会改变 Phase 3 检索排序（`decay_factor` 以该列为基准）——不脱钩则 AC-13 不成立。裁定：投递条件改为 `memory_decay_enabled AND hits AND random()<sample_rate`；L1（同键 upsert 刷新时钟）是 Phase 2 既有行为，不受此门控。worker 侧执行器不再重复判断（投递侧单点门控，与 R11 采样同侧）。
+
+两点合计修改量：`bootstrap.py` 一个条件、`agent_runtime/worker.py::_memory_context` 一个条件、P1-UT-12 更新。dev 执行，qa 将 (b) 纳入 P4-IT-16 断言（decay off 时队列无 reinforce 任务、`last_referenced_at` 不被 L2/L3 路径刷新）。
+
 ### R21 存量数据不回溯脱敏（新写入口径）
 
 PII 脱敏自本阶段开关生效起约束新写入；Phase 2/3 存量行可能已含明文。成功指标"≥99% 覆盖率"的测量口径**裁定**为验收期构造数据 + 上线后新写入；存量数据如需合规清理另行立项评估（在验收报告遗留项中注明，不阻塞本阶段）。
@@ -196,7 +209,7 @@ async def daily_migration(engine, settings)  # profile→pending / preference→
 async def upsert_flag(c, tenant, customer_id, key, content, source_type, source_ref)  # key 三值校验；extracted 直接 DomainError
 async def remove_flag(tenant, actor, customer_id, key, source='human'|'rule')
 async def delete_customer(tenant, actor, customer_id)      # R16 顺序 + 审计
-async def merge_customers(tenant, actor, source_id, target_id)  # R16 冲突矩阵 + 审计
+async def merge_customers(tenant, actor, source_id, target_id)  # R16 冲突矩阵 + R22 tickets 级联改写 + 审计
 async def scan_overdue_tickets(engine, settings)           # R12 打标 + 30 天无复发解除（仅 source_type='rule'）
 
 # modules/memory/service.py 增量（T5）
@@ -251,7 +264,8 @@ memory_reinforce_sample_rate: float = Field(default=1.0, ge=0, le=1)
 
 - FR-1~FR-7 全部；AC-1~AC-13；04 的 P4-UT-01~13、P4-IT-01~18、P4-API-01~05、P4-CM-01~04；
 - **P0 阻断（发现即停线报 lead）**：删除级联任何残留（含 embedding 列）；任何路径自动抽取覆盖人工条目；flag 经抽取路径写入；跨租户/跨客户数据泄露；审计 payload 出现 PII 原值；
-- 衰退正确性：protected/flag 免疫有常驻断言（C6）；event 不参与置信度迁移与检索过滤（R7/R8）；阈值等值保留（P4-UT-11）；`memory_decay_enabled=false` 与 Phase 3 行为一致（AC-13/P4-IT-16）；
+- 衰退正确性：protected/flag 免疫有常驻断言（C6）；event 不参与置信度迁移与检索过滤（R7/R8）；阈值等值保留（P4-UT-11）；`memory_decay_enabled=false` 与 Phase 3 行为一致（AC-13/P4-IT-16，含 R23(b) reinforce 不投递、不刷新 `last_referenced_at`）；
+- 合并完整性：merge 级联改写 `tickets.customer_id` 与 conversations（R22），合并后源客户在途工单的事件写入与规则扫描指向目标客户；删除场景保持 `tickets.customer_id` 不变 + "客户已删除"降级（R16/R22 场景区分）；
 - 双模式：P4-IT-10 在 alpine/pgvector 两容器各跑一遍；P4-IT-18 向量清除在 pgvector 容器验证；
 - 时间类用例一律改库构造（`last_referenced_at`/`expires_at`/`due_at`/`created_at`），手动触发单轮周期任务，不允许真实等待（04 §1 原则 4）；
 - 回归：Phase 1-3 memory 全量（**含 P1-IT-15~21 租约/reaper、P3-UT-05 衰减只降权不隐藏、双模式 store 测试**）、工单状态机、前端三门槛 + Playwright 全绿；R18 一致性核对（protected 与 source_type 不发散）。
