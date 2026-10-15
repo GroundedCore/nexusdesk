@@ -1,6 +1,6 @@
 import { t, errorText } from '../../i18n/index';
 import { useState } from 'react';
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Tabs, Space, Table, Tag, Typography, App } from 'antd';
+import { Alert, Button, Card, Checkbox, Descriptions, Drawer, Empty, Form, Input, Tabs, Space, Table, Tag, Typography, App } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { api, patch, type Ticket } from '../../shared/api/client';
 import { time, useAccess, useResource } from '../../shared/components/ui';
@@ -17,10 +17,11 @@ export function TicketsPage() {
     const [filter, setFilter] = useState<string>();
     const [page, setPage] = useState(1);
     const [note, setNote] = useState('');
+    const [isCommitment, setIsCommitment] = useState(false);
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
     const filtered = (rows.data || []).filter(t => (!filter || t.status === filter) && `${t.ticket_no || t.id} ${t.title}`.toLowerCase().includes(query.toLowerCase()));
-    function open(ticket: Ticket) { setSelected(ticket); setNote(''); setError(''); }
+    function open(ticket: Ticket) { setSelected(ticket); setNote(''); setIsCommitment(false); setError(''); }
     async function reloadSelected() {
         if (!selected || busy)
             return;
@@ -53,9 +54,10 @@ export function TicketsPage() {
         setBusy(true);
         setError('');
         try {
-            const saved = await patch<Ticket>(`/tickets/${selected.id}`, { status, note: note.trim(), revision: selected.revision });
+            const saved = await patch<Ticket>(`/tickets/${selected.id}`, { status, note: note.trim(), revision: selected.revision, is_commitment: isCommitment && Boolean(note.trim()) });
             setSelected(saved);
             setNote('');
+            setIsCommitment(false);
             rows.refresh();
             void message.success(t("工单已更新"));
         }
@@ -88,7 +90,7 @@ export function TicketsPage() {
         {selected.customer_id && <section className="ticket-detail-section"><h3>{t("客户记忆")}</h3><Button type="link" href={`#/memory/customers/${selected.customer_id}`}>{t("查看客户记忆")}</Button></section>}
         <section className="ticket-detail-section"><h3>{t("最近处理信息")}</h3><p className="ticket-description">{selected.note || t("暂无处理备注")}</p>{selected.resolution && <><h4>{t("解决说明")}</h4><p className="ticket-description">{selected.resolution}</p></>}</section>
         {error && <Alert type="error" showIcon title={t("提交未完成")} description={errorText(error)} action={<Button loading={busy} onClick={() => void reloadSelected()}>{t("加载最新版本")}</Button>}/>}
-        {!operator ? <Alert type="info" title={t("当前为只读角色")}/> : selected.status === 'closed' ? <Alert type="success" title={t("工单已关闭，详情只读")}/> : <Form layout="vertical"><Form.Item label={t("处理说明")} required><Input.TextArea aria-label={t("处理说明")} rows={5} maxLength={8000} showCount value={note} onChange={e => setNote(e.target.value)} disabled={busy} placeholder={t("记录本次处理；解决或关闭时必须填写说明")}/></Form.Item></Form>}
+        {!operator ? <Alert type="info" title={t("当前为只读角色")}/> : selected.status === 'closed' ? <Alert type="success" title={t("工单已关闭，详情只读")}/> : <Form layout="vertical"><Form.Item label={t("处理说明")} required><Input.TextArea aria-label={t("处理说明")} rows={5} maxLength={8000} showCount value={note} onChange={e => setNote(e.target.value)} disabled={busy} placeholder={t("记录本次处理；解决或关闭时必须填写说明")}/></Form.Item><Form.Item label={null}><Checkbox checked={isCommitment} disabled={busy || !note.trim()} onChange={e => setIsCommitment(e.target.checked)}>{t("标记为承诺")}</Checkbox></Form.Item></Form>}
       </Space>}
     </Drawer>
   </>;

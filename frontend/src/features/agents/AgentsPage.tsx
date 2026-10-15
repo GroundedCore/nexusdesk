@@ -18,7 +18,7 @@ export interface PageResult<T> {
     page: number;
     page_size: number;
 }
-const initialConfig = (): AgentConfig => ({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
+const initialConfig = (): AgentConfig => ({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket', 'memory_search'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
 const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['runtime', t("运行参数")]] as const);
 const labels = (): Record<string, string> => ({ system_prompt: t("行为指令"), tool_names: t("工具"), knowledge_base_ids: t("知识库"), max_model_rounds: t("最大模型轮次"), model_profile_id: t("模型方案"), model_profile_version: t("模型方案版本"), reply_language: t("回复语言") });
 interface Props {

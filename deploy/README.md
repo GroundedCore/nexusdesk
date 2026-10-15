@@ -113,6 +113,47 @@ API 就绪检查为 `/api/v1/ready`；它不代表模型调用一定成功。Wor
 
 PostgreSQL 的连接预算应覆盖 API 和每个 Worker 的独立连接池。Milvus 内部推理/索引所需资源另行评估；生产 Compose 是部署拓扑，不等于高可用、SSO、监控、备份恢复等生产验收全部完成。
 
+## 记忆检索：pgvector 与降级模式
+
+事件记忆（工单事件、待办承诺）的语义检索依赖 PostgreSQL 的 pgvector 扩展。quickstart 的默认 PostgreSQL 镜像为 `pgvector/pgvector:pg17`（pgvector 官方只提供 Debian 变体，没有 alpine tag）；`POSTGRES_IMAGE` 是镜像源覆盖口。注意：**升级与回退都不是"只换镜像"**——升级需按下文"手工启用 vector（存量库）"执行幂等步骤，回退必须先按"回退到普通镜像"执行清理 DDL，否则 `memory_items` 全表不可用。
+
+注意：**在存量数据卷上把镜像从 `postgres:17-alpine` 换成 `pgvector/pgvector:pg17` 并不会自动启用 vector 模式**。vector 列由迁移 0036 的探测块在建库迁移当时一次性创建，换镜像不会重跑迁移；此时扩展未装、列不存在，启动探测保持 text 模式。换镜像后需按下文"手工启用 vector（存量库）"执行一次幂等步骤。全新部署（空数据卷）无此问题，迁移会自动装好扩展与列。
+
+两种检索模式的行为差异：
+
+| | vector 模式（有 pgvector） | text 模式（无 pgvector 或未配置向量模型） |
+| --- | --- | --- |
+| 触发条件 | 扩展可用，且配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度须为 1536） | 任一条件不满足即降级，启动日志给出 warning |
+| 检索方式 | 向量余弦相关度 × 时间衰减 | 关键词（TSVECTOR，中文以 ILIKE 兜底）× 同一时间衰减 |
+| 结果质量 | 语义相近即可命中 | 依赖词汇重叠，中文召回质量较低 |
+| embedding 失败 | 条目标记 `embedding_failed`，每日维护任务限量重试；重试成功前该条目不参与召回 | 不适用 |
+
+功能开关与检索模式无关：`memory_search` 工具、待跟进事项注入、事件 TTL（`AGENT_MEMORY_EVENT_TTL_DAYS`，默认 180 天）在两种模式下行为一致；`AGENT_MEMORY_VECTOR_ENABLED=false` 可在有 pgvector 的环境强制 text 模式（对比测试用），`AGENT_MEMORY_EVENT_ENABLED=false` 只停止新事件写入。
+
+**手工启用 vector（存量库）**：以下场景都需要这一组幂等步骤——quickstart 存量数据卷换 pgvector 镜像后、以及生产环境在外部 PostgreSQL 上启用 vector。在目标库执行（quickstart 可用 `docker compose exec postgres psql -U nexusdesk -d nexusdesk`；`CREATE EXTENSION` 需 superuser）：
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+ALTER TABLE memory_items ADD COLUMN IF NOT EXISTS embedding vector(1536);
+CREATE INDEX IF NOT EXISTS memory_items_embedding
+    ON memory_items USING hnsw (embedding vector_cosine_ops);
+```
+
+然后配置 `AGENT_MEMORY_EMBEDDING_PROFILE_ID` / `AGENT_MEMORY_EMBEDDING_PROFILE_VERSION` 指向已发布的 Embedding 配置方案（输出维度 1536）并重启服务；启动探测即切换 vector 模式，新写入的事件条目开始生成 embedding。步骤可重复执行（全部幂等）。只执行一半（例如装了扩展但没建列）时探测保持 text 模式并输出 warning 日志，不会运行期报错。启用前已存在的存量条目没有 embedding，不参与召回（vector 检索含 `embedding IS NOT NULL` 硬条件，关键词兜底只在查询 embedding 失败时整查询降级），直到被覆写补上 embedding。
+
+**回退到普通镜像（清理 DDL 是强制前置）**：从 pgvector 镜像回退 `postgres:17-alpine` 时，**必须先在 pgvector 镜像上**执行清理 DDL，再切换镜像：
+
+```sql
+ALTER TABLE memory_items DROP COLUMN embedding;
+DROP EXTENSION vector;
+```
+
+HNSW 索引随列级联删除，无需单独处理。清理完成后设 `POSTGRES_IMAGE=postgres:17-alpine` 重建容器，启动探测自动降级 text 模式，事件数据保留。**切勿跳过清理直接换镜像**：普通镜像没有 vector 二进制，`memory_items` 挂着 vector 类型列会导致任何查询在规划期报 `could not access file "$libdir/vector"`——全表不可读写，且在 alpine 上 `DROP COLUMN` / `DROP INDEX` 同样报该错，没有 SQL 级自救手段，只能换镜像回 pgvector 再清理。回退会丢弃全部 embedding；之后若重新启用 vector，重走"手工启用 vector（存量库）"即可，新写入/覆写的条目会重新生成 embedding。
+
+**就地切换镜像的数据卷注意事项（升级、回退两个方向都适用）**：同一数据卷在 alpine（musl）与 Debian（glibc）镜像之间切换时，glibc 的 locale/collation 提供方与 musl 不同，文本索引可能报 collation version mismatch（实测 alpine→Debian 与 Debian→alpine 双向切换均会出现该 warning）。切换后应对该库执行一次 `REINDEX DATABASE`（例如 `docker compose exec postgres psql -U nexusdesk -d nexusdesk -c 'REINDEX DATABASE nexusdesk'`）；全新部署无此问题。
+
+生产环境的 PostgreSQL 是外部中间件（生产 Compose 不含 postgres 服务，零变更）：按上文"手工启用 vector（存量库）"在目标库执行幂等步骤并配置 Embedding profile 后，重启即切换 vector 模式；不执行则保持 text 模式，功能完整可用。生产如需停用 vector，同样必须先 `DROP COLUMN embedding` 再 `DROP EXTENSION vector`（顺序不可反），否则表同样不可用。pgvector 数据随普通 PG dump 备份，备份/升级流程不变。生产 memory-worker 的部署形态不变，仅通过代码获得 event_write / TTL / 重试任务处理能力。
+
 ## 自动部署（GitHub Actions CI/CD）
 
 `.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。

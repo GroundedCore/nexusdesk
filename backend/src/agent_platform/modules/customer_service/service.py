@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agent_platform.modules.agent_runtime.schemas import RunRequest
 from agent_platform.modules.conversation.service import add_message
+from agent_platform.modules.memory.events import enqueue_event_task
 from agent_platform.platform.persistence.store import (
     DomainError,
     audit,
@@ -257,6 +258,11 @@ class CustomerService:
                 h=json.dumps(history),
             )
             await audit(c, tenant, actor, "ticket.created", row["id"], action_id=str(aid))
+            # Phase 3 event memory: dispatch inside this transaction so the
+            # event task can never reference an uncommitted ticket. Gated on
+            # the write-side kill switch and the customer link (R6/R10).
+            if self.settings.memory_event_enabled and customer_id:
+                await enqueue_event_task(c, tenant, tid, "created")
             return row
 
     async def tickets(self, tenant):
@@ -281,7 +287,7 @@ class CustomerService:
                 "ticket_not_found",
             )
 
-    async def update_ticket(self, tenant, actor, tid, status, note, revision):
+    async def update_ticket(self, tenant, actor, tid, status, note, revision, is_commitment=False):
         transitions = {
             "open": {"in_progress", "closed"},
             "in_progress": {"waiting_customer", "resolved", "closed"},
@@ -337,17 +343,26 @@ class CustomerService:
                     note=note,
                 )
             if note.strip():
-                await execute(
+                remark = await one(
                     c,
-                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content)
-                    VALUES(:t,:id,'staff',:actor,'remark',:note)""",
+                    """INSERT INTO ticket_process_log(tenant_id,ticket_id,actor_type,actor_id,action_type,content,is_commitment)
+                    VALUES(:t,:id,'staff',:actor,'remark',:note,:commitment) RETURNING id""",
                     t=tenant,
                     id=tid,
                     actor=actor,
                     note=note,
+                    commitment=bool(is_commitment),
                 )
             result = required(
                 await one(c, TICKET_VIEW + " WHERE t.id=:id AND t.tenant_id=:t", id=tid, t=tenant)
             )
             await audit(c, tenant, actor, "ticket.updated", tid, status=status)
+            # Phase 3 event memory: lifecycle transitions and commitment
+            # remarks dispatch event_write tasks in this same transaction.
+            # Gated on the write-side kill switch and the customer link.
+            if self.settings.memory_event_enabled and row["customer_id"]:
+                if status != row["status"] and status in {"resolved", "closed"}:
+                    await enqueue_event_task(c, tenant, tid, status)
+                if is_commitment and note.strip():
+                    await enqueue_event_task(c, tenant, tid, "commitment", remark["id"])
             return result

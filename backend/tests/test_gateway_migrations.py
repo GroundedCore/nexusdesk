@@ -64,4 +64,4 @@ def test_gateway_upgrade_preserves_resources_and_guards_downgrade(migration_data
         == "existing connection"
     )
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0035_memory_customers"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0036_memory_events"

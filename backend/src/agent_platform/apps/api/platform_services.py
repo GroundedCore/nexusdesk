@@ -16,6 +16,7 @@ from agent_platform.modules.knowledge.service import KnowledgeService
 from agent_platform.modules.knowledge.vector_store import VectorIndex
 from agent_platform.modules.knowledge.workspace import Workspace
 from agent_platform.modules.memory.service import MemoryService
+from agent_platform.modules.memory.store import TsVectorStore
 from agent_platform.modules.model_gateway.gateway import GatewayChatModel, ModelGateway
 from agent_platform.modules.model_gateway.service import build_model
 from agent_platform.modules.observability.service import ObservabilityService
@@ -51,6 +52,10 @@ class PlatformServices:
         )
         self.retrieval = Retrieval(engine, self.knowledge, self.vector_index, self.gateway)
         self.memory = MemoryService(engine, settings)
+        # Phase 3 retrieval store. The keyword implementation is always safe;
+        # ``agent_runtime.bootstrap.runtime_services`` replaces it with the
+        # startup-probed implementation (pgvector when available).
+        self.memory_store = TsVectorStore(engine, settings)
         self.conversations = ConversationService(engine, settings.history_turns, self.memory)
         self.handoffs = HandoffService(engine, repository)
         self.customer = CustomerService(

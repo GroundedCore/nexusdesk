@@ -14,6 +14,13 @@ class SearchInput(BaseModel):
     query: str = Field(min_length=1, max_length=500)
 
 
+class MemorySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=1, max_length=500)
+    # The deployment-level memory_search_limit_max clamps this further.
+    limit: int = Field(default=5, ge=1, le=50)
+
+
 class TicketLookup(BaseModel):
     model_config = ConfigDict(extra="forbid")
     ticket_id: UUID
@@ -44,6 +51,14 @@ BUILTIN_SCHEMAS = {
             "parameters": TicketProposal.model_json_schema(),
         },
     },
+    "memory_search": {
+        "type": "function",
+        "function": {
+            "name": "memory_search",
+            "description": "检索当前客户的历史服务记录与过往事项（工单事件、待办承诺）。",
+            "parameters": MemorySearchInput.model_json_schema(),
+        },
+    },
 }
 
 
@@ -52,10 +67,23 @@ class PlatformTools:
         self.http, self.platform, self.row = http, platform, row
         self.allowed, self.kb_ids, self.emit = allowed, [UUID(k) for k in kb_ids], emit
 
+    def _memory_search_registered(self):
+        """memory_search registration gate (R15, P3-UT-10): the tool only
+        appears when the draft kept it, the run is customer-bound and the
+        agent snapshot has memory enabled. Playground and customerless runs
+        never see it, so the model cannot call it either.
+        """
+        if "memory_search" not in self.allowed or not self.row.get("customer_id"):
+            return False
+        agent = (self.row.get("config", {}).get("agent") or {}).get("config") or {}
+        return agent.get("memory_enabled", True) is not False
+
     @property
     def schemas(self):
         return self.http.schemas + [
-            schema for name, schema in BUILTIN_SCHEMAS.items() if name in self.allowed
+            schema
+            for name, schema in BUILTIN_SCHEMAS.items()
+            if name in self.allowed and (name != "memory_search" or self._memory_search_registered())
         ]
 
     async def execute(self, name, args):
@@ -142,6 +170,27 @@ class PlatformTools:
                     self.row["tenant_id"], self.row["conversation_id"], ticket.ticket_id
                 )
                 return {"ok": True, "data": json.loads(json.dumps(result, default=str))}
+            if name == "memory_search":
+                # Not in schemas => invisible to the model; this guard covers
+                # direct/hallucinated calls on customerless runs (P3-UT-10).
+                if not self._memory_search_registered():
+                    return {"ok": False, "error": "memory_search_unavailable"}
+                params = MemorySearchInput.model_validate(args)
+                hits = await self.platform.memory_store.search(
+                    self.row["tenant_id"], self.row["customer_id"], params.query, params.limit
+                )
+                data = [
+                    {
+                        "content": hit["content"],
+                        "key": hit["key"],
+                        "updated_at": str(hit["updated_at"]),
+                        "score": round(hit["score"], 6),
+                    }
+                    for hit in hits
+                ]
+                if not data:
+                    return {"ok": True, "data": [], "message": "未找到相关历史记录"}
+                return {"ok": True, "data": data}
             return await self.http.execute(name, args)
         except ValidationError:
             return {"ok": False, "error": "invalid_arguments"}

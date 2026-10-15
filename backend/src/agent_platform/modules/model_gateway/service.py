@@ -31,6 +31,17 @@ class DemoModel:
                     }
                 ],
             )
+        if "上次" in text and "memory_search" in self.available:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "id": "memory_query",
+                        "name": "memory_search",
+                        "args": {"query": text[:500]},
+                    }
+                ],
+            )
         if "knowledge_search" in self.available and "查询演示" not in text:
             return AIMessage(
                 content="",
