@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Pagination } from 'antd';
 import { t } from '../../../i18n';
 import { Badge, Empty, Field, Panel, time } from '../../../shared/components/ui';
@@ -12,6 +11,7 @@ interface Props {
   status: string;
   activeAgentId?: string | null;
   filterAgentId?: string;
+  homeAgentIds?: string[] | null;
   selected: string;
   operator: boolean;
   agents: Agent[] | null;
@@ -32,6 +32,7 @@ export function ConversationSidebar({
   status,
   activeAgentId,
   filterAgentId,
+  homeAgentIds,
   selected,
   operator,
   agents,
@@ -43,10 +44,14 @@ export function ConversationSidebar({
   onSelect,
   onPageChange,
 }: Props) {
-  const [agentId, setAgentId] = useState('');
   const locked = !!activeAgentId;
   const lockedName = locked ? agents?.find(agent => agent.id === activeAgentId)?.name || t('默认 Runtime') : '';
-  const effectiveAgentId = locked ? activeAgentId : agentId;
+  // In "all conversations" mode the selector doubles as the list filter; its
+  // options mirror the agents shown on the workbench entry page.
+  const effectiveAgentId = locked ? activeAgentId : filterAgentId;
+  const optionAgents = locked || !homeAgentIds
+    ? (agents || []).filter(agent => agent.published_version)
+    : (agents || []).filter(agent => homeAgentIds.includes(agent.id));
   const statusOptions = [
     ['all', t('全部')],
     ['bot', t('自动服务')],
@@ -63,14 +68,14 @@ export function ConversationSidebar({
           onSubmit={event => {
             event.preventDefault();
             void onCreate(effectiveAgentId || null);
-            setAgentId('');
+            if (onFilterAgentChange) onFilterAgentChange('');
           }}
         >
           <Field label={t('使用的 Agent')}>
-            <select value={effectiveAgentId || ''} onChange={event => setAgentId(event.target.value)} disabled={locked}>
+            <select value={effectiveAgentId || ''} onChange={event => { if (onFilterAgentChange) onFilterAgentChange(event.target.value); }} disabled={locked}>
               {!locked && <option value="">{t('默认 Runtime')}</option>}
-              {(agents || []).filter(agent => agent.published_version).map(agent => (
-                <option value={agent.id} key={agent.id}>{agent.name} · v{agent.published_version}</option>
+              {optionAgents.map(agent => (
+                <option value={agent.id} key={agent.id}>{agent.name}{agent.published_version ? ` · v${agent.published_version}` : ''}</option>
               ))}
             </select>
           </Field>
@@ -78,16 +83,6 @@ export function ConversationSidebar({
         </form>
       )}
       {locked && <p className="hint">{t('当前仅查看 {{v0}} 的会话', { v0: lockedName })}</p>}
-      {!locked && onFilterAgentChange && (
-        <Field label={t('按 Agent 筛选')}>
-          <select value={filterAgentId || ''} onChange={event => onFilterAgentChange(event.target.value)} aria-label={t('按 Agent 筛选')}>
-            <option value="">{t('全部 Agent')}</option>
-            {(agents || []).map(agent => (
-              <option value={agent.id} key={agent.id}>{agent.name}</option>
-            ))}
-          </select>
-        </Field>
-      )}
       <div className="c-filter-tabs">
         {statusOptions.map(([value, label]) => (
           <button
