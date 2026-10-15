@@ -1,8 +1,9 @@
 # Phase 4 · 治理、衰退与标记记忆 — 测试方案
 
-> 状态：待实施（本阶段开发完成后执行）
+> 状态：执行中（QA 修订已按 08 裁定落实：R1 迁移编号、R7 P4-IT-10 措辞、R18 P4-CM-05）
 > 创建：2026-10-10
-> 依据：`02-requirements.md`（FR-1~FR-7、AC-1~AC-13）、`03-technical-design.md`（迁移 `0033`、人工保护、PII、删除/合并、衰退机制）
+> 修订：2026-10-15（QA，按 `08-implementation-breakdown.md` R1/R7/R18）
+> 依据：`02-requirements.md`（FR-1~FR-7、AC-1~AC-13）、`03-technical-design.md`（迁移 `0037`（R1 重编号）、人工保护、PII、删除/合并、衰退机制）、`08-implementation-breakdown.md`（R1~R21 裁定）
 
 ## 1. 测试范围与原则
 
@@ -41,7 +42,7 @@
 | P4-UT-08 | 解除保护 | "恢复自动管理"后 `protected=false`、`source_type='extracted'`，后续抽取可正常覆盖 | FR-1 |
 | P4-UT-09 | flag 写入权限 | `type='flag' AND source_type='extracted'` 在 upsert 入口直接抛错；抽取器输出 flag 被过滤；DB CHECK 约束拒绝非法 flag key | FR-2 |
 | P4-UT-10 | decay 公式 | `effective_confidence` 各类型边界：age=0 → 原值；age=半衰期 → 一半；profile 365 天/preference 90 天/event 30 天；flag 与 protected 免疫 | FR-6.1 |
-| P4-UT-11 | 阈值路由 | 跌破 `memory_decay_min_confidence`（0.3）：profile→pending；preference/event→expired；恰好等于阈值的行为固化 | FR-6.1 |
+| P4-UT-11 | 阈值路由 | 跌破 `memory_decay_min_confidence`（0.3）：profile→pending；preference→expired；event 不参与置信度迁移（可见性仅由 TTL 管理，08 R8）；恰好等于阈值不迁移（等值保留，`>=` 阈值） | FR-6.1（按 R8 修订） |
 | P4-UT-12 | 合并冲突矩阵 | 同 (type,key) 冲突：protected 优先于非 protected；同保护级取 updated_at 较新者；被弃方物理删除并入审计明细 | AC-6/FR-5 |
 | P4-UT-13 | 强化语义 | 强化只刷新 `last_referenced_at` 与 `reference_count`，不提升 base confidence | FR-6.2 |
 
@@ -58,7 +59,7 @@
 | P4-IT-07 | 删除性能 | 单客户 200 条（容量上限）删除 P99 ≤ 2s | 非功能 |
 | P4-IT-08 | 客户合并 | 两客户（含同键冲突一边人工一边抽取）合并：identities 改挂；冲突保留人工条目；源 customer 删除；审计含源/目标/取舍明细；事务失败时整体回滚 | AC-6 |
 | P4-IT-09 | 衰退每日任务 | 构造：preference 200 天未引用、profile 400 天未引用、protected 500 天未引用、flag 500 天：任务执行后 preference→expired、profile→pending、protected 与 flag 保持 active 且照常注入；审计含变迁前分值 | AC-8/AC-10/AC-11 |
-| P4-IT-10 | 查询时过滤实时生效 | 每日任务未跑时，跌破阈值条目已不出现在注入与检索（SQL 内联衰减过滤） | 技术设计 §7a |
+| P4-IT-10 | 查询时过滤实时生效 | 每日任务未跑时，跌破阈值的 profile/preference 条目已不出现在注入段（SQL 内联衰减过滤实时生效）；event 检索不参与置信度过滤，可见性由 TTL 管理（08 R7/R8） | 技术设计 §7a（按 R7 修订） |
 | P4-IT-11 | 强化 L1 | 同键 upsert 刷新 `last_referenced_at`（构造临近过期条目，客户再次提及同 key → 时钟重置，任务执行后不迁移） | AC-9 |
 | P4-IT-12 | 强化 L2/L3 批量落库 | 投递 `reinforce` 任务（聚合同 id）：批量更新 `last_referenced_at`/`reference_count`；`memory_reinforce_sample_rate=0` 时不落库 | FR-6.2 |
 | P4-IT-13 | 强化不跑热路径 | run 执行期间无对 memory_items 的逐条强化写库（SQL 计数断言） | FR-6.2 |
@@ -82,10 +83,11 @@
 
 | 编号 | 核对项 | 通过标准 |
 |---|---|---|
-| P4-CM-01 | 迁移 `0033` 在线性 | 存量库执行成功；CHECK 约束不影响存量非 flag 数据 |
+| P4-CM-01 | 迁移 `0037` 在线性（R1 重编号，原 `0033`） | 存量库执行成功；`protected` 列回填（`source_type='human'` → `protected=true`）；CHECK 约束不影响存量非 flag 数据 |
 | P4-CM-02 | 配置加载 | `memory_pii_masking_enabled` / `memory_rule_scan_interval_minutes` / `memory_decay_*` / `memory_max_items_per_customer` / `memory_reinforce_sample_rate` 等默认值与覆盖生效；`memory_rule_scan_interval_minutes=0` 停用规则扫描 |
-| P4-CM-03 | 审计全覆盖 | 编辑/删除/合并/打标/衰退迁移/淘汰/PII 命中均落 `audit_records`（`memory.*` action）；payload 无 PII 原值 |
+| P4-CM-03 | 审计全覆盖 | 编辑/删除/合并/打标/衰退迁移/淘汰/PII 命中均落 `audit_records`（`memory.*` action，命名按 R17）；payload 无 PII 原值 |
 | P4-CM-04 | 前端 | 客户详情"删除客户"与"合并到…"均有二次确认；条目列表展示 effective_confidence 与 last_referenced_at；观测页记忆卡片区渲染 |
+| P4-CM-05 | protected 一致性（R18） | 不变式 `protected ⇔ source_type='human'`：`protected <> (source_type='human')` 的行数恒为 0（编辑/解除保护/衰退/合并各路径执行后核对） |
 
 ## 7. 回归范围
 
