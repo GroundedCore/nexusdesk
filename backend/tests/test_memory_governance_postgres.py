@@ -1528,3 +1528,44 @@ async def test_p4_it_17_memory_summary_aggregates_constructed_data(platform):
             "/api/v1/observability/memory", headers={"Authorization": "Bearer no-such-token"}
         )
     ).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# P4-CM-03 audit coverage completion (R17)
+# ---------------------------------------------------------------------------
+
+
+async def test_p4_cm_03_reinforce_task_failure_audits_kind_specific_action(platform):
+    """R17 sweep completion: a reinforce task whose executor keeps crashing
+    backs off, then fails permanently at the attempts cap with the
+    kind-specific memory.reinforce.failed audit (same worker mechanism as the
+    Phase 1-3 kinds; the other R17 actions are asserted in their own cases:
+    customer.deleted/merged IT-06/08, flag.upserted/removed IT-05/15,
+    item.released IT-01, decay_pending/decay_expired IT-09, evicted IT-11)."""
+    from test_memory_postgres import force_claimable
+
+    from agent_platform.modules.memory.worker import MemoryWorker
+
+    class CrashingDispatcher:
+        async def execute(self, task):
+            raise RuntimeError("boom")
+
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    item_id = await add_item(engine, tenant, customer_id, "preference", "language", "中文")
+    async with engine.begin() as c:
+        task_id = await enqueue_reinforce_task(c, tenant, {item_id: 1})
+
+    worker = MemoryWorker(engine, CrashingDispatcher(), settings)
+    for _ in range(10):
+        await force_claimable(engine, tenant)
+        if not await worker.run_once():
+            break
+        row = (await db_rows(engine, "SELECT status FROM memory_tasks WHERE id=:id", id=task_id))[0]
+        if row["status"] == "failed":
+            break
+    task = (await db_rows(engine, "SELECT * FROM memory_tasks WHERE id=:id", id=task_id))[0]
+    assert task["status"] == "failed" and task["attempts"] == task["max_attempts"]
+    audits = await audits_of(engine, tenant, "memory.reinforce.failed")
+    assert len(audits) == 1 and audits[0]["details"]["task_id"] == str(task_id)
