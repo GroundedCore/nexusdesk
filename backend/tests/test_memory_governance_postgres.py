@@ -543,12 +543,18 @@ async def test_p4_it_05_rule_scan_marks_clears_and_respects_human_flags(platform
     audits = await audits_of(engine, tenant, "memory.flag.upserted")
     assert len(audits) == 1 and audits[0]["details"]["source_type"] == "rule"
 
-    # A second round must not duplicate the flag row (unique constraint);
-    # full no-op idempotency (no repeat audit/revision churn) is D3, filed.
+    # A second round over unchanged facts is a full no-op (D3 779cca9 +
+    # D5 afe2d8f): nothing marked, no repeat UPDATE, no repeat audit — at the
+    # 15-minute default interval a noisy scan would distort the FR-7
+    # governance counters (~96 audit rows/day/customer).
     result = await scan_overdue_tickets(engine, settings)
+    assert result["marked"] == 0
     flags = [r for r in await items_of(engine, tenant, customer_id) if r["type"] == "flag"]
     assert len(flags) == 1
     assert flags[0]["content"] == flag["content"] and flags[0]["source_type"] == "rule"
+    assert flags[0]["revision"] == 1
+    audits = await audits_of(engine, tenant, "memory.flag.upserted")
+    assert len(audits) == 1  # still only the first mark
 
     # Clear: ticket resolved and due date 31 days back -> no overdue within
     # 30 days -> the rule-sourced flag lifts (AC-3).
@@ -717,6 +723,60 @@ async def test_p4_it_08_merge_rejects_same_customer_and_rolls_back(platform):
     rows = await items_of(engine, tenant, source)
     assert len(rows) == 1 and rows[0]["content"] == "张三"
     assert await db_rows(engine, "SELECT 1 AS x FROM memory_customers WHERE id=:id", id=source)
+
+
+async def test_p4_it_08_merge_relinks_tickets_and_keeps_memory_flowing(platform):
+    """R22: merge rewrites tickets.customer_id (string column, no FK) to the
+    target inside the merge transaction and audits tickets_relinked; the
+    source's in-flight tickets stay alive afterwards — a later resolved event
+    writes to the surviving target and the rule scan flags the target for
+    them. Delete deliberately keeps the reference dangling + the "客户已删除"
+    degradation instead (R16/R22 scenario split; IT-06 contrast)."""
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    source = await make_customer(engine, tenant)
+    target = await make_customer(engine, tenant)
+    ticket_id = await make_ticket(engine, tenant, source)  # overdue, open
+    await db_exec(
+        engine,
+        "INSERT INTO tickets_detail(ticket_id,tenant_id,description,resolution)"
+        " VALUES(:id,:t,'客户描述','已解决')",
+        id=ticket_id,
+        t=tenant,
+    )
+
+    result = await merge_customers(engine, tenant, "operator", source, target)
+    assert result["tickets_relinked"] == 1
+    ticket = await db_rows(engine, "SELECT customer_id FROM tickets WHERE id=:id", id=ticket_id)
+    assert ticket[0]["customer_id"] == str(target)
+    audits = await audits_of(engine, tenant, "memory.customer.merged")
+    assert audits[0]["details"]["tickets_relinked"] == 1
+
+    # A later event on the relinked ticket writes to the surviving target
+    # (pre-R22 the _customer_exists check silently dropped it: memory loss).
+    from test_memory_events_postgres import store_settings
+
+    from agent_platform.modules.memory.events import EventWriter
+    from agent_platform.modules.memory.store import TsVectorStore
+
+    store = TsVectorStore(engine, store_settings(settings))
+    writer = EventWriter(engine, store, store_settings(settings))
+    outcome = await writer.execute(
+        {
+            "id": uuid4(),
+            "tenant_id": tenant,
+            "payload": {"event": "resolved", "ticket_id": str(ticket_id)},
+        }
+    )
+    assert outcome == "done"
+    rows = await items_of(engine, tenant, target)
+    assert any(r["type"] == "event" and r["key"].endswith(":resolved") for r in rows)
+
+    # The rule scan covers the relinked overdue ticket and flags the target.
+    result = await scan_overdue_tickets(engine, settings)
+    assert result["marked"] == 1
+    flags = [r for r in await items_of(engine, tenant, target) if r["type"] == "flag"]
+    assert flags[0]["key"] == "complaint_risk" and flags[0]["source_type"] == "rule"
 
 
 # ---------------------------------------------------------------------------
@@ -1059,3 +1119,412 @@ async def test_p4_cm_05_protected_invariant_holds_across_governance_paths(platfo
     await add_item(engine, tenant, source, "preference", "style", "简洁")
     await merge_customers(engine, tenant, "operator", source, customer_id)
     assert await protected_drift_count(engine, tenant) == 0
+
+
+# ---------------------------------------------------------------------------
+# P4-IT-03 flag injection (AC-2, FR-2; R15)
+# ---------------------------------------------------------------------------
+
+
+async def _run_and_capture(client, services, settings, conversation_id, model,
+                           message="进度怎样了"):
+    from test_memory_customers_postgres import claim_and_run
+
+    services.worker.runtime.legacy.model = model
+    response = await client.post(
+        f"/api/v1/conversations/{conversation_id}/messages", json={"content": message}
+    )
+    assert response.status_code == 202, response.text
+    await claim_and_run(services, settings)
+    return response
+
+
+def _injected_system_text(model):
+    return "\n".join(m.content for m in model.seen[0] if m.type == "system")
+
+
+class _CaptureModel:
+    def __init__(self, reply="回答"):
+        self.seen = []
+        self.reply = reply
+
+    async def ainvoke(self, messages):
+        self.seen.append(messages)
+        from langchain_core.messages import AIMessage
+
+        return AIMessage(content=self.reply)
+
+
+async def _bound_conversation(engine, tenant, customer_id):
+    conversation_id = uuid4()
+    await db_exec(
+        engine,
+        "INSERT INTO runtime_conversations(id,tenant_id,external_id,customer_id)"
+        " VALUES(:id,:t,:e,:c)",
+        id=conversation_id,
+        t=tenant,
+        e=f"conv-{uuid4().hex[:8]}",
+        c=customer_id,
+    )
+    return conversation_id
+
+
+async def test_p4_it_03_flags_inject_first_and_have_their_own_budget(platform):
+    """AC-2: the 【服务标记】 section opens the injection, ahead of profile/
+    preference/pending-events; flags do not consume the 20-item profile
+    budget; their own cap is configurable (memory_flag_inject_max)."""
+    client, services, settings = platform
+    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    # Fill the 20-item profile/preference budget completely.
+    for i in range(20):
+        await add_item(engine, tenant, customer_id, "preference", f"custom_{i:02d}",
+                       f"偏好{i}", confidence=0.9)
+    await memory.upsert_flag(tenant, "operator", customer_id, "vip", "VIP客户")
+    await memory.upsert_flag(tenant, "operator", customer_id, "complaint_risk", "曾投诉")
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+
+    model = _CaptureModel()
+    await _run_and_capture(client, services, settings, conversation_id, model)
+    injected = _injected_system_text(model)
+    assert "【服务标记】" in injected and "VIP客户" in injected and "曾投诉" in injected
+    # Flag section precedes the preference section.
+    assert injected.index("【服务标记】") < injected.index("【客户偏好】")
+    # All 20 budget items still inject: flags have their own budget (FR-2).
+    for i in range(20):
+        assert f"偏好{i}" in injected
+
+    # Independent cap: memory_flag_inject_max=1 keeps only the newest flag.
+    services.worker.settings = settings.model_copy(update={"memory_flag_inject_max": 1})
+    model2 = _CaptureModel()
+    await _run_and_capture(client, services, settings, conversation_id, model2)
+    injected2 = _injected_system_text(model2)
+    assert injected2.count("：VIP客户") + injected2.count("：曾投诉") == 1  # one of two dropped
+
+
+async def test_p4_it_03_no_flags_keeps_phase3_message_body(platform):
+    """No flags -> render_flag_injection is None and the injected body is
+    byte-identical to Phase 3 (regression guard, 08 section 3.1 红线)."""
+    client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    await add_item(engine, tenant, customer_id, "profile", "name", "张三")
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+    model = _CaptureModel()
+    await _run_and_capture(client, services, settings, conversation_id, model)
+    injected = _injected_system_text(model)
+    assert "【服务标记】" not in injected and "张三" in injected
+
+
+# ---------------------------------------------------------------------------
+# P4-IT-04 blacklist behaviour (FR-2; R13/R15)
+# ---------------------------------------------------------------------------
+
+
+async def test_p4_it_04_blacklist_injects_instruction_no_handoff_by_default(platform):
+    """blacklist flag: the injection gains the fixed instruction line
+    谨慎服务，涉承诺一律转人工确认; with the default switch
+    (memory_blacklist_auto_handoff=false) the run proceeds normally."""
+    client, services, settings = platform
+    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    await memory.upsert_flag(tenant, "operator", customer_id, "blacklist", "黑名单客户")
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+
+    model = _CaptureModel()
+    await _run_and_capture(client, services, settings, conversation_id, model)
+    injected = _injected_system_text(model)
+    assert "谨慎服务，涉承诺一律转人工确认" in injected
+    # Default switch: the run executed (the model was invoked).
+    assert model.seen
+
+
+async def test_p4_it_04_blacklist_auto_handoff_when_enabled(platform):
+    """memory_blacklist_auto_handoff=true: a blacklisted customer's message
+    is recorded and handed straight to a human — no run is submitted (R13)."""
+    client, services, settings = platform
+    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    await memory.upsert_flag(tenant, "operator", customer_id, "blacklist", "黑名单客户")
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+    # Opt the customer service into auto handoff for this test only.
+    services.platform.customer.settings = settings.model_copy(
+        update={"memory_blacklist_auto_handoff": True}
+    )
+
+    response = await client.post(
+        f"/api/v1/conversations/{conversation_id}/messages", json={"content": "在吗"}
+    )
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["run"] is None and body["handoff"] is not None
+
+    # No run was submitted for the conversation.
+    runs = await db_rows(
+        engine, "SELECT count(*)::int AS n FROM runtime_runs WHERE tenant_id=:t", t=tenant
+    )
+    assert runs[0]["n"] == 0
+    # The user message is on record and the conversation waits for a human.
+    conv = await db_rows(
+        engine, "SELECT mode FROM runtime_conversations WHERE id=:id", id=conversation_id
+    )
+    assert conv[0]["mode"] == "waiting"
+    messages = await db_rows(
+        engine,
+        "SELECT content FROM conversation_messages WHERE conversation_id=:id AND role='user'",
+        id=conversation_id,
+    )
+    assert any("在吗" in row["content"] for row in messages)
+    handoffs = await db_rows(
+        engine, "SELECT reason FROM handoffs WHERE conversation_id=:id", id=conversation_id
+    )
+    assert handoffs[0]["reason"] == "黑名单客户自动转人工"
+
+
+# ---------------------------------------------------------------------------
+# P4-IT-12/13 reinforcement dispatch (FR-6.2; R10/R11)
+# ---------------------------------------------------------------------------
+
+
+async def test_p4_it_12_l3_overlap_enqueues_reinforce_at_run_finish(platform):
+    """End to end: an injected item overlapping the user input (L3) becomes
+    a reinforce task inside the run-finish transaction; the memory.injected
+    runtime event carries the section counts (R10); with
+    memory_reinforce_sample_rate=0 nothing is enqueued (dispatch-side
+    sampling)."""
+    client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    item_id = await add_item(engine, tenant, customer_id, "preference", "language", "中文")
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+
+    await _run_and_capture(client, services, settings, conversation_id, _CaptureModel(),
+                           message="请用中文回复我")
+    tasks = await db_rows(
+        engine,
+        "SELECT * FROM memory_tasks WHERE tenant_id=:t AND kind='reinforce'",
+        t=tenant,
+    )
+    assert len(tasks) == 1
+    assert tasks[0]["payload"]["hits"] == {str(item_id): 1}
+    events = await db_rows(
+        engine,
+        "SELECT e.data FROM runtime_events e JOIN runtime_runs r ON r.id=e.run_id"
+        " WHERE e.type='memory.injected' AND r.tenant_id=:t",
+        t=tenant,
+    )
+    assert len(events) == 1
+    assert events[0]["data"] == {"items": 1, "flags": 0, "events": 0}
+
+    # Sampling off: a second run enqueues nothing more.
+    services.worker.settings = settings.model_copy(update={"memory_reinforce_sample_rate": 0.0})
+    await _run_and_capture(client, services, settings, conversation_id, _CaptureModel(),
+                           message="请用中文回复我")
+    tasks = await db_rows(
+        engine,
+        "SELECT count(*)::int AS n FROM memory_tasks WHERE tenant_id=:t AND kind='reinforce'",
+        t=tenant,
+    )
+    assert tasks[0]["n"] == 1  # unchanged
+
+
+async def test_p4_it_13_reinforcement_never_writes_on_the_hot_path(platform):
+    """FR-6.2: during run execution the referenced item's row is untouched
+    (last_referenced_at/reference_count unchanged right after finish); the
+    refresh only happens when the memory worker executes the queued task."""
+    client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    item_id = await add_item(engine, tenant, customer_id, "preference", "language", "中文")
+    await age_item(engine, item_id, 10)
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+
+    await _run_and_capture(client, services, settings, conversation_id, _CaptureModel(),
+                           message="请用中文回复我")
+    row = (await items_of(engine, tenant, customer_id))[0]
+    assert row["reference_count"] == 0  # hot path wrote nothing
+    aged = await db_rows(
+        engine,
+        "SELECT last_referenced_at < now()-interval '1 day' AS aged"
+        " FROM memory_items WHERE id=:id",
+        id=item_id,
+    )
+    assert aged[0]["aged"] is True  # still backdated: no synchronous refresh
+
+    # The queued task does the refresh, batched off the hot path.
+    from agent_platform.modules.memory.bootstrap import MemoryDispatcher
+
+    dispatcher = MemoryDispatcher(None, None, None, reinforce=ReinforceService(engine, settings))
+    task = (
+        await db_rows(
+            engine,
+            "SELECT * FROM memory_tasks WHERE tenant_id=:t AND kind='reinforce'",
+            t=tenant,
+        )
+    )[0]
+    assert await dispatcher.execute(task) == "done"
+    row = (await items_of(engine, tenant, customer_id))[0]
+    assert row["reference_count"] == 1
+    fresh = await db_rows(
+        engine,
+        "SELECT last_referenced_at > now()-interval '1 minute' AS fresh"
+        " FROM memory_items WHERE id=:id",
+        id=item_id,
+    )
+    assert fresh[0]["fresh"] is True
+
+
+# ---------------------------------------------------------------------------
+# P4-IT-16 decay switch parity with Phase 3 (AC-13; R14)
+# ---------------------------------------------------------------------------
+
+
+async def test_p4_it_16_decay_disabled_skips_maintenance_migration(platform):
+    """AC-13 at the worker layer: with memory_decay_enabled=false the
+    maintenance pass is exactly the Phase 3 one (TTL only) — no threshold
+    migration, no eviction — while the enabled worker migrates."""
+    _client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    old = await add_item(engine, tenant, customer_id, "preference", "language", "中文",
+                         confidence=0.9)
+    await age_item(engine, old, 200)  # below threshold: would expire under decay
+
+    from agent_platform.modules.memory.worker import MemoryWorker
+
+    off = MemoryWorker(engine, service=None,
+                       settings=settings.model_copy(update={"memory_decay_enabled": False}),
+                       store=None)
+    await off.maintenance()
+    row = (await items_of(engine, tenant, customer_id))[0]
+    assert row["status"] == "active"  # Phase 3 behaviour: untouched
+
+    on = MemoryWorker(engine, service=None,
+                      settings=settings.model_copy(update={"memory_decay_enabled": True}),
+                      store=None)
+    await on.maintenance()
+    row = (await items_of(engine, tenant, customer_id))[0]
+    assert row["status"] == "expired"
+
+
+async def test_p4_it_16_decay_disabled_gates_reinforce_dispatch(platform):
+    """R23(b): with memory_decay_enabled=false the dispatch side enqueues no
+    reinforce task and the L3 path never refreshes last_referenced_at —
+    reinforcement would shift the Phase 3 retrieval ordering (decay_factor
+    keys off that column), so AC-13 parity requires the gate. L1 (same-key
+    upsert refreshing the clock) is Phase 2 behaviour and stays ungated."""
+    client, services, settings = platform
+    engine, tenant = services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+    item_id = await add_item(engine, tenant, customer_id, "preference", "language", "中文")
+    await age_item(engine, item_id, 10)
+    conversation_id = await _bound_conversation(engine, tenant, customer_id)
+
+    services.worker.settings = settings.model_copy(update={"memory_decay_enabled": False})
+    await _run_and_capture(client, services, settings, conversation_id, _CaptureModel(),
+                           message="请用中文回复我")
+    tasks = await db_rows(
+        engine,
+        "SELECT count(*)::int AS n FROM memory_tasks WHERE tenant_id=:t AND kind='reinforce'",
+        t=tenant,
+    )
+    assert tasks[0]["n"] == 0  # dispatch gated off
+    aged = await db_rows(
+        engine,
+        "SELECT last_referenced_at < now()-interval '1 day' AS aged"
+        " FROM memory_items WHERE id=:id",
+        id=item_id,
+    )
+    assert aged[0]["aged"] is True  # L3 never touched the clock
+
+    # L1 stays ungated: a same-key extraction upsert refreshes the clock even
+    # with decay off (Phase 2 behaviour, outside the R23(b) gate).
+    decay_off = MemoryService(
+        engine, settings.model_copy(update={"memory_decay_enabled": False})
+    )
+    async with engine.begin() as c:
+        await decay_off.apply_extracted(
+            c, tenant, customer_id,
+            [extract_op("language", "中文", op="update", item_type="preference")],
+            "conv-l1", 0.9, 0.5,
+        )
+    fresh = await db_rows(
+        engine,
+        "SELECT last_referenced_at > now()-interval '1 minute' AS fresh"
+        " FROM memory_items WHERE id=:id",
+        id=item_id,
+    )
+    assert fresh[0]["fresh"] is True
+
+
+# ---------------------------------------------------------------------------
+# P4-IT-17 observability memory summary (AC-7, FR-7; R20)
+# ---------------------------------------------------------------------------
+
+
+async def test_p4_it_17_memory_summary_aggregates_constructed_data(platform):
+    """Construct a known dataset, then memory_summary() agrees with it:
+    extraction volume from audit details, pending backlog, governance
+    counters, decay counters, reinforcement queue stats, PII hits."""
+    client, services, settings = platform
+    memory, engine, tenant = services.platform.memory, services.repository.engine, settings.tenant_id
+    customer_id = await make_customer(engine, tenant)
+
+    # Extraction: 1 added + 1 pii hit, audited the way the extraction service
+    # persists it (apply_extracted counts ride the audit details).
+    async with engine.begin() as c:
+        counts = await memory.apply_extracted(
+            c, tenant, customer_id,
+            [extract_op("phone", "13812345678", op="add")], "conv-1", 0.8, 0.5,
+        )
+        from agent_platform.platform.persistence.store import audit
+
+        await audit(c, tenant, "memory", "memory.extract.applied", customer_id, **counts)
+
+    # Governance: one flag write, one human edit.
+    await memory.upsert_flag(tenant, "operator", customer_id, "vip", "重点")
+    phone_item = next(r for r in await items_of(engine, tenant, customer_id)
+                      if r["key"] == "phone")
+    await memory.edit_item(tenant, "operator", phone_item["id"], "新号码")
+    # Backlog: one pending row.
+    await add_item(engine, tenant, customer_id, "profile", "company", "公司", status="pending")
+    # Decay: one preference expires.
+    old = await add_item(engine, tenant, customer_id, "preference", "style", "简洁",
+                         confidence=0.9)
+    await age_item(engine, old, 200)
+    await daily_migration(engine, settings)
+    # Reinforcement: one done task refreshing one id.
+    async with engine.begin() as c:
+        task_id = await enqueue_reinforce_task(c, tenant, {phone_item["id"]: 2})
+    task = (await db_rows(engine, "SELECT * FROM memory_tasks WHERE id=:id", id=task_id))[0]
+    await ReinforceService(engine, settings).execute(task)
+    await db_exec(engine, "UPDATE memory_tasks SET status='done' WHERE id=:id", id=task_id)
+
+    summary = await services.platform.observability.memory_summary(tenant)
+    today = [d for d in summary["extraction_daily"] if d["runs"] == 1]
+    assert today and today[0]["added"] == 1 and today[0]["pii_masked"] == 1
+    assert summary["backlog"]["pending"] >= 1
+    governance = {row["action"]: row["n"] for row in summary["governance"]}
+    assert governance["memory.flag.upserted"] == 1
+    assert governance["memory.item.edited"] == 1
+    assert summary["pii_masked"] >= 1
+    assert summary["decay"]["decay_expired"] == 1
+    reinforce = summary["reinforce"]
+    assert reinforce["tasks_done"] == 1 and reinforce["ids_refreshed"] == 1
+
+    # HTTP surface (D4 regression guard: the reinforce aggregation once 500'd
+    # this endpoint on every call): reader auth suffices, anonymous is 401,
+    # and the body mirrors the service-level shape.
+    response = await client.get(
+        "/api/v1/observability/memory", headers={"Authorization": "Bearer platform-viewer"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["pii_masked"] == summary["pii_masked"]
+    assert body["decay"]["decay_expired"] == 1
+    assert body["reinforce"]["tasks_done"] == 1
+    assert (
+        await client.get(
+            "/api/v1/observability/memory", headers={"Authorization": "Bearer no-such-token"}
+        )
+    ).status_code == 401
