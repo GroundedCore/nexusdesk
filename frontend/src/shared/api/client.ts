@@ -9,7 +9,7 @@ export interface Message { id: string; seq: number; role: string; content: strin
 export interface Action { id: string; status: string; payload: { title: string; description: string }; expires_at: string }
 export interface ConversationDetail extends Conversation { messages: Message[]; runs: Run[]; actions: Action[] }
 export interface Handoff { revision?: number; id: string; conversation_id: string; external_id: string; reason: string; summary: string; status: string; assignee: string | null }
-export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; customer_id?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
+export interface Ticket { ticket_no?: string; priority?: number; assignee_id?: string | null; customer_id?: string | null; customer_active?: boolean; due_at?: string | null; created_at?: string; updated_at?: string; resolution?: string | null; id: string; title: string; description: string; status: string; note: string; revision: number }
 export interface ChannelField {
   name: string;
   label: string;
@@ -62,10 +62,24 @@ export interface Audit { id: number; actor: string; action: string; resource: st
 export interface MemoryCustomer { id: string; external_keys: string[]; item_count: number; last_active_at: string | null; created_at: string }
 export interface MemoryCustomerPage { items: MemoryCustomer[]; total: number; page: number; page_size: number }
 export interface MemoryIdentity { id: string; source: string; external_key: string; created_at: string }
-export interface MemoryItem { id: string; type: string; key: string; content: string; confidence: number; status: string; source_type: string; source_ref: string | null; prev_content?: string | null; revision?: number; customer_id?: string; updated_at: string; created_at?: string }
+export interface MemoryItem { id: string; type: string; key: string; content: string; confidence: number; status: string; source_type: string; source_ref: string | null; prev_content?: string | null; revision?: number; customer_id?: string; protected?: boolean; last_referenced_at?: string | null; reference_count?: number; effective_confidence?: number | null; updated_at: string; created_at?: string }
 export interface MemoryCustomerDetail { id: string; created_at: string; identities: MemoryIdentity[]; items: MemoryItem[] }
 export interface MemoryPendingItem extends MemoryItem { customer_id: string; customer_external_keys?: string[] }
 export interface MemoryPendingPage { items: MemoryPendingItem[]; total: number; page: number; page_size: number }
+
+// Phase 4 · governance observability (GET /observability/memory).
+export interface MemoryExtractionDay { day: string; runs: number; added: number; updated: number; pending: number; dropped: number; pii_masked: number }
+export interface MemorySummary {
+  window_hours: number;
+  extraction_daily: MemoryExtractionDay[];
+  hit_rate: { customer_runs: number; injected_runs: number };
+  backlog: { pending: number; oldest_age_seconds: number | null };
+  governance: { action: string; n: number }[];
+  pii_masked: number;
+  reinforce: { tasks_done: number; tasks_failed: number; ids_refreshed: number };
+  decay: { decay_pending: number; decay_expired: number; evicted: number; expired_restored: number };
+  search: { calls: number; empty: number };
+}
 
 export function token() { return sessionStorage.getItem('agent-platform-token') || ''; }
 export function setToken(value: string) { if (value) sessionStorage.setItem('agent-platform-token', value); else sessionStorage.removeItem('agent-platform-token'); }

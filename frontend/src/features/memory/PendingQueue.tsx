@@ -71,7 +71,18 @@ export function PendingQueue({ operator, onOpenCustomer }: Props) {
             title: t('类型'), dataIndex: 'type', width: 90,
             render: (value: string) => <Tag>{typeLabels()[value] || value}</Tag>,
           },
-          { title: t('键'), dataIndex: 'key', width: 130, render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
+          {
+            title: t('键'), dataIndex: 'key', width: 200,
+            render: (value: string) => {
+              const suggested = value.endsWith(':suggested');
+              return (
+                <Space size={4} wrap>
+                  <Typography.Text code>{suggested ? value.slice(0, -':suggested'.length) : value}</Typography.Text>
+                  {suggested && <Tag color="blue">{t('建议更新（人工保护）')}</Tag>}
+                </Space>
+              );
+            },
+          },
           { title: t('内容'), dataIndex: 'content' },
           { title: t('置信度'), dataIndex: 'confidence', width: 90, render: (value: number) => value.toFixed(2) },
           { title: t('来源'), key: 'source', width: 160, render: (_, row) => <SourceRef item={row} /> },
@@ -81,7 +92,7 @@ export function PendingQueue({ operator, onOpenCustomer }: Props) {
             render: (_: unknown, row: MemoryPendingItem) => (
               <Space size={4} wrap>
                 <Popconfirm
-                  title={t('确认后这条记忆将对客户生效')}
+                  title={row.key.endsWith(':suggested') ? t('确认后将更新人工维护的原条目') : t('确认后这条记忆将对客户生效')}
                   okText={t('确认')}
                   cancelText={t('取消')}
                   onConfirm={() => void decide(row, 'confirm')}
