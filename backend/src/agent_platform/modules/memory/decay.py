@@ -83,8 +83,9 @@ def injection_filter_sql(settings):
     clause = """ AND (
         type NOT IN ('profile','preference') OR protected
         OR confidence * exp(-ln(2) * EXTRACT(EPOCH FROM (now()-last_referenced_at))
-            / (CASE type WHEN 'profile' THEN :hl_profile ELSE :hl_preference END
-               * 86400.0)) >= :min_confidence
+            / (CASE type WHEN 'profile' THEN CAST(:hl_profile AS numeric)
+               ELSE CAST(:hl_preference AS numeric) END
+               * 86400.0)) >= CAST(:min_confidence AS numeric)
     )"""
     params = {
         "hl_profile": settings.memory_decay_half_life_days_profile,
@@ -95,11 +96,13 @@ def injection_filter_sql(settings):
 
 
 # The shared SQL twin of effective_confidence for the daily pass: per-type
-# half-life in days, flags excluded by the surrounding WHERE clause.
+# half-life in days, flags excluded by the surrounding WHERE clause. Bind
+# params sit inside an untyped CASE, so each branch is CAST explicitly —
+# otherwise PostgreSQL's prepare phase infers text (QA D1).
 _EFFECTIVE_SQL = """confidence * exp(-ln(2) * EXTRACT(EPOCH FROM (now()-last_referenced_at))
-    / (CASE type WHEN 'profile' THEN :hl_profile
-                 WHEN 'preference' THEN :hl_preference
-                 ELSE :hl_event END * 86400.0))"""
+    / (CASE type WHEN 'profile' THEN CAST(:hl_profile AS numeric)
+                 WHEN 'preference' THEN CAST(:hl_preference AS numeric)
+                 ELSE CAST(:hl_event AS numeric) END * 86400.0))"""
 
 
 def _half_life_params(settings):
@@ -117,7 +120,7 @@ async def _migrate_below_threshold(c, tenant, settings, item_type, target, actio
         f"""SELECT id,customer_id,key,{_EFFECTIVE_SQL} AS effective
         FROM memory_items
         WHERE tenant_id=:t AND type=:type AND status='active' AND NOT protected
-        AND {_EFFECTIVE_SQL} < :min_confidence
+        AND {_EFFECTIVE_SQL} < CAST(:min_confidence AS numeric)
         ORDER BY id""",
         t=tenant,
         type=item_type,
@@ -153,8 +156,11 @@ async def _migrate_below_threshold(c, tenant, settings, item_type, target, actio
 async def _evict_over_capacity(c, tenant, settings):
     """Evict the lowest-scoring active rows above the per-customer cap.
 
-    Protected rows and flags never evict (R8 double guard); a customer whose
-    overflow consists only of protected rows simply stays over the cap.
+    Eviction is a soft expiry (FR-6.3): rows land in ``expired`` so the
+    console can restore them, and an expired restore refreshes the reference
+    clock (R19) — no evict-restore-re-evict loop. Protected rows and flags
+    never evict (R8 double guard); a customer whose overflow consists only
+    of protected rows simply stays over the cap.
     """
     limit = settings.memory_max_items_per_customer
     over = await many(
@@ -181,7 +187,7 @@ async def _evict_over_capacity(c, tenant, settings):
         for row in candidates[: group["n"] - limit]:
             updated = await one(
                 c,
-                """UPDATE memory_items SET status='deleted',updated_at=now()
+                """UPDATE memory_items SET status='expired',updated_at=now()
                 WHERE id=:id AND status='active' RETURNING id""",
                 id=row["id"],
             )

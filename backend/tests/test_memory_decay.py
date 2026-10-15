@@ -75,8 +75,9 @@ def test_half_lives_assembled_from_scalar_settings():
 
 def test_injection_filter_sql_keeps_threshold_equality():
     clause, params = injection_filter_sql(_settings())
-    # P4-UT-11: rows exactly at the threshold stay injectable.
-    assert ">= :min_confidence" in clause
+    # P4-UT-11: rows exactly at the threshold stay injectable (the bound
+    # params are CAST explicitly so the prepare phase cannot infer text).
+    assert ">= CAST(:min_confidence AS numeric)" in clause
     assert "protected" in clause
     assert params == {"hl_profile": 365, "hl_preference": 90, "min_confidence": 0.3}
 
