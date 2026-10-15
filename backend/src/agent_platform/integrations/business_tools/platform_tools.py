@@ -179,6 +179,20 @@ class PlatformTools:
                 hits = await self.platform.memory_store.search(
                     self.row["tenant_id"], self.row["customer_id"], params.query, params.limit
                 )
+                # L2 reference signal (R11): hit ids feed the reinforce task
+                # dispatched at run finish; they stay internal and never reach
+                # the model-facing output below.
+                reinforce = self.row.setdefault("_memory_reinforce", {})
+                for hit in hits:
+                    if hit.get("id"):
+                        hit_id = str(hit["id"])
+                        reinforce[hit_id] = reinforce.get(hit_id, 0) + 1
+                # R10 telemetry: call volume and the empty-result rate
+                # (hits=0) aggregate from this event. Production always wires
+                # emit; the None guard keeps legacy ad-hoc constructions
+                # (unit tests) working.
+                if self.emit is not None:
+                    await self.emit("memory_search.completed", {"hits": len(hits)})
                 data = [
                     {
                         "content": hit["content"],

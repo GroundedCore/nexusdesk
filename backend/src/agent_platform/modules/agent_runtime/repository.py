@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL, channel
 from agent_platform.modules.agent_runtime.schemas import TERMINAL, BusyError, CapacityError
 from agent_platform.modules.conversation.service import add_message
+from agent_platform.modules.memory.decay import enqueue_reinforce_task
 from agent_platform.modules.memory.extraction import enqueue_extract_task
 from agent_platform.modules.memory.summary import enqueue_summary_task
 from agent_platform.platform.persistence.store import DomainError, transaction
@@ -311,6 +312,18 @@ class RunRepository:
                             "memory_extract.queued",
                             {"customer_id": str(conversation["customer_id"])},
                         )
+                # Phase 4 (R11): reference reinforcement. The hit ids were
+                # collected during injection (L3) and memory_search (L2) and
+                # sampled at dispatch time by the worker; the INSERT is the
+                # only synchronous write, same-transaction precedent as the
+                # summary/extraction dispatches.
+                if memory and memory.get("reinforce"):
+                    await enqueue_reinforce_task(conn, row["tenant_id"], memory["reinforce"])
+                # Phase 4 (R10): injection hit-rate telemetry. Written only
+                # when something was actually injected (the worker drops the
+                # key otherwise); data carries section counts, never content.
+                if memory and memory.get("injected"):
+                    await self._event(conn, run_id, "memory.injected", memory["injected"])
             await self._event(
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )
