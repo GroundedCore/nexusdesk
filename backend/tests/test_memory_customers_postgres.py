@@ -265,7 +265,11 @@ async def test_p2_ut_09_add_on_existing_key_does_nothing(platform):
 
 
 async def test_extracted_update_never_clobbers_human_edit(platform):
-    """A human correction is protected: extraction updates skip human rows."""
+    """A human correction is protected: extraction updates never overwrite
+    human rows. Phase 4 (FR-1, 08 R4): the update is parked as a pending
+    ``name:suggested`` suggestion instead of being silently dropped (the
+    Phase 2 behaviour); full lifecycle coverage is P4-UT-07/P4-IT-01 in
+    test_memory_governance_postgres.py."""
     _client, services, settings = platform
     memory, engine = services.platform.memory, services.repository.engine
     tenant = settings.tenant_id
@@ -285,9 +289,12 @@ async def test_extracted_update_never_clobbers_human_edit(platform):
             0.8,
             0.5,
         )
-    assert counts["updated"] == 0 and counts["noop"] == 1
-    row = (await items_of(engine, tenant, customer_id))[0]
-    assert row["content"] == "张叁" and row["source_type"] == "human"
+    assert counts["updated"] == 0 and counts["pending"] == 1
+    rows = await items_of(engine, tenant, customer_id)
+    base = next(r for r in rows if r["key"] == "name")
+    assert base["content"] == "张叁" and base["source_type"] == "human"
+    suggestion = next(r for r in rows if r["key"] == "name:suggested")
+    assert suggestion["status"] == "pending" and suggestion["content"] == "张四"
 
 
 # ---------------------------------------------------------------------------

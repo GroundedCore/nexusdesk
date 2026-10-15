@@ -75,7 +75,9 @@ def test_0037_protected_column_backfill_and_flag_check(migration_database):
     # CHECK: the three controlled flag keys are legal, anything else is not.
     for key in ("vip", "complaint_risk", "blacklist"):
         _insert_item(url, "flag", key, "human", "标记说明")
-    with pytest.raises(Exception):
+    import asyncpg
+
+    with pytest.raises(asyncpg.exceptions.CheckViolationError):
         _insert_item(url, "flag", "custom_flag", "extracted")
     # Non-flag keys stay free-form (constraint is conditional on type='flag').
     free = _insert_item(url, "profile", "custom_whatever", "extracted")
