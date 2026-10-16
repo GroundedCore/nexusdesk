@@ -84,7 +84,16 @@ Judge 输出使用结构化 Schema：每个维度包含 status、score（有效�
 
 以下 HTTP 路径均以 `/api/v1` 为前缀。目标方法、字段和事件为待实现契约，不能作为现有 API 调用。
 
-当前接口：`GET/POST /agents/{id}/evaluation-cases`、`GET /agents/{id}/evaluation-reports`、`POST /agents/{id}/evaluate`。
+当前接口：`GET/POST /agents/{id}/evaluation-cases`、`PATCH/DELETE /agents/{id}/evaluation-cases/{case_id}`、
+`POST /agents/{id}/evaluation-cases/{case_id}/run`（单条用例试跑，不落报告）、
+`GET /agents/{id}/evaluation-reports`（支持 `page`/`page_size`/`agent_version`，返回 `items/total/page/page_size/versions`）、
+`GET /agents/{id}/evaluation-trend`（返回最近若干次评测的通过率趋势点）、
+`GET /agents/{id}/evaluation-cases/template`（下载 xlsx；已有用例直接导出，为空时给出示例行）、
+`POST /agents/{id}/evaluation-cases/import`（原始 xlsx body，按用例名称合并，逐行返回失败原因）、
+`POST /agents/{id}/evaluate`（全量评测，写入报告）。
+
+报告新增 `environment` 快照（P2-A）：冻结运行时的 Agent 版本、模型方案版本、工具清单、
+知识库文档版本统计与记忆开关，用于跨报告对比与结果联动；历史报告该列为 `null`。
 
 目标契约：`submit_evaluation(context, EvaluationSpec) -> JobRef`、`get_report(context, report_id)`、`compare_reports(...)`。输入含 Agent 版本、数据集版本、模型方案版本、知识快照、模拟定义、评分配置及预算；报告按层返回结果。发布门禁消费报告，不重跑隐式评测。
 

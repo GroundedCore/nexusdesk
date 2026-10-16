@@ -94,6 +94,7 @@ test('knowledge, publication, conversation, confirmed ticket, handoff and evalua
   await expect(page.getByRole('status')).toContainText('已恢复');
   await nav('质量评测');
   await page.getByLabel('待评测的发布版本').selectOption({ label: `${agent} · v1` });
+  await page.getByRole('button', { name: '新增用例' }).click();
   await page.getByLabel('用例名称').fill('退货知识问答');
   await page.getByLabel('用户输入', { exact: true }).fill('退货政策');
   await page.getByLabel('预期包含文本（每行一项）').fill('七天');

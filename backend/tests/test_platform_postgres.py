@@ -567,3 +567,133 @@ async def test_evaluation_case_limit_is_atomic(platform):
     assert sum(r.status_code == 201 for r in responses) == 20
     assert sum(r.status_code == 400 for r in responses) == 4
     assert len((await client.get(path)).json()) == 20
+
+
+async def test_evaluation_case_management_and_report_pagination(platform):
+    client, _, _ = platform
+    agent, _ = await create_agent(client)
+    aid = agent["id"]
+    created = await client.post(
+        f"/api/v1/agents/{aid}/evaluation-cases",
+        json={"name": "首条", "input": "你好", "expected_contains": ["你好"]},
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+
+    updated = await client.patch(
+        f"/api/v1/agents/{aid}/evaluation-cases/{cid}",
+        json={
+            "name": "改名",
+            "input": "你好",
+            "expected_contains": ["你好"],
+            "forbidden_contains": ["错误"],
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["name"] == "改名"
+
+    single = await client.post(f"/api/v1/agents/{aid}/evaluation-cases/{cid}/run")
+    assert single.status_code == 200, single.text
+    assert single.json()["result"]["name"] == "改名"
+
+    report = await client.post(f"/api/v1/agents/{aid}/evaluate")
+    assert report.status_code == 200, report.text
+    reports = await client.get(
+        f"/api/v1/agents/{aid}/evaluation-reports", params={"page": 1, "page_size": 5}
+    )
+    assert reports.status_code == 200, reports.text
+    body = reports.json()
+    assert body["page"] == 1 and body["page_size"] == 5
+    assert body["total"] == 1 and len(body["items"]) == 1
+    assert body["versions"] == [1]
+    environment = body["items"][0]["environment"]
+    assert environment["agent_version"] == 1
+    assert environment["memory"] == {"enabled": True, "write": True, "summary": True}
+    trend = await client.get(f"/api/v1/agents/{aid}/evaluation-trend")
+    assert trend.status_code == 200, trend.text
+    points = trend.json()["points"]
+    assert len(points) == 1 and points[0]["total"] == 1 and points[0]["agent_version"] == 1
+    filtered = await client.get(
+        f"/api/v1/agents/{aid}/evaluation-reports",
+        params={"page": 1, "page_size": 5, "agent_version": 99},
+    )
+    assert filtered.json()["total"] == 0
+
+    deleted = await client.delete(f"/api/v1/agents/{aid}/evaluation-cases/{cid}")
+    assert deleted.status_code == 200, deleted.text
+    assert (await client.get(f"/api/v1/agents/{aid}/evaluation-cases")).json() == []
+
+
+async def test_evaluation_case_workbook_template_and_import(platform):
+    client, _, _ = platform
+    agent, _ = await create_agent(client, ["knowledge_search"])
+    aid = agent["id"]
+    path = f"/api/v1/agents/{aid}/evaluation-cases"
+
+    # An agent without cases still downloads a usable sheet: the sample rows show the format.
+    template = await client.get(f"{path}/template")
+    assert template.status_code == 200, template.text
+    assert template.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert "attachment" in template.headers["content-disposition"]
+    from agent_platform.modules.evaluation.workbook import build_workbook, parse_workbook
+
+    assert len(parse_workbook(template.content)) == 2
+
+    # A row that breaks the contract is reported by Excel row without losing the valid row.
+    workbook = build_workbook(
+        [
+            {
+                "name": "知识检索",
+                "spec": {"input": "怎么退货", "expected_contains": ["演示模式"]},
+            },
+            {"name": "缺少断言", "spec": {"input": "你好"}},
+        ]
+    )
+    imported = await client.post(f"{path}/import", content=workbook)
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert (body["created"], body["updated"], body["total"]) == (1, 0, 1)
+    assert body["errors"] == [
+        {"row": 3, "name": "缺少断言", "error": "At least one assertion is required"}
+    ]
+
+    # Re-importing the same sheet merges by name instead of duplicating.
+    again = await client.post(f"{path}/import", content=workbook)
+    assert again.json()["updated"] == 1
+    case = (await client.get(path)).json()[0]
+    assert case["name"] == "知识检索"
+
+    # The imported case is executable: the mock tool stays mocked, no live call happens.
+    report = await client.post(f"/api/v1/agents/{aid}/evaluate")
+    assert report.status_code == 200, report.text
+    assert report.json()["results"][0]["passed"] is True
+
+    # The sheet now round-trips the stored cases instead of the samples.
+    assert [row["name"] for row in parse_workbook(
+        (await client.get(f"{path}/template")).content
+    )] == ["知识检索"]
+
+    # A broken upload is rejected before any row is written.
+    bad = await client.post(f"{path}/import", content=b"not a workbook")
+    assert bad.status_code == 422, bad.text
+    assert bad.json()["detail"] == "invalid_workbook"
+
+
+async def test_evaluation_case_workbook_import_respects_the_case_limit(platform):
+    client, _, _ = platform
+    agent, _ = await create_agent(client)
+    path = f"/api/v1/agents/{agent['id']}/evaluation-cases"
+    from agent_platform.modules.evaluation.workbook import build_workbook
+
+    workbook = build_workbook(
+        [
+            {"name": f"用例 {index}", "spec": {"input": f"输入 {index}", "expected_contains": ["x"]}}
+            for index in range(24)
+        ]
+    )
+    body = (await client.post(f"{path}/import", content=workbook)).json()
+    assert body["created"] == 20
+    assert [row["error"] for row in body["errors"]] == ["maximum_20_cases_per_agent"] * 4
+    assert body["total"] == 20
