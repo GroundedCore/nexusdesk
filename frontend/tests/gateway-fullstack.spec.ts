@@ -1,21 +1,23 @@
 import { test, expect } from '@playwright/test';
+import { signInAsAdmin } from './e2e-auth';
 
 // Real HTTP API + migrated PostgreSQL. No route interception in this suite.
 test('gateway governance persists and governs real requests', async ({ page, request }) => {
   const root = '/api/v1/model-gateway';
   const stamp = Date.now(); const name = `联调-${stamp}`; const forbidden = `restricted-${stamp}`;
-  const connectionResponse = await request.post(`${root}/connections`, { data: { name, protocol: 'demo' } });
+  const auth = await signInAsAdmin(page, request);
+  const connectionResponse = await request.post(`${root}/connections`, { data: { name, protocol: 'demo' }, headers: auth });
   expect(connectionResponse.status()).toBe(201);
   const connection = await connectionResponse.json();
-  const modelResponse = await request.post(`${root}/models`, { data: { name, connection_id: connection.id, model_name: 'demo', operations: ['chat'], tool_calling: true } });
+  const modelResponse = await request.post(`${root}/models`, { data: { name, connection_id: connection.id, model_name: 'demo', operations: ['chat'], tool_calling: true }, headers: auth });
   expect(modelResponse.status()).toBe(201);
   const model = await modelResponse.json();
-  const profileResponse = await request.post(`${root}/profiles`, { data: { name, model_id: model.id, operation: 'chat' } });
+  const profileResponse = await request.post(`${root}/profiles`, { data: { name, model_id: model.id, operation: 'chat' }, headers: auth });
   expect(profileResponse.status()).toBe(201);
   const profile = await profileResponse.json();
-  expect((await request.post(`${root}/profiles/${profile.id}/publish`, { data: { revision: 1 } })).status()).toBe(200);
+  expect((await request.post(`${root}/profiles/${profile.id}/publish`, { data: { revision: 1 }, headers: auth })).status()).toBe(200);
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/');
+  await page.goto('/#/overview');
   await page.getByRole('navigation').getByRole('button', { name: '模型网关' }).click();
   await page.getByLabel('搜索资源').fill(name);
   await page.locator('.gateway-card').click();
@@ -43,7 +45,10 @@ test('gateway governance persists and governs real requests', async ({ page, req
   await page.getByLabel('已发布方案').selectOption(profile.id);
   await page.getByRole('textbox', { name: '调用参数 JSON', exact: true }).fill(JSON.stringify({ operation: 'chat', messages: [{ role: 'user', content: forbidden }] }));
   await page.getByRole('button', { name: '调用模型', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('content_blocked_input');
+  // The block surfaces both as a transient antd toast and a persistent inline
+  // alert (p.alert.error) — assert the durable inline one; role-based matching
+  // races with the toast and breaks strict mode when both are visible.
+  await expect(page.locator('.alert.error').filter({ hasText: 'content_blocked_input' })).toBeVisible();
   await page.getByRole('button', { name: '调用日志', exact: true }).click();
   await page.getByLabel('搜索调用日志').fill(name);
   await expect(page.getByRole('cell', { name: 'content_blocked_input', exact: true })).toBeVisible();

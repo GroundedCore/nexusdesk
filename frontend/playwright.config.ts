@@ -7,6 +7,8 @@ export default defineConfig({
   use: {
     locale: 'zh-CN',
     baseURL: process.env.E2E_BASE_URL || 'http://127.0.0.1:5173',
+    // The quickstart container serves a self-signed certificate on 8080.
+    ignoreHTTPSErrors: !!process.env.E2E_IGNORE_HTTPS_ERRORS,
     viewport: { width: 1440, height: 1000 },
     launchOptions: process.env.E2E_CHROME_PATH ? { executablePath: process.env.E2E_CHROME_PATH } : {},
     screenshot: 'only-on-failure',
