@@ -70,10 +70,19 @@ def query(url, sql, *params):
     return asyncio.run(run())
 
 
+def head_revision():
+    """Resolve the migration head from the scripts, so adding a revision does not
+    break the upgrade/downgrade guards that assert the database ends at head."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini"))).get_current_head()
+
+
 def test_empty_upgrade_downgrade_upgrade(migration_database):
     url = migration_database
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0037_memory_governance"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head_revision()
     migrate(url, "base", "downgrade")
     assert not query(
         url,

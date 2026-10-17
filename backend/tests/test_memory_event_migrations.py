@@ -16,7 +16,7 @@ server image; assertions branch on what ``pg_available_extensions`` offers:
 from uuid import uuid4
 
 import pytest
-from test_ticket_migrations import migrate, query
+from test_ticket_migrations import head_revision, migrate, query
 from test_ticket_migrations import migration_database as _migration_database
 
 migration_database = _migration_database
@@ -41,7 +41,7 @@ def _columns(url, table):
 def test_0036_probe_block_matches_server_capability(migration_database):
     url = migration_database
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0037_memory_governance"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head_revision()
 
     memory_columns = _columns(url, "memory_items")
     # Always-on pieces: keyword fallback column + retry marker.
@@ -108,7 +108,7 @@ def test_0036_preserves_existing_rows_and_downgrades(migration_database):
 
     # Re-upgrade is clean (the DO-block probe is re-runnable).
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0037_memory_governance"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head_revision()
     assert query(url, "SELECT content FROM memory_items WHERE id=$1", item)[0][0] == (
         "工单 TK-1 已创建：测试"
     )
