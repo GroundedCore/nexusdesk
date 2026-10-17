@@ -64,6 +64,10 @@ export function errorText(message:string) {
     ticket_revision_conflict:'工单已被修改，请加载最新版本后重试',
     forbidden:'当前角色没有执行此操作的权限',
     unauthorized:'访问凭据无效，请重新配置',
+    judge_demo_profile:'Judge 方案是演示模型，无法返回评分 JSON，请改选真实 Chat 方案。',
+    judge_response_not_json:'Judge 模型没有返回 JSON，请更换支持结构化输出的 Chat 方案。',
+    judge_response_invalid:'Judge 返回的 JSON 不符合评分结构，请重试或更换方案。',
+    judge_tool_calls_forbidden:'Judge 方案开启了工具调用，评分不允许调用工具。',
   };
   if(code)return `${t(known[code]||'请求失败，请重试或联系管理员')} (${message})`;
   if(/^422 ·/.test(message))return `${t('请检查必填项和输入格式')} (422)`;

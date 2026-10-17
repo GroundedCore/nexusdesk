@@ -14,7 +14,7 @@ alpine and pgvector containers):
 from uuid import uuid4
 
 import pytest
-from test_ticket_migrations import migrate, query
+from test_ticket_migrations import head_revision, migrate, query
 from test_ticket_migrations import migration_database as _migration_database
 
 migration_database = _migration_database
@@ -57,7 +57,7 @@ def test_0037_protected_column_backfill_and_flag_check(migration_database):
     extracted = _insert_item(url, "preference", "language", "extracted", "中文")
 
     migrate(url, "head")
-    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == "0037_memory_governance"
+    assert query(url, "SELECT version_num FROM alembic_version")[0][0] == head_revision()
 
     # Column exists with the right nullability/default.
     assert "protected" in _columns(url, "memory_items")

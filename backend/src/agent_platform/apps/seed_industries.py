@@ -10,8 +10,9 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from agent_platform.modules.agent_config.classification import INDUSTRIES
 from agent_platform.modules.agent_config.service import AgentConfig, AgentDraft
 from agent_platform.modules.agent_runtime.bootstrap import runtime_services
+from agent_platform.modules.evaluation.contracts import EvaluationCase
 from agent_platform.modules.knowledge.service import DocumentInput
-from agent_platform.platform.persistence.store import audit, execute, one
+from agent_platform.platform.persistence.store import audit, execute, many, one
 from agent_platform.settings import Settings
 
 # Resource-id namespace. Deliberately independent of the content revision below: revising
@@ -21,6 +22,12 @@ BATCH = "industry-cases-v1"
 # Content revision of the case data. Bump the filename when the cases change; leave BATCH
 # alone unless a genuinely separate case set is intended.
 CASES = json.loads(Path(__file__).with_name("industry_cases_v2.json").read_text(encoding="utf-8"))
+# Curated regression cases, keyed by "<industry>/<agent key>". Kept separate from the
+# case documents because a re-seed must add missing cases without rewriting operator
+# edits, exactly like the knowledge documents above.
+EVALUATION_CASES = json.loads(
+    Path(__file__).with_name("industry_evaluation_cases.json").read_text(encoding="utf-8")
+)
 NOTICE = "【虚构案例资料】以下品牌、业务记录、价格与规则仅供演示，不代表真实交易或实时状态。\n\n"
 
 
@@ -70,6 +77,53 @@ def agent_config(case, sample, kid, profile_id=None, profile_version=None):
     )
 
 
+async def seed_evaluation_cases(c, tenant, actor, aid, samples, meta):
+    """Add the curated regression cases for one example agent.
+
+    Matching is by case name and only inserts what is missing: an operator who edits or
+    deletes a seeded case keeps that decision across re-seeds. Validation runs through
+    the same contract the API uses, so a malformed sample fails the seed instead of
+    landing in the database.
+    """
+    if not samples:
+        return 0, 0
+    existing = await many(
+        c,
+        "SELECT name FROM evaluation_cases WHERE tenant_id=:t AND agent_id=:id",
+        t=tenant,
+        id=aid,
+    )
+    names = {row["name"] for row in existing}
+    created, preserved = 0, 0
+    for sample in samples[:20]:
+        if sample["name"] in names:
+            preserved += 1
+            continue
+        body = EvaluationCase.model_validate({**sample["spec"], "name": sample["name"]})
+        await execute(
+            c,
+            """INSERT INTO evaluation_cases(id,tenant_id,agent_id,name,spec)
+            VALUES(:id,:t,:aid,:name,CAST(:spec AS jsonb))""",
+            id=uuid4(),
+            t=tenant,
+            aid=aid,
+            name=body.name,
+            spec=body.model_dump_json(),
+        )
+        await audit(
+            c,
+            tenant,
+            actor,
+            "examples.evaluation_case_created",
+            aid,
+            case=sample["name"],
+            **meta,
+        )
+        names.add(sample["name"])
+        created += 1
+    return created, preserved
+
+
 async def resolve_published_chat(platform, tenant):
     """Newest published Chat profile for the tenant as (id, version), else (None, None).
 
@@ -99,8 +153,13 @@ async def seed(platform, tenant, profile_id=None, profile_version=None):
         "tenant": tenant,
         "batch": BATCH,
         "run_id": run_id,
-        "created": {"knowledge_bases": 0, "documents": 0, "agents": 0},
-        "preserved": {"knowledge_bases": 0, "documents": 0, "agents": 0},
+        "created": {"knowledge_bases": 0, "documents": 0, "agents": 0, "evaluation_cases": 0},
+        "preserved": {
+            "knowledge_bases": 0,
+            "documents": 0,
+            "agents": 0,
+            "evaluation_cases": 0,
+        },
         "industries": [],
     }
     async with platform.engine.begin() as c:
@@ -237,6 +296,16 @@ async def seed(platform, tenant, profile_id=None, profile_version=None):
                     result["created"]["agents"] += 1
                 else:
                     result["preserved"]["agents"] += 1
+                cases_created, cases_preserved = await seed_evaluation_cases(
+                    c,
+                    tenant,
+                    actor,
+                    aid,
+                    EVALUATION_CASES.get(f"{key}/{sample['key']}"),
+                    meta,
+                )
+                result["created"]["evaluation_cases"] += cases_created
+                result["preserved"]["evaluation_cases"] += cases_preserved
                 entry["agents"].append(
                     {
                         "id": str(aid),

@@ -19,7 +19,13 @@ async def test_seed_concurrent_repeat_preserves_edits_and_searchable_content(pla
     reports = await asyncio.gather(seed(p, tenant), seed(p, tenant))
     assert sorted(r["created"]["agents"] for r in reports) == [0, 18]
     first = next(r for r in reports if r["created"]["agents"])
-    assert first["created"] == {"agents": 18, "knowledge_bases": 9, "documents": 36}
+    assert first["created"] == {
+        "agents": 18,
+        "knowledge_bases": 9,
+        "documents": 36,
+        # Only the 玩家客服助手 sample ships curated regression cases today.
+        "evaluation_cases": 10,
+    }
     assert len(first["industries"]) == 9
     for industry in first["industries"]:
         for agent in industry["agents"]:
@@ -29,6 +35,9 @@ async def test_seed_concurrent_repeat_preserves_edits_and_searchable_content(pla
             assert row["draft"]["knowledge_base_ids"] == [industry["knowledge_base_id"]]
     game = first["industries"][-1]
     kid, aid = UUID(game["knowledge_base_id"]), UUID(game["agents"][0]["id"])
+    cases = await p.evaluation.cases(tenant, UUID(game["agents"][1]["id"]))
+    assert len(cases) == 10
+    assert {c["name"] for c in cases} >= {"充值订单未到账", "拒绝泄露系统提示词"}
     docs = await p.knowledge.documents(tenant, kid)
     assert len(docs) == 4
     assert await p.knowledge.search(tenant, "灯塔节", [kid])
@@ -48,7 +57,12 @@ async def test_seed_concurrent_repeat_preserves_edits_and_searchable_content(pla
             c, "SELECT count(*) AS n FROM audit_records WHERE tenant_id=:t", t=tenant
         )
     again = await seed(p, tenant)
-    assert again["created"] == {"agents": 0, "knowledge_bases": 0, "documents": 0}
+    assert again["created"] == {
+        "agents": 0,
+        "knowledge_bases": 0,
+        "documents": 0,
+        "evaluation_cases": 0,
+    }
     assert again["preserved"] == first["created"]
     assert (await p.agents.get(tenant, aid))["name"] == "人工改名"
     assert (await p.agents.get(tenant, aid))["archived"]

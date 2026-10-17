@@ -1,9 +1,11 @@
+import io
 from datetime import datetime
 from typing import Annotated, Literal
+from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,6 +22,10 @@ from agent_platform.platform.persistence.store import DomainError, many
 
 router = APIRouter(tags=["platform"])
 ingress = APIRouter(tags=["channel-ingress"])
+
+# Evaluation workbooks are spreadsheets of names and prompts, never attachments.
+EVALUATION_WORKBOOK_BYTES = 5_000_000
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 class Input(BaseModel):
@@ -688,9 +694,78 @@ async def create_case(aid: UUID, body: EvaluationCase, request: Request, user: A
     return await services(request).evaluation.create(user.tenant, user.actor, aid, body)
 
 
+@router.get("/agents/{aid}/evaluation-cases/template")
+async def evaluation_case_template(aid: UUID, request: Request, user: Reader):
+    content, filename = await services(request).evaluation.template(user.tenant, aid)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Content-Length": str(len(content)),
+        },
+    )
+
+
+@router.post("/agents/{aid}/evaluation-cases/import")
+async def import_evaluation_cases(
+    aid: UUID, request: Request, user: Admin, filename: str = Query("", max_length=255)
+):
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > EVALUATION_WORKBOOK_BYTES:
+            raise DomainError("workbook_size_exceeded", 413)
+    return await services(request).evaluation.import_workbook(
+        user.tenant, user.actor, aid, bytes(content), filename
+    )
+
+
+@router.patch("/agents/{aid}/evaluation-cases/{cid}")
+async def update_case(aid: UUID, cid: UUID, body: EvaluationCase, request: Request, user: Admin):
+    return await services(request).evaluation.update(user.tenant, user.actor, aid, cid, body)
+
+
+@router.delete("/agents/{aid}/evaluation-cases/{cid}")
+async def delete_case(aid: UUID, cid: UUID, request: Request, user: Admin):
+    return await services(request).evaluation.delete(user.tenant, user.actor, aid, cid)
+
+
+@router.post("/agents/{aid}/evaluation-cases/{cid}/run")
+async def run_case(
+    aid: UUID,
+    cid: UUID,
+    request: Request,
+    user: Admin,
+    body: ScoringOptions | None = None,
+):
+    return await services(request).evaluation.run_case(
+        user.tenant, user.actor, aid, cid, body
+    )
+
+
 @router.get("/agents/{aid}/evaluation-reports")
-async def reports(aid: UUID, request: Request, user: Reader):
-    return await services(request).evaluation.reports(user.tenant, aid)
+async def reports(
+    aid: UUID,
+    request: Request,
+    user: Reader,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    agent_version: int | None = None,
+):
+    return await services(request).evaluation.reports(
+        user.tenant, aid, page, page_size, agent_version
+    )
+
+
+@router.get("/agents/{aid}/evaluation-trend")
+async def evaluation_trend(
+    aid: UUID,
+    request: Request,
+    user: Reader,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    return await services(request).evaluation.trend(user.tenant, aid, limit)
 
 
 @router.post("/agents/{aid}/evaluate")

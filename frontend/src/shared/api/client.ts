@@ -54,8 +54,18 @@ export interface ChannelDelivery {
 export interface Document { id: string; title: string; content: string; current_version: number; enabled: boolean }
 export interface SearchResult { chunk_id: string; title: string; version: number; excerpt: string; score: number }
 export interface Summary { total: number; completed: number; failed: number; cancelled: number; running: number; queued: number; average_seconds: number | null; p95_seconds: number | null; tool_failures: number; tokens: number; ttfc?: { p50_ms: number | null; p95_ms: number | null; samples: number } }
-export interface EvaluationCase { id: string; name: string; spec: { input: string; expected_contains: string[] } }
-export interface EvaluationReport { id: string; agent_version: number; created_at: string; results: { status?:string; judge?:unknown;judge_error?:string;similarity?:unknown; name: string; passed: boolean; output: string; tools: string[]; error: string | null }[] }
+export interface EvaluationCaseSpec { input: string; expected_contains?: string[]; forbidden_contains?: string[]; expected_tools?: string[] | null; mock_tools?: Record<string, unknown>; reference_answers?: string[] }
+export interface EvaluationCase { id: string; name: string; spec: EvaluationCaseSpec }
+export interface EvaluationResult { case_id?: string; status?: string; rules_passed?: boolean; rule_violations?: string[]; judge?: unknown; judge_error?: string; similarity?: unknown; scoring?: unknown; name: string; passed: boolean; output: string; tools: string[]; error: string | null }
+export interface EvaluationEnvironmentKnowledge { id: string; name: string; documents: number; published: number }
+export interface EvaluationEnvironment { agent_version: number; model: { profile_id: string | null; version: number | null }; tools: string[]; knowledge: EvaluationEnvironmentKnowledge[]; memory: { enabled: boolean; write: boolean; summary: boolean } }
+export interface EvaluationReport { id: string; agent_version: number; created_at: string; results: EvaluationResult[]; environment?: EvaluationEnvironment | null }
+export interface EvaluationReportPage { items: EvaluationReport[]; total: number; page: number; page_size: number; versions: number[] }
+export interface EvaluationCaseRun { agent_version: number; result: EvaluationResult }
+export interface EvaluationTrendPoint { id: string; agent_version: number; created_at: string; total: number; passed: number; pass_rate: number; needs_review: number; errors: number }
+export interface EvaluationTrend { points: EvaluationTrendPoint[]; limit: number }
+export interface EvaluationImportError { row: number; name: string; error: string }
+export interface EvaluationImport { created: number; updated: number; total: number; errors: EvaluationImportError[] }
 export interface Audit { id: number; actor: string; action: string; resource: string; created_at: string }
 
 // Phase 2 · customer entity + profile/preference memory (console API contract §5).
@@ -83,21 +93,41 @@ export interface MemorySummary {
 
 export function token() { return sessionStorage.getItem('agent-platform-token') || ''; }
 export function setToken(value: string) { if (value) sessionStorage.setItem('agent-platform-token', value); else sessionStorage.removeItem('agent-platform-token'); }
+async function fail(response: Response, credential: string): Promise<never> {
+  let detail: unknown;
+  try { detail = (await response.json() as { detail: unknown }).detail; } catch { detail = response.statusText; }
+  if (response.status === 401 && credential === token() && ['invalid_api_token','invalid_local_session','invalid_enterprise_session','identity_provider_session_revoked'].includes(String(detail))) {
+    window.dispatchEvent(new CustomEvent('nexusdesk:session-expired'));
+  }
+  throw new Error(`${response.status} · ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+}
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const credential = token();
   if (options.body) headers.set('Content-Type', 'application/json');
   if (credential) headers.set('Authorization', `Bearer ${credential}`);
   const response = await fetch('/api/v1' + path, { ...options, headers });
-  if (!response.ok) {
-    let detail: unknown;
-    try { detail = (await response.json() as { detail: unknown }).detail; } catch { detail = response.statusText; }
-    if (response.status === 401 && credential === token() && ['invalid_api_token','invalid_local_session','invalid_enterprise_session','identity_provider_session_revoked'].includes(String(detail))) {
-      window.dispatchEvent(new CustomEvent('nexusdesk:session-expired'));
-    }
-    throw new Error(`${response.status} · ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
-  }
+  if (!response.ok) return fail(response, credential);
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+}
+/** Authenticated binary upload. The body is the raw file, matching the API's streaming routes. */
+export async function upload<T>(path: string, file: File): Promise<T> {
+  const headers = new Headers({ 'Content-Type': file.type || 'application/octet-stream' });
+  const credential = token();
+  if (credential) headers.set('Authorization', `Bearer ${credential}`);
+  const response = await fetch('/api/v1' + path, { method: 'POST', headers, body: file });
+  if (!response.ok) return fail(response, credential);
+  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+}
+/** Authenticated download that keeps the server's RFC 5987 filename. */
+export async function download(path: string): Promise<{ blob: Blob; filename: string }> {
+  const credential = token();
+  const headers = new Headers();
+  if (credential) headers.set('Authorization', `Bearer ${credential}`);
+  const response = await fetch('/api/v1' + path, { headers });
+  if (!response.ok) return fail(response, credential);
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(response.headers.get('content-disposition') || '');
+  return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded[1]) : 'download' };
 }
 export const post = <T,>(path: string, body: unknown = {}) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 export const put = <T,>(path: string, body: unknown) => api<T>(path, { method: 'PUT', body: JSON.stringify(body) });

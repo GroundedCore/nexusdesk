@@ -10,9 +10,15 @@ from test_model_gateway import setup as setup_model
 from test_platform_postgres import conversation, create_agent
 from test_platform_postgres import platform as _platform_fixture
 
-from agent_platform.modules.evaluation.scoring import JudgeResult, ProfileRef, verdict
+from agent_platform.modules.evaluation.scoring import (
+    JudgeResult,
+    ProfileRef,
+    extract_json_object,
+    verdict,
+)
 from agent_platform.modules.knowledge.chunking import ChunkingPolicy, chunk_document
 from agent_platform.modules.knowledge.vector_store import VectorIndex
+from agent_platform.platform.persistence.store import DomainError
 
 platform = _platform_fixture
 
@@ -35,6 +41,16 @@ def test_judge_cannot_override_hard_failure():
         JudgeResult.model_validate(
             {"correctness": {"status": "scored", "score": 6, "reason": "bad"}}
         )
+
+
+def test_extract_json_object_tolerates_provider_wrappers():
+    payload = '{"correctness": {"status": "scored", "score": 4, "reason": "ok"}}'
+    assert extract_json_object(payload) == payload
+    assert extract_json_object(f"```json\n{payload}\n```") == payload
+    assert extract_json_object(f"Here is the verdict:\n{payload}\nHope that helps.") == payload
+    with pytest.raises(DomainError) as error:
+        extract_json_object("no object here")
+    assert error.value.code == "judge_response_not_json"
 
 
 @pytest.mark.asyncio

@@ -23,7 +23,7 @@ function normalizePath(value: string) {
   if (path === '/models') return '/models/models';
   if (path === '/agents/new') return '/agents/new/config';
   if (path === '/agents/new/conversations') return '/agents/new/config';
-  if (/^\/agents\/[^/?#]+\/(config|conversations)$/.test(path)) return path;
+  if (/^\/agents\/[^/?#]+\/(config|conversations|evaluation)$/.test(path)) return path;
   if (modelSections.some(section => path === `/models/${section}`)) return path;
   return '/overview';
 }
