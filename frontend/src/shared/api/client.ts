@@ -93,6 +93,26 @@ export interface EvaluationTrendPoint { id: string; agent_version: number; creat
 export interface EvaluationTrend { points: EvaluationTrendPoint[]; limit: number }
 export interface EvaluationImportError { row: number; name: string; error: string }
 export interface EvaluationImport { created: number; updated: number; total: number; errors: EvaluationImportError[] }
+export interface QualitySummary { agents: number; evaluated: number; reports: number; cases: number; passed: number; failed: number; needs_review: number; errors: number; pass_rate: number | null }
+export interface QualityAgentRow {
+    agent_id: string; agent_name: string; archived: boolean; published_version: number | null;
+    report_id: string | null; agent_version: number | null; created_at: string | null; cases: number;
+    total: number; passed: number; failed: number; needs_review: number; errors: number;
+    pass_rate: number | null; previous_pass_rate: number | null; delta: number | null; regressions: number;
+}
+export interface QualityOverview { summary: QualitySummary; agents: QualityAgentRow[] }
+export interface QualityReviewItem {
+    agent_id: string; agent_name: string; agent_archived: boolean; report_id: string; agent_version: number;
+    created_at: string; case_id: string | null; name: string | null; status: string; raw_status: string | null;
+    error: string | null; judge_error: string | null; rule_violations: string[];
+}
+export interface QualityReviews { items: QualityReviewItem[]; total: number; page: number; page_size: number; status: string; counts: Record<string, number> }
+export interface QualityRegressionItem {
+    agent_id: string; agent_name: string; report_id: string; previous_report_id: string; agent_version: number;
+    previous_agent_version: number; created_at: string; case_id: string | null; name: string | null;
+    status: string; previous_status: string; error: string | null; judge_error: string | null;
+}
+export interface QualityRegressions { items: QualityRegressionItem[]; total: number; limit: number }
 export interface Audit { id: number; actor: string; action: string; resource: string; created_at: string }
 
 // Phase 2 · customer entity + profile/preference memory (console API contract §5).

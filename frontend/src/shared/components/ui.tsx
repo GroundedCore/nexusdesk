@@ -110,7 +110,7 @@ export function Empty({ children = t("暂无记录") }: {
 export function Badge({ value }: {
     value: string;
 }) {
-    const labels: Record<string, string> = { bot: t("自动服务"), waiting: t("等待接管"), human: t("人工服务"), closed: t("已关闭"), queued: t("排队中"), running: t("执行中"), completed: t("已完成"), failed: t("失败"), cancelled: t("已取消"), active: t("处理中"), resolved: t("已解决"), open: t("待处理"), in_progress: t("处理中"), waiting_customer: t("待客户补充"), pending: t("待确认"), confirmed: t("已确认"), rejected: t("已拒绝"), mvp: t("基础可用"), partial: t("部分实现"), planned: t("待实现") };
+    const labels: Record<string, string> = { bot: t("自动服务"), waiting: t("等待接管"), human: t("人工服务"), closed: t("已关闭"), queued: t("排队中"), running: t("执行中"), completed: t("已完成"), failed: t("失败"), cancelled: t("已取消"), active: t("处理中"), resolved: t("已解决"), open: t("待处理"), in_progress: t("处理中"), waiting_customer: t("待客户补充"), pending: t("待确认"), confirmed: t("已确认"), rejected: t("已拒绝"), mvp: t("基础可用"), partial: t("部分实现"), planned: t("待实现"), passed: t("通过"), needs_review: t("待复核"), error: t("评分/执行错误") };
     return <span className={`badge ${value}`}>{labels[value] || value}</span>;
 }
 export function Panel({ title, children, action }: {

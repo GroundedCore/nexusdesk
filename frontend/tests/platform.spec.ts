@@ -92,8 +92,8 @@ test('knowledge, publication, conversation, confirmed ticket, handoff and evalua
   await nav('人工协同');
   await card.getByRole('button', { name: '结束并恢复 Agent' }).click();
   await expect(page.getByRole('status')).toContainText('已恢复');
-  await nav('质量评测');
-  await page.getByLabel('待评测的发布版本').selectOption({ label: `${agent} · v1` });
+  // Evaluation moved into the agent workspace; the outer 质量大盘 only aggregates it.
+  await page.goto(`/#/agents/${agentId}/evaluation`);
   await page.getByRole('button', { name: '新增用例' }).click();
   await page.getByLabel('用例名称').fill('退货知识问答');
   await page.getByLabel('用户输入', { exact: true }).fill('退货政策');
@@ -101,7 +101,10 @@ test('knowledge, publication, conversation, confirmed ticket, handoff and evalua
   await page.getByRole('button', { name: '保存用例' }).click();
   await expect(page.getByRole('status')).toContainText('用例已保存');
   await page.getByRole('button', { name: '运行评测' }).click();
-  await expect(page.locator('.report')).toContainText('1/1 通过', { timeout: 20000 });
+  await expect(page.locator('.agent-evaluation-view .agent-evaluation-report-table')).toContainText('1/1', { timeout: 20000 });
+  await nav('质量大盘');
+  await expect(page.locator('.quality-board')).toContainText(agent);
+  await expect(page.locator('.quality-board')).toContainText('待复核队列');
   // The former 渠道接入 section was renamed to 开放平台.
   for (const name of ['工具目录', '服务工单', '开放平台', '运行与审计', '访问与策略', '平台总览']) {
     await nav(name);

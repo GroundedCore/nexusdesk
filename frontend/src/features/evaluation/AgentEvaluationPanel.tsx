@@ -1,4 +1,5 @@
-import { Button, Checkbox, Modal, Pagination, Select, Space, Tag } from 'antd';
+import { Button, Descriptions, Modal, Pagination, Progress, Select, Space, Statistic, Table, Tag, Tooltip } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { useRef, useState } from 'react';
 import { errorText, t } from '../../i18n/index';
 import type { ModelResource } from '../models/ModelsPage';
@@ -10,6 +11,7 @@ import {
     upload,
     type EvaluationCase,
     type EvaluationCaseRun,
+    type EvaluationCaseSpec,
     type EvaluationEnvironment,
     type EvaluationImport,
     type EvaluationReport,
@@ -33,6 +35,10 @@ interface CaseDraft {
     expected_tools: string;
     reference_answers: string;
     mock_tools: string;
+}
+
+interface CompareRow {
+    name: string;
 }
 
 const DEFAULT_MOCKS = () => JSON.stringify({
@@ -85,9 +91,27 @@ function statusLabel(result: EvaluationResult) {
     return result.passed ? t("通过") : t("失败");
 }
 
+/** `error` outranks a rule failure, matching the backend summary buckets. */
+function statusColor(result: EvaluationResult) {
+    if (result.status === 'error' || result.error) return 'red';
+    if (result.status === 'needs_review') return 'gold';
+    return result.passed ? 'green' : 'red';
+}
+
 /** Import errors arrive as stable codes from the API; only the limit one has a friendlier label. */
 function importError(code: string) {
     return code === 'maximum_20_cases_per_agent' ? t("每个 Agent 最多 20 条用例") : code;
+}
+
+function environmentText(environment?: EvaluationEnvironment | null) {
+    if (!environment) return t("未知");
+    const published = environment.knowledge.reduce((sum, item) => sum + item.published, 0);
+    return [
+        environment.model.version ? t("模型方案 v{{v0}}", { v0: environment.model.version }) : t("未绑定模型方案"),
+        environment.knowledge.length ? t("知识库 {{v0}} 个 / 已发布 {{v1}} 篇", { v0: environment.knowledge.length, v1: published }) : t("无知识库"),
+        t("记忆{{v0}}", { v0: environment.memory.enabled ? t("开启") : t("关闭") }),
+        t("工具 {{v0}} 个", { v0: environment.tools.length }),
+    ].join(' · ');
 }
 
 export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = false }: Props) {
@@ -108,6 +132,7 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
     const [editing, setEditing] = useState<EvaluationCase | null>(null);
     const [editDraft, setEditDraft] = useState<CaseDraft>(blankDraft);
     const [caseResults, setCaseResults] = useState<Record<string, EvaluationResult>>({});
+    const [expandedCaseKeys, setExpandedCaseKeys] = useState<readonly string[]>([]);
     const [runningCaseId, setRunningCaseId] = useState('');
     const [importing, setImporting] = useState(false);
     const [importNotice, setImportNotice] = useState('');
@@ -127,6 +152,7 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
     const latestTotal = latest?.results.length ?? 0;
     const latestReview = latest?.results.filter(result => result.status === 'needs_review').length ?? 0;
     const latestErrors = latest?.results.filter(result => result.status === 'error' || result.error).length ?? 0;
+    const latestRate = latestTotal ? Math.round((latestPassed / latestTotal) * 100) : 0;
     const canRun = !locked && !!publishedVersion && !!cases.data?.length;
     const pageReports = reports.data?.items ?? [];
     const selectedReports = pageReports.filter(report => compareIds.includes(report.id));
@@ -155,12 +181,6 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
         reports.refresh();
         latestReports.refresh();
         trend.refresh();
-    }
-
-    function toggleCompare(id: string, checked: boolean) {
-        setCompareIds(previous => checked
-            ? [...previous.filter(item => item !== id), id].slice(-2)
-            : previous.filter(item => item !== id));
     }
 
     function submitAdd(event: React.FormEvent) {
@@ -207,6 +227,7 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
             try {
                 const run = await post<EvaluationCaseRun>(`/agents/${agentId}/evaluation-cases/${testCase.id}/run`, options());
                 setCaseResults(previous => ({ ...previous, [testCase.id]: run.result }));
+                setExpandedCaseKeys(previous => previous.includes(testCase.id) ? previous : [...previous, testCase.id]);
             } finally {
                 setRunningCaseId('');
             }
@@ -241,7 +262,54 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
         }, '');
     }
 
-    const compareNames = Array.from(new Set(selectedReports.flatMap(report => report.results.map(result => result.name))));
+    const caseColumns: TableColumnsType<EvaluationCase> = [
+        { title: t("用例名称"), dataIndex: 'name', width: 200, render: (value: string) => <strong>{value}</strong> },
+        { title: t("用户输入"), key: 'input', ellipsis: true, render: (_, row) => row.spec.input },
+        { title: t("断言"), key: 'assertions', width: 220, render: (_, row) => <AssertionTags spec={row.spec}/> },
+        { title: t("最近结果"), key: 'result', width: 120, render: (_, row) => <LatestResult result={caseResults[row.id]}/> },
+        {
+            title: t("操作"), key: 'actions', width: 220,
+            render: (_, row) => <Space size={4} wrap>
+                <Button size="small" loading={runningCaseId === row.id} disabled={locked || !publishedVersion} onClick={() => runCase(row)}>{t("运行此用例")}</Button>
+                <Button size="small" disabled={locked} onClick={() => { setEditing(row); setEditDraft(toDraft(row)); }}>{t("编辑")}</Button>
+                <Button size="small" danger disabled={locked} onClick={() => removeCase(row)}>{t("删除")}</Button>
+            </Space>,
+        },
+    ];
+
+    const reportColumns: TableColumnsType<EvaluationReport> = [
+        { title: t("版本"), key: 'version', width: 90, render: (_, row) => <strong>v{row.agent_version}</strong> },
+        {
+            title: t("通过率"), key: 'pass_rate', width: 180,
+            render: (_, row) => {
+                const passed = row.results.filter(result => result.passed).length;
+                const total = row.results.length;
+                const percent = total ? Math.round((passed / total) * 100) : 0;
+                return <div className="agent-evaluation-rate">
+                    <Progress percent={percent} size="small" showInfo={false} strokeColor={percent === 100 ? '#52a06b' : percent >= 50 ? '#d9a441' : '#d1635f'}/>
+                    <span>{passed}/{total}</span>
+                </div>;
+            },
+        },
+        { title: t("待复核"), key: 'review', width: 90, render: (_, row) => row.results.filter(result => result.status === 'needs_review').length },
+        { title: t("评分/执行错误"), key: 'error', width: 130, render: (_, row) => row.results.filter(result => result.status === 'error' || result.error).length },
+        { title: t("运行时间"), dataIndex: 'created_at', width: 180, render: (value: string) => time(value) },
+        { title: t("运行环境"), key: 'environment', ellipsis: true, render: (_, row) => <Tooltip title={environmentText(row.environment)}><span>{environmentText(row.environment)}</span></Tooltip> },
+    ];
+
+    const compareRows: CompareRow[] = Array.from(new Set(selectedReports.flatMap(report => report.results.map(result => result.name)))).map(name => ({ name }));
+    const compareColumns: TableColumnsType<CompareRow> = [
+        { title: t("用例"), dataIndex: 'name', ellipsis: true },
+        ...selectedReports.map(report => ({
+            title: `v${report.agent_version} · ${time(report.created_at)}`,
+            key: report.id,
+            width: 200,
+            render: (_: unknown, row: CompareRow) => {
+                const result = report.results.find(item => item.name === row.name);
+                return result ? <Tag color={statusColor(result)}>{statusLabel(result)}</Tag> : <span className="hint">{t("无")}</span>;
+            },
+        })),
+    ];
 
     return <>
         <Alert error={profiles.error || models.error || connections.error || cases.error || reports.error || latestReports.error || trend.error || action.error} notice={action.notice}/>
@@ -259,6 +327,15 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
                     refresh();
                 }, t("评测完成"))}>{action.busy ? t("处理中…") : t("运行评测")}</Button>
             </div>
+        </div>
+        <div className="agent-evaluation-stats">
+            <div className="agent-evaluation-stat">
+                <Statistic title={t("最近通过率")} value={latestRate} suffix="%"/>
+                <span className="hint">{latest ? t("最近一次：v{{v0}} · {{v1}}", { v0: latest.agent_version, v1: time(latest.created_at) }) : t("尚未运行评测")}</span>
+            </div>
+            <div className="agent-evaluation-stat"><Statistic title={t("待复核")} value={latestReview}/></div>
+            <div className="agent-evaluation-stat agent-evaluation-stat-error"><Statistic title={t("评分/执行错误")} value={latestErrors}/></div>
+            <div className="agent-evaluation-stat"><Statistic title={t("用例总数")} value={cases.data?.length ?? 0}/></div>
         </div>
         {latest && publishedVersion && latest.agent_version !== publishedVersion && <p className="hint">{t("评测结果对应 v{{v0}}，与当前发布版本不一致，建议重新评测。", { v0: latest.agent_version })}</p>}
         <div className="split">
@@ -291,7 +368,7 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
                 </div>)}
             </div>
         </div>}
-        <div className="split">
+        <div className="agent-evaluation-sections">
             <Panel title={t("测试用例")} action={<Space size={4}>
                 <Button size="small" disabled={action.busy} onClick={downloadTemplate}>{t("下载模板")}</Button>
                 <Button size="small" loading={importing} disabled={locked} onClick={() => fileInput.current?.click()}>{t("导入用例")}</Button>
@@ -305,25 +382,21 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
                 <p className="hint">{t("业务工具全部使用模拟结果，不会调用真实业务接口。真实模型模式仍会调用模型并消耗额度。")}</p>
                 <p className="hint">{t("先下载模板，填写后导入；同名的用例会被覆盖，新名称会新增。")}</p>
                 <Alert error={importDetail} notice={importNotice}/>
-                {cases.data?.map(testCase => <article className="tool-item" key={testCase.id}>
-                    <div className="row">
-                        <strong>{testCase.name}</strong>
-                        <Space size={4}>
-                            <Button size="small" loading={runningCaseId === testCase.id} disabled={locked || !publishedVersion} onClick={() => runCase(testCase)}>{t("运行此用例")}</Button>
-                            <Button size="small" disabled={locked} onClick={() => { setEditing(testCase); setEditDraft(toDraft(testCase)); }}>{t("编辑")}</Button>
-                            <Button size="small" danger disabled={locked} onClick={() => removeCase(testCase)}>{t("删除")}</Button>
-                        </Space>
-                    </div>
-                    <p>{testCase.spec.input}</p>
-                    <p className="hint">{t("应包含：")}{(testCase.spec.expected_contains || []).join('、') || t("无")}</p>
-                    {Boolean(testCase.spec.forbidden_contains?.length || testCase.spec.expected_tools?.length) && <p className="hint">{[(testCase.spec.forbidden_contains || []).length ? t("禁止包含 {{v0}}", { v0: (testCase.spec.forbidden_contains || []).join('、') }) : '', (testCase.spec.expected_tools || []).length ? t("预期工具 {{v0}}", { v0: (testCase.spec.expected_tools || []).join('、') }) : ''].filter(Boolean).join(' · ')}</p>}
-                    {caseResults[testCase.id] && <div className="agent-evaluation-result">
-                        <Tag color={caseResults[testCase.id].passed ? 'green' : 'red'}>{statusLabel(caseResults[testCase.id])}</Tag>
-                        <span className="hint">{t("单条运行结果")}</span>
-                        <pre>{caseResults[testCase.id].error || caseResults[testCase.id].output || t("无")}</pre>
-                    </div>}
-                </article>)}
-                {!cases.data?.length && <Empty>{t("暂无记录")}</Empty>}
+                <Table<EvaluationCase>
+                    className="agent-evaluation-table agent-evaluation-case-table"
+                    rowKey="id"
+                    size="small"
+                    dataSource={cases.data ?? []}
+                    columns={caseColumns}
+                    scroll={{ x: 980 }}
+                    locale={{ emptyText: <Empty>{t("暂无记录")}</Empty> }}
+                    expandable={{
+                        expandedRowKeys: expandedCaseKeys,
+                        onExpandedRowsChange: keys => setExpandedCaseKeys(keys.map(String)),
+                        expandedRowRender: testCase => <CaseRunResult result={caseResults[testCase.id]}/>,
+                    }}
+                    pagination={{ pageSize: 10, size: 'small', showSizeChanger: false, showTotal: total => t("共 {{v0}} 条用例", { v0: total }) }}
+                />
             </Panel>
             <Panel title={t("评测报告")} action={<Space size={8}>
                 <Select size="small" value={reportVersion} style={{ minWidth: 130 }} disabled={locked} onChange={value => { setReportVersion(value); setReportPage(1); setCompareIds([]); }} options={[{ value: 'all' as const, label: t("全部版本") }, ...(reports.data?.versions || []).map(version => ({ value: version, label: `v${version}` }))]}/>
@@ -331,23 +404,24 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
                 {compareIds.length > 0 && <Button size="small" type="text" onClick={() => setCompareIds([])}>{t("清空选择")}</Button>}
             </Space>}>
                 {selectedReports.length > 0 && <p className="hint">{t("已选择 {{v0}}/2 份报告", { v0: selectedReports.length })}</p>}
-                {pageReports.map(report => <article className="report" key={report.id}>
-                    <div className="row">
-                        <Space size={6}>
-                            <Checkbox checked={compareIds.includes(report.id)} onChange={event => toggleCompare(report.id, event.target.checked)}/>
-                            <strong>v{report.agent_version} · {report.results.filter(result => result.passed).length}/{report.results.length}{t(" 通过")}</strong>
-                        </Space>
-                        <span className="hint">{time(report.created_at)}</span>
-                    </div>
-                    <EnvironmentSummary environment={report.environment}/>
-                    {report.results.map((result, index) => <details key={index}>
-                        <summary><span className={`badge ${result.passed ? 'completed' : 'failed'}`}>{statusLabel(result)}</span> {result.name}</summary>
-                        <pre>{result.error || result.output}</pre>
-                        {Boolean(result.judge || result.judge_error || result.similarity) && <pre>{JSON.stringify({ judge: result.judge, judge_error: result.judge_error ? errorText(result.judge_error) : null, similarity: result.similarity }, null, 2)}</pre>}
-                        <p className="hint">{t("工具：")}{result.tools.join(' → ') || t("无")}</p>
-                    </details>)}
-                </article>)}
-                {!pageReports.length && <Empty>{t("运行后查看发布版本的评测结果")}</Empty>}
+                <Table<EvaluationReport>
+                    className="agent-evaluation-table agent-evaluation-report-table"
+                    rowKey="id"
+                    size="small"
+                    dataSource={pageReports}
+                    columns={reportColumns}
+                    scroll={{ x: 760 }}
+                    pagination={false}
+                    locale={{ emptyText: <Empty>{t("运行后查看发布版本的评测结果")}</Empty> }}
+                    rowSelection={{
+                        selectedRowKeys: compareIds,
+                        onChange: keys => setCompareIds(keys.map(String).slice(-2)),
+                        columnWidth: 40,
+                    }}
+                    expandable={{
+                        expandedRowRender: report => <ReportCasesTable report={report}/>,
+                    }}
+                />
                 {(reports.data?.total || 0) > 0 && <Pagination className="agent-pagination" size="small" current={reportPage} pageSize={reportPageSize} total={reports.data?.total || 0} showSizeChanger pageSizeOptions={[5, 10, 20]} showTotal={total => t("共 {{v0}} 条报告", { v0: total })} onChange={(page, size) => { setReportPage(size === reportPageSize ? page : 1); setReportPageSize(size); setCompareIds([]); }}/>}
             </Panel>
         </div>
@@ -369,27 +443,82 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
         </Modal>
         <Modal open={compareOpen} title={t("报告对比")} width={900} footer={<Button onClick={() => setCompareOpen(false)}>{t("关闭")}</Button>} onCancel={() => setCompareOpen(false)}>
             <h4 className="agent-evaluation-compare-title">{t("运行环境")}</h4>
-            <table className="agent-evaluation-compare">
-                <thead><tr><th>{t("项目")}</th>{selectedReports.map(report => <th key={report.id}>v{report.agent_version} · {time(report.created_at)}</th>)}</tr></thead>
-                <tbody>
-                    <tr><td>{t("模型方案")}</td>{selectedReports.map(report => <td key={report.id}>{report.environment?.model.version ? `v${report.environment.model.version}` : t("无")}</td>)}</tr>
-                    <tr><td>{t("记忆")}</td>{selectedReports.map(report => <td key={report.id}>{report.environment ? (report.environment.memory.enabled ? t("开启") : t("关闭")) : t("未知")}</td>)}</tr>
-                    <tr><td>{t("知识库")}</td>{selectedReports.map(report => <td key={report.id}>{report.environment?.knowledge.length ? t("{{v0}} 个", { v0: report.environment.knowledge.length }) : t("无")}</td>)}</tr>
-                </tbody>
-            </table>
+            <Descriptions size="small" bordered column={1} items={[
+                { key: 'model', label: t("模型方案"), children: compareEnvironment(selectedReports, report => report.environment?.model.version ? `v${report.environment.model.version}` : t("无")) },
+                { key: 'memory', label: t("记忆"), children: compareEnvironment(selectedReports, report => report.environment ? (report.environment.memory.enabled ? t("开启") : t("关闭")) : t("未知")) },
+                { key: 'knowledge', label: t("知识库"), children: compareEnvironment(selectedReports, report => report.environment?.knowledge.length ? t("{{v0}} 个", { v0: report.environment.knowledge.length }) : t("无")) },
+            ]}/>
             <h4 className="agent-evaluation-compare-title">{t("用例结果")}</h4>
-            <table className="agent-evaluation-compare">
-                <thead><tr><th>{t("用例")}</th>{selectedReports.map(report => <th key={report.id}>v{report.agent_version} · {time(report.created_at)}</th>)}</tr></thead>
-                <tbody>{compareNames.map(name => <tr key={name}>
-                    <td>{name}</td>
-                    {selectedReports.map(report => {
-                        const result = report.results.find(item => item.name === name);
-                        return <td key={report.id}>{result ? <Tag color={result.passed ? 'green' : 'red'}>{statusLabel(result)}</Tag> : <span className="hint">{t("无")}</span>}</td>;
-                    })}
-                </tr>)}</tbody>
-            </table>
+            <Table<CompareRow>
+                rowKey="name"
+                size="small"
+                dataSource={compareRows}
+                columns={compareColumns}
+                pagination={false}
+                scroll={{ x: 560 }}
+                locale={{ emptyText: <Empty>{t("暂无记录")}</Empty> }}
+                rowClassName={row => {
+                    const states = selectedReports.map(report => report.results.find(item => item.name === row.name)?.passed);
+                    return states.length === 2 && states[0] !== states[1] ? 'agent-evaluation-compare-diff' : '';
+                }}
+            />
         </Modal>
     </>;
+}
+
+function compareEnvironment(reports: EvaluationReport[], value: (report: EvaluationReport) => string) {
+    return <Space size={16} wrap>{reports.map(report => <span key={report.id}><strong>v{report.agent_version}</strong>：{value(report)}</span>)}</Space>;
+}
+
+function AssertionTags({ spec }: { spec: EvaluationCaseSpec }) {
+    const tags = [
+        spec.expected_contains?.length ? <Tag key="include" color="blue">{t("含 {{v0}}", { v0: spec.expected_contains.length })}</Tag> : null,
+        spec.forbidden_contains?.length ? <Tag key="forbid" color="red">{t("禁 {{v0}}", { v0: spec.forbidden_contains.length })}</Tag> : null,
+        spec.expected_tools?.length ? <Tag key="tools" color="purple">{t("工具 {{v0}}", { v0: spec.expected_tools.length })}</Tag> : null,
+    ].filter(Boolean);
+    if (!tags.length) return <span className="hint">{t("无")}</span>;
+    return <Space size={4} wrap>{tags}</Space>;
+}
+
+function LatestResult({ result }: { result?: EvaluationResult }) {
+    if (!result) return <span className="hint">—</span>;
+    return <Tag color={statusColor(result)}>{statusLabel(result)}</Tag>;
+}
+
+function CaseRunResult({ result }: { result?: EvaluationResult }) {
+    if (!result) return <p className="hint">{t("暂无记录")}</p>;
+    return <div className="agent-evaluation-result">
+        <Tag color={statusColor(result)}>{statusLabel(result)}</Tag>
+        <span className="hint">{t("单条运行结果")}</span>
+        <pre>{result.error || result.output || t("无")}</pre>
+        <p className="hint">{t("工具：")}{result.tools.join(' → ') || t("无")}</p>
+    </div>;
+}
+
+function ReportCasesTable({ report }: { report: EvaluationReport }) {
+    const rows = report.results.map((result, index) => ({ ...result, key: result.case_id || `${report.id}-${index}` }));
+    const columns: TableColumnsType<EvaluationResult & { key: string }> = [
+        { title: t("用例"), dataIndex: 'name', width: 200, ellipsis: true },
+        { title: t("最近结果"), key: 'status', width: 120, render: (_, row) => <Tag color={statusColor(row)}>{statusLabel(row)}</Tag> },
+        { title: t("工具"), key: 'tools', width: 180, render: (_, row) => <span className="hint">{row.tools.join(' → ') || t("无")}</span> },
+        { title: t("输出"), key: 'output', ellipsis: true, render: (_, row) => row.error || row.output || t("无") },
+    ];
+    return <div className="agent-evaluation-report-detail">
+        <p className="agent-evaluation-env hint">{environmentText(report.environment)}</p>
+        <Table<EvaluationResult & { key: string }>
+            className="agent-evaluation-table"
+            rowKey="key"
+            size="small"
+            dataSource={rows}
+            columns={columns}
+            pagination={false}
+            scroll={{ x: 700 }}
+            expandable={{
+                rowExpandable: row => Boolean(row.judge || row.judge_error || row.similarity),
+                expandedRowRender: row => <pre>{JSON.stringify({ judge: row.judge, judge_error: row.judge_error ? errorText(row.judge_error) : null, similarity: row.similarity }, null, 2)}</pre>,
+            }}
+        />
+    </div>;
 }
 
 function CaseFields({ draft, onChange }: { draft: CaseDraft; onChange: (draft: CaseDraft) => void }) {
@@ -403,16 +532,4 @@ function CaseFields({ draft, onChange }: { draft: CaseDraft; onChange: (draft: C
         <Field label={t("模拟工具结果 JSON")}><textarea className="mono" rows={6} value={draft.mock_tools} onChange={event => onChange({ ...draft, mock_tools: event.target.value })}/></Field>
         <p className="hint">{t("至少填写一项断言：预期包含、禁止包含或预期工具。")}</p>
     </>;
-}
-
-function EnvironmentSummary({ environment }: { environment?: EvaluationEnvironment | null }) {
-    if (!environment) return null;
-    const published = environment.knowledge.reduce((sum, item) => sum + item.published, 0);
-    const parts = [
-        environment.model.version ? t("模型方案 v{{v0}}", { v0: environment.model.version }) : t("未绑定模型方案"),
-        environment.knowledge.length ? t("知识库 {{v0}} 个 / 已发布 {{v1}} 篇", { v0: environment.knowledge.length, v1: published }) : t("无知识库"),
-        t("记忆{{v0}}", { v0: environment.memory.enabled ? t("开启") : t("关闭") }),
-        t("工具 {{v0}} 个", { v0: environment.tools.length }),
-    ];
-    return <p className="agent-evaluation-env hint">{parts.join(' · ')}</p>;
 }
