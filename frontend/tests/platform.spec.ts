@@ -101,7 +101,7 @@ test('knowledge, publication, conversation, confirmed ticket, handoff and evalua
   await page.getByRole('button', { name: '保存用例' }).click();
   await expect(page.getByRole('status')).toContainText('用例已保存');
   await page.getByRole('button', { name: '运行评测' }).click();
-  await expect(page.locator('.agent-evaluation-view .report')).toContainText('1/1 通过', { timeout: 20000 });
+  await expect(page.locator('.agent-evaluation-view .agent-evaluation-report-table')).toContainText('1/1', { timeout: 20000 });
   await nav('质量大盘');
   await expect(page.locator('.quality-board')).toContainText(agent);
   await expect(page.locator('.quality-board')).toContainText('待复核队列');
