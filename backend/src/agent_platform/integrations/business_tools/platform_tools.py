@@ -5,8 +5,10 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agent_platform.modules.agent_config.memory import resolve_agent_memory
 from agent_platform.modules.customer_service.service import TicketProposal
 from agent_platform.platform.persistence.store import DomainError, execute
+from agent_platform.settings import Settings
 
 
 class SearchInput(BaseModel):
@@ -67,16 +69,26 @@ class PlatformTools:
         self.http, self.platform, self.row = http, platform, row
         self.allowed, self.kb_ids, self.emit = allowed, [UUID(k) for k in kb_ids], emit
 
+    def _memory_config(self):
+        """Effective memory config for this run (Phase 5, C-4).
+
+        Built from the run's agent snapshot config plus the platform settings;
+        a legacy/customerless run without a snapshot falls back to the
+        all-default config so pre-Phase-5 behaviour stays on.
+        """
+        agent = (self.row.get("config", {}).get("agent") or {}).get("config") or {}
+        settings = getattr(self.platform, "settings", None) or Settings(_env_file=None)
+        return resolve_agent_memory(agent, settings)
+
     def _memory_search_registered(self):
-        """memory_search registration gate (R15, P3-UT-10): the tool only
+        """memory_search registration gate (R15, P3-UT-10, C-4): the tool only
         appears when the draft kept it, the run is customer-bound and the
-        agent snapshot has memory enabled. Playground and customerless runs
-        never see it, so the model cannot call it either.
+        effective memory config keeps search on. Playground and customerless
+        runs never see it, so the model cannot call it either.
         """
         if "memory_search" not in self.allowed or not self.row.get("customer_id"):
             return False
-        agent = (self.row.get("config", {}).get("agent") or {}).get("config") or {}
-        return agent.get("memory_enabled", True) is not False
+        return self._memory_config().search
 
     @property
     def schemas(self):
@@ -176,8 +188,12 @@ class PlatformTools:
                 if not self._memory_search_registered():
                     return {"ok": False, "error": "memory_search_unavailable"}
                 params = MemorySearchInput.model_validate(args)
+                # Agent-level search cap (C-4): the effective limit tightens
+                # the model-supplied one; the store still clamps the platform
+                # ceiling (memory_search_limit_max) as a second line.
+                limit = min(params.limit, self._memory_config().search_limit)
                 hits = await self.platform.memory_store.search(
-                    self.row["tenant_id"], self.row["customer_id"], params.query, params.limit
+                    self.row["tenant_id"], self.row["customer_id"], params.query, limit
                 )
                 # L2 reference signal (R11): hit ids feed the reinforce task
                 # dispatched at run finish; they stay internal and never reach

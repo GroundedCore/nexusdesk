@@ -1,7 +1,8 @@
 # NexusDesk 记忆系统 · 分阶段规划文档
 
-> 状态：规划评审中（未开始实施）
+> 状态：Phase 1-4 已上线；Phase 5-7 规划评审中（未开始实施）
 > 创建：2026-10-09
+> 修订：2026-10-17（新增 Phase 5-7 迭代规划）
 
 ## 背景
 
@@ -29,6 +30,9 @@ NexusDesk 当前的"上下文"仅有 `runtime_conversations.history` JSONB 滑�
 | Phase 2 | 客户实体 + 画像/偏好记忆 | 跨会话连续服务，记忆系统主体 | 中 | ~2-3 周 | [phase-2-customer-profile/](phase-2-customer-profile/) |
 | Phase 3 | 事件记忆 + 语义检索 | 工单闭环联动；海量记忆按需检索（含检索时间衰减） | 中 | ~2 周 | [phase-3-event-memory-search/](phase-3-event-memory-search/) |
 | Phase 4 | 治理、衰退与标记记忆 | 生产合规前提：纠错、遗忘、防污染；记忆衰退与强化保鲜 | 中低 | ~1-2 周 | [phase-4-governance/](phase-4-governance/) |
+| Phase 5 | Agent 记忆配置开关 | 记忆行为按 Agent 场景裁剪；配置可见可改；只能收紧不能放宽 | 低 | ~1 周 | [phase-5-agent-memory-config/](phase-5-agent-memory-config/) |
+| Phase 6 | 记忆可视化与注入可解释性 | 三层记忆视图；注入明细落库，"本次对话用了哪几条记忆"可回溯 | 中 | ~1.5-2 周 | [phase-6-memory-visualization/](phase-6-memory-visualization/) |
+| Phase 7 | 生产观测与告警 | 任务/embedding/检索/维护健康度可视；轻量告警主动发现故障 | 中低 | ~1-1.5 周 | [phase-7-observability-alerts/](phase-7-observability-alerts/) |
 
 各阶段目录下统一包含五份文档：
 
@@ -52,4 +56,11 @@ NexusDesk 当前的"上下文"仅有 `runtime_conversations.history` JSONB 滑�
   - Phase 1：摘要生成时机与成本（每次截断触发一次 LLM 调用）；
   - Phase 2：身份解析规则（渠道侧只有 session_id 哈希）与抽取置信度阈值；
   - Phase 3：pgvector 引入决策（compose 镜像变更）与降级策略；检索排序时间衰减的半衰期默认值（30 天）；
-  - Phase 4：PII 与"忘记我"合规流程；衰退机制的分类型半衰期与阈值（profile 365 天转 pending、preference 90 天、protected 免疫）、强化信号的三级近似（L1 同键 upsert / L2 检索命中 / L3 关键词重叠）是否可接受。
+  - Phase 4：PII 与"忘记我"合规流程；衰退机制的分类型半衰期与阈值（profile 365 天转 pending、preference 90 天、protected 免疫）、强化信号的三级近似（L1 同键 upsert / L2 检索命中 / L3 关键词重叠）是否可接受；
+  - Phase 5：存量 Agent 迁移的行为等价性（旧三开关 → 新配置映射）；"Agent 只能收紧"的平台级能力清单是否完整；写入策略 `review` 模式与既有置信度阈值的关系；
+  - Phase 6：`memory_injection_log` 的写放大控制（批量插入 + 90 天保留期）；审计时间线不引入新的 PII 泄露面；历史无明细数据的展示降级；
+  - Phase 7：告警阈值默认值与冷却窗口（宁缺勿滥）；观测聚合 SQL 的时间窗限制（避免全表扫描）；零新中间件约束是否守住。
+
+## 记忆种类现状（Phase 5-7 规划时盘点）
+
+存储层 `memory_items.type` 共 4 类：`profile`（客户画像）、`preference`（客户偏好）、`event`（事件记忆）、`flag`（服务标记，治理标记而非认知记忆）；另有会话摘要 `runtime_conversations.summary`（工作记忆，非独立存储）。对应认知分类：工作记忆有（滑动窗口 + 滚动摘要）、情景记忆有（event，偏客服工单场景）、语义记忆有（profile + preference，非通用知识图谱）、**过程记忆没有**——Agent 在线自我进化维持"明确不做"（走 evaluation 模块离线迭代），Phase 5-7 不新增记忆类型。

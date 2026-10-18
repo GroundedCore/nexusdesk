@@ -207,6 +207,29 @@ async def agent_catalog(
     )
 
 
+@router.get("/agents/memory-config-caps")
+async def agent_memory_config_caps(request: Request, user: Reader):
+    """Platform-side memory capability caps for the agent config form (C-6).
+
+    Returns the platform-level switches and ceilings the form uses to show
+    "platform disabled" hints and to warn about numeric truncation. These are
+    tenant-agnostic deployment settings; authentication is still required, and
+    no tenant-scoped data is exposed.
+    """
+    s = services(request).settings
+    return {
+        "summary_enabled": s.summary_enabled,
+        "memory_inject_enabled": s.memory_inject_enabled,
+        "memory_extract_enabled": s.memory_extract_enabled,
+        "memory_inject_max_items": s.memory_inject_max_items,
+        # The agent-facing ceiling (D2), not the store's second-line clamp
+        # memory_search_limit_max: the form warns against the value the
+        # effective config actually truncates to.
+        "memory_search_limit": s.memory_search_limit,
+        "memory_blacklist_auto_handoff": s.memory_blacklist_auto_handoff,
+    }
+
+
 @router.get("/agents/{aid}")
 async def agent_detail(aid: UUID, request: Request, user: Reader):
     return await services(request).agents.get(user.tenant, aid)

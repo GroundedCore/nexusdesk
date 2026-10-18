@@ -598,7 +598,9 @@ async def test_p2_it_09_agent_switches_split_read_and_write(platform):
     await ingest(client, channel, "m2", "customer1", "还记得我吗")
     await execute_next(services, settings)
     assert [task["status"] for task in await extract_tasks(engine, tenant)] == ["done"]
-    # memory_enabled=false: extraction still dispatches, injection stops.
+    # Phase 5 (C-3) upgraded memory_enabled to a master switch: with it off,
+    # injection stops AND extraction no longer dispatches (memory_write=true is
+    # overridden by the master switch).
     body["config"]["memory_write"] = True
     body["config"]["memory_enabled"] = False
     assert (
@@ -611,7 +613,7 @@ async def test_p2_it_09_agent_switches_split_read_and_write(platform):
     row = await services.repository.claim(services.worker.owner, 30, tenant)
     assert await services.worker._customer_memory(row) is None
     await services.worker._execute(row)
-    assert [task["status"] for task in await extract_tasks(engine, tenant)] == ["done", "pending"]
+    assert [task["status"] for task in await extract_tasks(engine, tenant)] == ["done"]
 
 
 async def test_p2_it_10_global_extract_switch_off_dispatches_nothing(platform):

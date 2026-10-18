@@ -1,5 +1,32 @@
 export interface PlatformModule { id: string; name: string; description: string; status: string }
-export interface AgentConfig { reply_language?: "auto"|"zh-CN"|"zh-TW"|"en"|"hi"; system_prompt: string; tool_names: string[]; knowledge_base_ids: string[]; max_model_rounds: number; model_profile_id?: string | null; model_profile_version?: number | null }
+export interface AgentConfig {
+  reply_language?: "auto" | "zh-CN" | "zh-TW" | "en" | "hi";
+  system_prompt: string;
+  tool_names: string[];
+  knowledge_base_ids: string[];
+  max_model_rounds: number;
+  model_profile_id?: string | null;
+  model_profile_version?: number | null;
+  summary_enabled?: boolean;
+  memory_enabled?: boolean;
+  memory_read_enabled?: boolean;
+  memory_write?: boolean;
+  memory_types?: Array<"profile" | "preference" | "event">;
+  memory_search_enabled?: boolean;
+  memory_write_mode?: "auto" | "review";
+  memory_inject_max_items?: number | null;
+  memory_search_limit?: number | null;
+  memory_blacklist_auto_handoff?: boolean;
+}
+/** Platform-side memory capability caps exposed by GET /agents/memory-config-caps. */
+export interface MemoryConfigCaps {
+  summary_enabled: boolean;
+  memory_inject_enabled: boolean;
+  memory_extract_enabled: boolean;
+  memory_inject_max_items: number;
+  memory_search_limit: number;
+  memory_blacklist_auto_handoff: boolean;
+}
 export interface Agent { created_by?: string | null; industry?:string; tags?:string[]; is_example?:boolean; updated_at?: string; created_at?: string; id: string; name: string; description: string; draft: AgentConfig; draft_revision: number; published_version: number | null; archived?: boolean }
 export interface KnowledgeBase { id: string; name: string; document_count: number; enabled: boolean }
 export interface Tool { revision?: number; published_version?: number; id: string; name: string; enabled: boolean; source: string; spec: Record<string, unknown> }
