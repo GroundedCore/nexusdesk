@@ -3,6 +3,7 @@ import logging
 import random
 from uuid import uuid4
 
+from agent_platform.modules.agent_config.memory import resolve_agent_memory
 from agent_platform.modules.agent_runtime.notify import QUEUE_CHANNEL
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
 from agent_platform.modules.memory.service import (
@@ -126,14 +127,31 @@ class RuntimeWorker:
         if self.memory is None or not row.get("customer_id"):
             return None
         agent = (row["config"].get("agent") or {}).get("config") or {}
-        if not agent.get("memory_enabled", True):
+        effective = resolve_agent_memory(agent, self.settings)
+        if not effective.read:
             return None
+        # Profile/preference injects the agent's allowed subset (flag is never
+        # part of it and is unaffected); events follow "event" in types and the
+        # item cap now comes from the effective config rather than the raw
+        # platform setting (C-4). FR-1: the agent-level inject cap covers
+        # profile/preference/event alike, so the event section is bounded by
+        # min(agent-effective cap, platform event ceiling) — the default agent
+        # (cap=platform inject max) keeps the Phase 3 behaviour of 5.
+        profile_types = tuple(t for t in ("profile", "preference") if t in effective.types)
+        event_limit = min(effective.inject_max_items, self.settings.memory_event_inject_max)
         try:
             items = await self.memory.injection_items(
-                row["tenant_id"], row["customer_id"], self.settings.memory_inject_max_items
+                row["tenant_id"],
+                row["customer_id"],
+                effective.inject_max_items,
+                types=profile_types,
             )
-            events = await self.memory.pending_event_items(
-                row["tenant_id"], row["customer_id"], self.settings.memory_event_inject_max
+            events = (
+                await self.memory.pending_event_items(
+                    row["tenant_id"], row["customer_id"], event_limit
+                )
+                if "event" in effective.types
+                else []
             )
             flags = await self.memory.active_flags(
                 row["tenant_id"],
@@ -194,17 +212,20 @@ class RuntimeWorker:
         """
         agent = row["config"].get("agent") or {}
         config = agent.get("config") or {}
+        effective = resolve_agent_memory(config, self.settings)
         memory = {}
-        if dropped and self.settings.summary_enabled and config.get("summary_enabled", True):
+        if dropped and effective.summary:
             memory["dropped"] = dropped
             memory["max_input"] = self.settings.summary_max_input_messages
-        if (
-            self.settings.memory_extract_enabled
-            and config.get("memory_write", True)
-            and not agent.get("is_example")
-        ):
+        if effective.write and not agent.get("is_example"):
             memory["extract"] = True
             memory["extract_debounce"] = self.settings.memory_extract_debounce_seconds
+            # Snapshot the write mode and allowed types into the dispatch dict
+            # so the async task applies the config captured at run time (C-4).
+            memory["write_mode"] = effective.write_mode
+            memory["types"] = [
+                t for t in ("profile", "preference", "event") if t in effective.types
+            ]
         hits = row.get("_memory_reinforce")
         if (
             getattr(self.settings, "memory_decay_enabled", False)

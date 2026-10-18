@@ -15,6 +15,7 @@ import json
 import logging
 import re
 
+from agent_platform.modules.agent_config.memory import MEMORY_TYPES
 from agent_platform.modules.memory.service import MemoryService
 from agent_platform.modules.memory.summary import SummaryError, require_binding
 from agent_platform.modules.model_gateway.contracts import ChatRequest
@@ -130,12 +131,19 @@ def parse_extraction_output(text):
     return [op for op in (validate_item(item) for item in data) if op is not None]
 
 
-async def enqueue_extract_task(conn, tenant, conversation_id, customer_id, debounce_seconds):
+async def enqueue_extract_task(
+    conn, tenant, conversation_id, customer_id, debounce_seconds, write_mode="auto", types=None
+):
     """Insert an extraction task unless one exists within the debounce window.
 
     Per-conversation debounce (FR-2): at most one extraction task per
     ``debounce_seconds`` — the extraction input is the recent message window,
     so a later task naturally covers earlier turns; nothing is merged.
+
+    Phase 5 (C-4): the effective ``write_mode`` and allowed ``types`` ride in
+    the task payload as a snapshot, so the asynchronous executor applies the
+    config captured at dispatch time even if the agent is edited afterwards.
+    Defaults keep legacy callers unchanged (auto / all three types).
     """
     existing = await one(
         conn,
@@ -149,15 +157,20 @@ async def enqueue_extract_task(conn, tenant, conversation_id, customer_id, debou
     )
     if existing:
         return None
+    payload = {
+        "conversation_id": str(conversation_id),
+        "customer_id": str(customer_id),
+        "write_mode": write_mode or "auto",
+    }
+    if types:
+        payload["types"] = [t for t in MEMORY_TYPES if t in types]
     row = await one(
         conn,
         """INSERT INTO memory_tasks(tenant_id,kind,payload)
         VALUES(:t,:kind,CAST(:payload AS jsonb)) RETURNING id""",
         t=tenant,
         kind=EXTRACT_KIND,
-        payload=json.dumps(
-            {"conversation_id": str(conversation_id), "customer_id": str(customer_id)}
-        ),
+        payload=json.dumps(payload),
     )
     return row["id"]
 
@@ -264,6 +277,8 @@ class ExtractionService:
                 str(cid),
                 self.settings.memory_confidence_auto,
                 self.settings.memory_confidence_pending,
+                write_mode=payload.get("write_mode", "auto"),
+                types=payload.get("types"),
             )
             await audit(
                 c,
