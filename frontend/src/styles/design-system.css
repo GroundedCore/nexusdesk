@@ -45,6 +45,9 @@
 .console-layout .badge:is(.running,.human,.active,.in_progress) {background:#efefff;color:#605cdd}
 .console-layout .badge:is(.failed,.rejected) {background:#fff0ef;color:#bf5b56}
 .console-layout .badge:is(.waiting,.pending,.queued) {background:#fff8e8;color:#977329}
+.console-layout .badge:is(.passed) {background:#edf8f0;color:#36865e}
+.console-layout .badge:is(.needs_review) {background:#fff8e8;color:#977329}
+.console-layout .badge:is(.error) {background:#fdeceb;color:#b04a4a}
 .console-layout .alert {border-radius:8px;font-size:13px;padding:12px 16px}
 .console-layout .empty {padding:40px 16px;font-size:13px;color:#8a90a1;text-align:center}
 .console-layout pre {background:#f8f9fc;border:1px solid var(--ui-line);border-radius:6px;line-height:1.8}

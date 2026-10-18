@@ -558,6 +558,48 @@ async def test_recent_messages_and_bounded_human_context(platform):
     assert detail["history"][-1]["content"] == f"客服{settings.history_turns + 1}"
 
 
+async def test_evaluation_quality_board_reviews_and_regressions(platform):
+    """The cross-agent board replaces the duplicate per-agent evaluation page."""
+    client, _, _ = platform
+    agent, _ = await create_agent(client)
+    aid = agent["id"]
+    created = await client.post(
+        f"/api/v1/agents/{aid}/evaluation-cases",
+        json={"name": "回归用例", "input": "你好", "expected_contains": ["演示模式"]},
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+    assert (await client.post(f"/api/v1/agents/{aid}/evaluate")).status_code == 200
+    # Rewrite the assertion so the same case can only fail on the next run.
+    assert (
+        await client.patch(
+            f"/api/v1/agents/{aid}/evaluation-cases/{cid}",
+            json={"name": "回归用例", "input": "你好", "expected_contains": ["绝不出现的断言"]},
+        )
+    ).status_code == 200
+    assert (await client.post(f"/api/v1/agents/{aid}/evaluate")).status_code == 200
+
+    board = (await client.get("/api/v1/evaluation/overview")).json()
+    assert board["summary"]["evaluated"] == 1
+    assert board["summary"]["reports"] == 2
+    row = next(item for item in board["agents"] if item["agent_id"] == aid)
+    assert row["cases"] == 1 and row["failed"] == 1 and row["passed"] == 0
+    assert row["pass_rate"] == 0.0 and row["previous_pass_rate"] == 1.0
+    assert row["delta"] == -1.0 and row["regressions"] == 1
+
+    reviews = (await client.get("/api/v1/evaluation/reviews")).json()
+    assert reviews["status"] == "needs_review" and reviews["items"] == []
+    failed = (await client.get("/api/v1/evaluation/reviews", params={"status": "failed"})).json()
+    assert failed["counts"]["failed"] == 1
+    assert [item["name"] for item in failed["items"]] == ["回归用例"]
+    assert failed["items"][0]["agent_id"] == aid
+
+    regressions = (await client.get("/api/v1/evaluation/regressions")).json()
+    assert regressions["total"] == 1
+    assert regressions["items"][0]["case_id"] == cid
+    assert regressions["items"][0]["previous_status"] == "passed"
+
+
 async def test_evaluation_case_limit_is_atomic(platform):
     client, _, _ = platform
     agent, _ = await create_agent(client)

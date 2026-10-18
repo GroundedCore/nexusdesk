@@ -773,6 +773,37 @@ async def evaluate(aid: UUID, request: Request, user: Admin, body: ScoringOption
     return await services(request).evaluation.run(user.tenant, user.actor, aid, body)
 
 
+@router.get("/evaluation/overview")
+async def evaluation_overview(
+    request: Request,
+    user: Reader,
+    report_limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+):
+    """Cross-agent quality board; replaces the per-agent picker that duplicated
+    the agent-scoped evaluation tab."""
+    return await services(request).evaluation.overview(user.tenant, report_limit)
+
+
+@router.get("/evaluation/reviews")
+async def evaluation_reviews(
+    request: Request,
+    user: Reader,
+    status: Literal["needs_review", "error", "failed", "passed", "all"] = "needs_review",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    return await services(request).evaluation.reviews(user.tenant, status, page, page_size)
+
+
+@router.get("/evaluation/regressions")
+async def evaluation_regressions(
+    request: Request,
+    user: Reader,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+):
+    return await services(request).evaluation.regressions(user.tenant, limit)
+
+
 @router.get("/policy")
 async def effective_policy(request: Request, user: Reader):
     settings = request.app.state.settings
