@@ -4,10 +4,11 @@ import {t} from '../../i18n';
 import {post} from '../../shared/api/client';
 import {showLogin} from './AuthBoundary';
 import {loginError} from './LoginPage';
+import {BrandMark} from '../../shared/components/BrandMark';
 
 export function InitialPassword() {
   const [busy,setBusy]=useState(false),[error,setError]=useState('');
-  return <main className="auth-loading"><div className="login-brand">nexus<span>desk</span></div>
+  return <main className="auth-loading"><BrandMark/>
     <Card title={t('首次登录，请修改初始密码')} style={{width:'100%',maxWidth:460}}>
       <p>{t('设置专属密码后即可进入工作台。')}</p>
       {error&&<Alert type="error" showIcon title={error} style={{marginBottom:16}}/>}

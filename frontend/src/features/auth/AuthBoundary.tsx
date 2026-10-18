@@ -5,6 +5,7 @@ import {normalizeRoute} from '../../app/hashRouter';
 import {t} from '../../i18n';
 import {LoginPage} from './LoginPage';
 import {InitialPassword} from './InitialPassword';
+import {BrandMark} from '../../shared/components/BrandMark';
 
 const destinationKey='nexusdesk-return-route';
 export function showLogin(expired=false) {
@@ -35,6 +36,6 @@ export function AuthBoundary({children}:{children:ReactNode}) {
     history.replaceState(null,'','#'+(target==='/login'?'/overview':target));setLogin(false);setReady(false);setMustChange(false);setRevision(v=>v+1);
   }}/>;
   if(mustChange)return <InitialPassword/>;
-  if(!ready)return <div className="auth-loading"><div className="login-brand">nexus<span>desk</span></div>{error?<Alert type="error" showIcon title={t('登录服务暂不可用，请稍后重试')} action={<Button onClick={()=>setRevision(v=>v+1)}>{t('重试')}</Button>}/>:<Spin size="large"/>}</div>;
+  if(!ready)return <div className="auth-loading"><BrandMark/>{error?<Alert type="error" showIcon title={t('登录服务暂不可用，请稍后重试')} action={<Button onClick={()=>setRevision(v=>v+1)}>{t('重试')}</Button>}/>:<Spin size="large"/>}</div>;
   return children;
 }
