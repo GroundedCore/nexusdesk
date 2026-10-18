@@ -2,10 +2,10 @@ import {consoleTheme} from '../../styles/theme';
 import { LanguageSelector } from '../../i18n/LanguageSelector';
 import { t, number, errorText } from '../../i18n/index';
 import { useEffect, useRef, useState } from 'react';
-import { Avatar, Button, Card, Checkbox, ConfigProvider, Drawer, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Select, Space, Spin, Splitter, Tag } from 'antd';
+import { Avatar, Button, Card, Checkbox, ConfigProvider, Drawer, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Radio, Select, Space, Spin, Splitter, Switch, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined, CommentOutlined, EditOutlined, ExperimentOutlined, HistoryOutlined, MoreOutlined, PlusOutlined, RobotOutlined, SaveOutlined, SendOutlined } from '@ant-design/icons';
-import { api, patch, post, put, type Agent, type AgentConfig, type EvaluationReportPage, type KnowledgeBase, type Tool } from '../../shared/api/client';
-import { Alert, Field, time, useAccess, useAction, useResource } from '../../shared/components/ui';
+import { api, patch, post, put, type Agent, type AgentConfig, type EvaluationReportPage, type KnowledgeBase, type MemoryConfigCaps, type Tool } from '../../shared/api/client';
+import { Alert, Field, time, toast, useAccess, useAction, useResource } from '../../shared/components/ui';
 import { useCatalogOptions } from '../models/useCatalogOptions';
 import { AgentModelPicker } from './AgentModelPicker';
 import { AgentChat, AgentRecords } from './Conversations';
@@ -19,9 +19,25 @@ export interface PageResult<T> {
     page: number;
     page_size: number;
 }
-const initialConfig = (): AgentConfig => ({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket', 'memory_search'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
-const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['runtime', t("运行参数")]] as const);
-const labels = (): Record<string, string> => ({ system_prompt: t("行为指令"), tool_names: t("工具"), knowledge_base_ids: t("知识库"), max_model_rounds: t("最大模型轮次"), model_profile_id: t("模型方案"), model_profile_version: t("模型方案版本"), reply_language: t("回复语言") });
+const initialConfig = (): AgentConfig => withMemoryDefaults({ system_prompt: t('你是一个专业、友好的智能助手。请准确理解用户需求，并提供清晰可靠的帮助。'), tool_names: ['knowledge_search', 'propose_ticket', 'memory_search'], knowledge_base_ids: [], max_model_rounds: 6, model_profile_id: null, model_profile_version: null, reply_language: "auto" });
+const groups = () => ([['basic', t("基本信息")], ['model', t("模型配置")], ['prompt', t("行为指令")], ['tools', t("工具")], ['knowledge', t("知识库")], ['memory', t("记忆")], ['runtime', t("运行参数")]] as const);
+const labels = (): Record<string, string> => ({ system_prompt: t("行为指令"), tool_names: t("工具"), knowledge_base_ids: t("知识库"), max_model_rounds: t("最大模型轮次"), model_profile_id: t("模型方案"), model_profile_version: t("模型方案版本"), reply_language: t("回复语言"), summary_enabled: t("滚动摘要"), memory_enabled: t("启用客户长期记忆"), memory_read_enabled: t("读取记忆"), memory_write: t("自动写入记忆"), memory_types: t("记忆类型"), memory_search_enabled: t("启用 memory_search 检索"), memory_write_mode: t("写入策略"), memory_inject_max_items: t("单次注入上限"), memory_search_limit: t("检索返回上限"), memory_blacklist_auto_handoff: t("黑名单客户自动转人工") });
+type MemoryType = "profile" | "preference" | "event";
+const MEMORY_TYPES: MemoryType[] = ["profile", "preference", "event"];
+const memoryTypeLabel = (type: MemoryType) => type === 'profile' ? t("客户画像") : type === 'preference' ? t("客户偏好") : t("事件记忆");
+const withMemoryDefaults = (config: AgentConfig): AgentConfig => ({ ...config, summary_enabled: config.summary_enabled ?? true, memory_enabled: config.memory_enabled ?? true, memory_read_enabled: config.memory_read_enabled ?? true, memory_write: config.memory_write ?? true, memory_types: config.memory_types?.length ? config.memory_types : [...MEMORY_TYPES], memory_search_enabled: config.memory_search_enabled ?? true, memory_write_mode: config.memory_write_mode ?? "auto", memory_inject_max_items: config.memory_inject_max_items ?? null, memory_search_limit: config.memory_search_limit ?? null, memory_blacklist_auto_handoff: config.memory_blacklist_auto_handoff ?? false });
+interface MemoryPreset { key: string; label: string; summary_enabled: boolean; memory_enabled: boolean; memory_read_enabled: boolean; memory_write: boolean; memory_write_mode: "auto" | "review"; memory_types: MemoryType[]; memory_search_enabled: boolean; memory_inject_max_items: number | null; memory_search_limit: number | null; memory_blacklist_auto_handoff: boolean; }
+const memoryPresets = (): MemoryPreset[] => [
+    { key: 'standard', label: t("普通客服"), summary_enabled: true, memory_enabled: true, memory_read_enabled: true, memory_write: true, memory_write_mode: "auto", memory_types: [...MEMORY_TYPES], memory_search_enabled: true, memory_inject_max_items: null, memory_search_limit: null, memory_blacklist_auto_handoff: false },
+    { key: 'compliance', label: t("高合规客服"), summary_enabled: true, memory_enabled: true, memory_read_enabled: true, memory_write: true, memory_write_mode: "review", memory_types: [...MEMORY_TYPES], memory_search_enabled: true, memory_inject_max_items: null, memory_search_limit: null, memory_blacklist_auto_handoff: false },
+    { key: 'knowledge', label: t("知识问答"), summary_enabled: true, memory_enabled: false, memory_read_enabled: false, memory_write: false, memory_write_mode: "auto", memory_types: [...MEMORY_TYPES], memory_search_enabled: false, memory_inject_max_items: null, memory_search_limit: null, memory_blacklist_auto_handoff: false },
+    { key: 'short_term', label: t("短期问答"), summary_enabled: true, memory_enabled: true, memory_read_enabled: false, memory_write: false, memory_write_mode: "auto", memory_types: [...MEMORY_TYPES], memory_search_enabled: false, memory_inject_max_items: null, memory_search_limit: null, memory_blacklist_auto_handoff: false },
+    { key: 'demo', label: t("演示 Agent"), summary_enabled: false, memory_enabled: false, memory_read_enabled: false, memory_write: false, memory_write_mode: "auto", memory_types: [...MEMORY_TYPES], memory_search_enabled: false, memory_inject_max_items: null, memory_search_limit: null, memory_blacklist_auto_handoff: false },
+];
+function MemoryToggle({ label, hint, checked, onChange, disabled, tooltip }: { label: string; hint?: string; checked: boolean; onChange: (checked: boolean) => void; disabled: boolean; tooltip?: string }) {
+    const tile = <label className={`agent-memory-toggle${checked ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}`}><Switch size="small" aria-label={label} checked={checked} disabled={disabled} onChange={onChange}/><span className="agent-memory-toggle-text"><span className="agent-memory-toggle-label">{label}</span>{hint && <span className="agent-memory-toggle-hint">{hint}</span>}</span></label>;
+    return tooltip ? <Tooltip title={tooltip}><span className="agent-memory-toggle-wrap">{tile}</span></Tooltip> : tile;
+}
 interface Props {
     route: string;
     onNavigate: (path: string, replace?: boolean) => void;
@@ -68,10 +84,27 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     const [pickQuery, setPickQuery] = useState('');
     const [activeSection, setActiveSection] = useState('basic');
     const [mobileTab, setMobileTab] = useState('config');
+    const [preset, setPreset] = useState<string | null>(null);
     const form = useRef<HTMLFormElement>(null);
     const models = useCatalogOptions('profiles', editor);
     const tools = useResource<Tool[]>(editor ? '/tools' : null);
     const bases = useResource<KnowledgeBase[]>(editor ? '/knowledge-bases' : null);
+    const memoryCaps = useResource<MemoryConfigCaps>(editor ? '/agents/memory-config-caps' : null);
+    const caps = memoryCaps.data;
+    const formDisabled = !admin || action.busy || !!selected?.archived;
+    const summaryPlatformOff = caps ? !caps.summary_enabled : false;
+    const injectPlatformOff = caps ? !caps.memory_inject_enabled : false;
+    const extractPlatformOff = caps ? !caps.memory_extract_enabled : false;
+    const blacklistForced = caps ? !!caps.memory_blacklist_auto_handoff : false;
+    // 上限字段初始化为平台默认值（caps 未加载时回退到后端内置默认 20/5）。
+    const defaultInjectLimit = caps?.memory_inject_max_items ?? 20;
+    const defaultSearchLimit = caps?.memory_search_limit ?? 5;
+    const memoryEnabled = config.memory_enabled !== false;
+    const readEffective = !injectPlatformOff && memoryEnabled && config.memory_read_enabled !== false;
+    const writeEffective = !extractPlatformOff && memoryEnabled && config.memory_write !== false;
+    const searchEffective = readEffective && config.memory_search_enabled !== false;
+    const summaryEffective = !summaryPlatformOff && config.summary_enabled !== false;
+    const blacklistEffective = blacklistForced || config.memory_blacklist_auto_handoff === true;
     const versions = useResource<{
         version: number;
         created_at: string;
@@ -118,7 +151,32 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         update();
         return () => root.removeEventListener('scroll', update);
     }, [editor, view]);
-    function apply(agent: Agent) { setSelected(agent); setName(agent.name); setDescription(agent.description); setConfig(agent.draft); setIndustry(agent.industry || ''); setTags(agent.tags || []); setIsExample(!!agent.is_example); setSaved(JSON.stringify({ name: agent.name, description: agent.description, config: agent.draft, industry: agent.industry || '', tags: agent.tags || [], is_example: !!agent.is_example })); setSavedAt(agent.updated_at || ''); }
+    function apply(agent: Agent) { const draft = withMemoryDefaults(agent.draft); setSelected(agent); setName(agent.name); setDescription(agent.description); setConfig(draft); setIndustry(agent.industry || ''); setTags(agent.tags || []); setIsExample(!!agent.is_example); setPreset(null); setSaved(JSON.stringify({ name: agent.name, description: agent.description, config: draft, industry: agent.industry || '', tags: agent.tags || [], is_example: !!agent.is_example })); setSavedAt(agent.updated_at || ''); }
+    function applyMemoryPreset(key: string) {
+        const presetValue = memoryPresets().find(p => p.key === key);
+        if (!presetValue)
+            return;
+        setPreset(key);
+        setConfig(c => ({ ...c, summary_enabled: presetValue.summary_enabled, memory_enabled: presetValue.memory_enabled, memory_read_enabled: presetValue.memory_read_enabled, memory_write: presetValue.memory_write, memory_write_mode: presetValue.memory_write_mode, memory_types: [...presetValue.memory_types], memory_search_enabled: presetValue.memory_search_enabled, memory_inject_max_items: presetValue.memory_inject_max_items, memory_search_limit: presetValue.memory_search_limit, memory_blacklist_auto_handoff: presetValue.memory_blacklist_auto_handoff }));
+    }
+    function setMemoryTypes(types: MemoryType[]) {
+        if (!types.length) {
+            toast.error(t("请至少选择一种记忆类型"));
+            return;
+        }
+        setConfig({ ...config, memory_types: types });
+    }
+    function memoryOverCap(): string | null {
+        if (!caps)
+            return null;
+        const inject = config.memory_inject_max_items;
+        if (inject != null && inject > caps.memory_inject_max_items)
+            return t("{{v0}} 超过平台上限 {{v1}}，保存后将被截断为平台上限 {{v1}}。确定继续吗？", { v0: t("单次注入上限"), v1: caps.memory_inject_max_items });
+        const search = config.memory_search_limit;
+        if (search != null && search > caps.memory_search_limit)
+            return t("{{v0}} 超过平台上限 {{v1}}，保存后将被截断为平台上限 {{v1}}。确定继续吗？", { v0: t("检索返回上限"), v1: caps.memory_search_limit });
+        return null;
+    }
     useEffect(() => { onWorkspaceChange(editor); }, [editor]);
     useEffect(() => {
         setRouteError('');
@@ -126,6 +184,7 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
         setPicker(null);
         setMobileTab('config');
         action.clear();
+        setPreset(null);
         if (!targetId) {
             setSelected(null);
             rows.refresh();
@@ -184,6 +243,17 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
                     return;
             }
         }
+        if (!(config.memory_types?.length)) {
+            setView('config');
+            setMobileTab('config');
+            setActiveSection('memory');
+            requestAnimationFrame(() => document.getElementById('agent-memory')?.scrollIntoView({ block: 'start' }));
+            void action.run(async () => { throw new Error(t("请至少选择一种记忆类型")); }, '');
+            return;
+        }
+        const overCap = memoryOverCap();
+        if (overCap && !window.confirm(overCap))
+            return;
         setView('config');
         setMobileTab('config');
         requestAnimationFrame(() => {
@@ -275,6 +345,30 @@ export function AgentsPage({ onWorkspaceChange, onGuardChange, onConfigureModels
     <section id="agent-model"><h2>{t("模型配置")}</h2><AgentModelPicker key={selected?.id || 'new'} config={config} onChange={setConfig} profiles={models.data} refresh={models.refresh} onConfigure={onConfigureModels} disabled={!admin || action.busy || !!selected?.archived}/></section>
     <section id="agent-prompt"><h2>{t("行为指令")}</h2><p className="agent-section-description">{t("告诉 Agent 应该扮演什么角色、如何思考和回答。")}</p><div className="agent-setting-card agent-prompt-card"><textarea aria-label={t("行为指令")} required maxLength={16000} rows={6} value={config.system_prompt} onChange={e => setConfig({ ...config, system_prompt: e.target.value })} placeholder={t("描述角色、任务目标与回答要求\u2026")}/><div className="agent-input-footer"><span>{t("清晰的指令有助于获得稳定的回答")}</span><span>{number(config.system_prompt.length)} / 16,000</span></div></div></section>
     {(['tools', 'knowledge'] as const).map(kind => <section id={`agent-${kind}`} key={kind}><div className="agent-section-heading"><h2>{kind === 'tools' ? t("工具") : t("知识库")}</h2><Button type="text" icon={<PlusOutlined aria-hidden/>} disabled={!admin || action.busy || selected?.archived} onClick={() => { setPickQuery(''); setPicker(kind); }}>{t("添加")}</Button></div><div className="agent-setting-card">{(kind === 'tools' ? config.tool_names : config.knowledge_base_ids).length ? (kind === 'tools' ? config.tool_names : config.knowledge_base_ids).map(id => <div className="agent-binding" key={id}><span>{kind === 'tools' ? id : bases.data?.find(b => b.id === id)?.name || id}</span><Button type="text" disabled={!admin || action.busy || selected?.archived} onClick={() => toggle(kind === 'tools' ? 'tool_names' : 'knowledge_base_ids', id)}>{t("移除")}</Button></div>) : <div className="agent-binding-empty">{t("点击「添加」选择")}{kind === 'tools' ? t("可调用的工具") : t("可访问的知识库")}</div>}</div></section>)}
+    <section id="agent-memory"><h2>{t("记忆")}</h2><p className="agent-section-description">{t("配置 Agent 的对话记忆与客户长期记忆，保存后新会话生效。")}</p>
+      <div className="agent-setting-card"><Field label={t("应用预设")}><select aria-label={t("应用预设")} value={preset || ''} disabled={formDisabled} onChange={e => applyMemoryPreset(e.target.value)}><option value="">{t("选择预设模板")}</option>{memoryPresets().map(p => <option key={p.key} value={p.key}>{p.label}</option>)}</select></Field><p className="agent-muted">{t("预设仅填充表单，不会自动保存，可继续调整后点击保存。")}</p></div>
+      <div className="agent-setting-card"><h3 className="agent-memory-group">{t("会话记忆")}</h3><MemoryToggle label={t("滚动摘要")} hint={t("长对话自动压缩为摘要，保持上下文")} checked={summaryEffective} onChange={v => setConfig({ ...config, summary_enabled: v })} disabled={formDisabled || summaryPlatformOff} tooltip={summaryPlatformOff ? t("平台已禁用") : undefined}/></div>
+      <div className="agent-setting-card"><h3 className="agent-memory-group">{t("客户长期记忆")}</h3>
+        <MemoryToggle label={t("启用客户长期记忆")} hint={t("跨会话记住客户的画像、偏好与事件")} checked={memoryEnabled} onChange={v => setConfig({ ...config, memory_enabled: v })} disabled={formDisabled}/>
+        {!memoryEnabled && <p className="agent-muted agent-memory-off">{t("关闭后，此 Agent 不再读取、写入或检索客户记忆。")}</p>}
+        {memoryEnabled && <div className="agent-memory-reveal">
+          <div className="agent-memory-grid">
+            <MemoryToggle label={t("读取记忆")} hint={t("会话中注入该客户的既有记忆")} checked={readEffective} onChange={v => setConfig({ ...config, memory_read_enabled: v })} disabled={formDisabled || injectPlatformOff} tooltip={injectPlatformOff ? t("平台已禁用") : undefined}/>
+            <MemoryToggle label={t("自动写入记忆")} hint={t("对话结束后自动抽取新记忆")} checked={writeEffective} onChange={v => setConfig({ ...config, memory_write: v })} disabled={formDisabled || extractPlatformOff} tooltip={extractPlatformOff ? t("平台已禁用") : undefined}/>
+          </div>
+          {(readEffective || writeEffective) && <div className="agent-memory-types"><span className="agent-memory-caption">{t("记忆类型")}</span><Checkbox.Group aria-label={t("记忆类型")} value={config.memory_types ?? []} disabled={formDisabled} options={MEMORY_TYPES.map(type => ({ value: type, label: memoryTypeLabel(type) }))} onChange={(vals) => setMemoryTypes(vals as MemoryType[])}/></div>}
+          {writeEffective && <div className="agent-memory-types"><span className="agent-memory-caption">{t("写入策略")}</span><Radio.Group value={config.memory_write_mode ?? 'auto'} disabled={formDisabled} onChange={e => setConfig({ ...config, memory_write_mode: e.target.value as "auto" | "review" })}><Radio value="auto">{t("自动写入")}</Radio><Radio value="review">{t("全部人工确认")}</Radio></Radio.Group></div>}
+          <div className="agent-memory-grid">
+            {readEffective && <MemoryToggle label={t("启用 memory_search 检索")} hint={t("允许 Agent 主动检索客户记忆")} checked={searchEffective} onChange={v => setConfig({ ...config, memory_search_enabled: v })} disabled={formDisabled}/>}
+            <MemoryToggle label={t("黑名单客户自动转人工")} hint={t("命中黑名单的客户直接转人工处理")} checked={blacklistEffective} onChange={v => setConfig({ ...config, memory_blacklist_auto_handoff: v })} disabled={formDisabled || blacklistForced} tooltip={blacklistForced ? t("平台已开启自动转人工") : undefined}/>
+          </div>
+          {readEffective && <div className="agent-memory-grid agent-memory-limits">
+            <Field label={t("单次注入上限")}><InputNumber aria-label={t("单次注入上限")} min={1} precision={0} value={config.memory_inject_max_items ?? defaultInjectLimit} disabled={formDisabled} onChange={v => setConfig({ ...config, memory_inject_max_items: v ?? defaultInjectLimit })}/><small className="agent-memory-cap">{t("平台上限 {{v0}}", { v0: defaultInjectLimit })}</small></Field>
+            {searchEffective && <Field label={t("检索返回上限")}><InputNumber aria-label={t("检索返回上限")} min={1} precision={0} value={config.memory_search_limit ?? defaultSearchLimit} disabled={formDisabled} onChange={v => setConfig({ ...config, memory_search_limit: v ?? defaultSearchLimit })}/><small className="agent-memory-cap">{t("平台上限 {{v0}}", { v0: defaultSearchLimit })}</small></Field>}
+          </div>}
+        </div>}
+      </div>
+    </section>
     <section id="agent-runtime"><h2>{t("运行参数")}</h2><div className="agent-setting-card"><Field label={t("回复语言")}><select aria-label={t("回复语言")} value={config.reply_language || 'auto'} onChange={e => setConfig({ ...config, reply_language: e.target.value as AgentConfig['reply_language'] })}><option value="auto">{t("跟随用户语言")}</option><option value="zh-CN">{t("简体中文")}</option><option value="zh-TW">{t("繁體中文")}</option><option value="en">English</option><option value="hi">हिन्दी</option></select></Field><p className="agent-muted">{t("回复语言独立于界面语言，保存并发布后生效。")}</p><Field label={t("最大模型轮次")}><InputNumber aria-label={t("最大模型轮次")} min={1} max={30} precision={0} value={config.max_model_rounds} disabled={!admin || action.busy || selected?.archived} onChange={v => setConfig({ ...config, max_model_rounds: v || 1 })}/></Field><p className="agent-muted">{t("限制单次运行的模型调用轮数，范围 1\u201330。")}</p></div></section>
     </fieldset></form></Splitter.Panel><Splitter.Panel min="25%" className="agent-chat-panel"><AgentChat key={selected?.id || 'new'} agent={selected}/></Splitter.Panel></Splitter></div>
     {view === 'records' && selected && <AgentRecords agentId={selected.id}/>}

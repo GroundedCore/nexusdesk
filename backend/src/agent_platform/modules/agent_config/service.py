@@ -32,6 +32,36 @@ class AgentConfig(BaseModel):
     # memory_enabled gates prompt injection; memory_write gates extraction.
     memory_enabled: bool = True
     memory_write: bool = True
+    # Phase 5 (C-1): ``memory_enabled`` is upgraded to the customer-memory
+    # master switch, and the fields below complete the config surface. The
+    # three legacy keys above keep their names so existing snapshots stay
+    # parseable under ``extra="forbid"``; every new key has a default that is
+    # bit-compatible with the Phase 1-4 behaviour (AC-9).
+    memory_read_enabled: bool = True
+    # One of the three writable/injectable types; ``flag`` intentionally is
+    # never offered (it is a platform-governed marker, C-5).
+    memory_types: list[Literal["profile", "preference", "event"]] = [
+        "profile",
+        "preference",
+        "event",
+    ]
+    memory_search_enabled: bool = True
+    memory_write_mode: Literal["auto", "review"] = "auto"
+    # ``None`` follows the platform setting. Only the lower bound is rejected:
+    # a value above the platform ceiling is accepted and truncated to the
+    # ceiling at runtime by ``resolve_memory_config`` (agent can only tighten,
+    # C-3), matching the AC-7 "save with a warning, take effect truncated"
+    # contract.
+    memory_inject_max_items: int | None = Field(default=None, ge=1)
+    memory_search_limit: int | None = Field(default=None, ge=1)
+    memory_blacklist_auto_handoff: bool = False
+
+    @field_validator("memory_types")
+    @classmethod
+    def memory_types_nonempty(cls, value):
+        if not value:
+            raise ValueError("memory_types must contain at least one type")
+        return value
 
     @model_validator(mode="after")
     def model_binding(self):
@@ -172,14 +202,20 @@ class AgentService:
 
     async def update(self, tenant, actor, aid, body, revision):
         async with self.engine.begin() as c:
+            # The FROM subquery snapshots the pre-update draft so the audit
+            # record can carry the before/after values (FR-6/AC-11); it never
+            # widens the match — the WHERE clause still owns id/tenant/revision.
             row = await one(
                 c,
                 """UPDATE agents SET name=:name,description=:description,draft=CAST(:draft AS jsonb),
                 industry=CASE WHEN :set_industry THEN :industry ELSE industry END,
                 tags=CASE WHEN :set_tags THEN CAST(:tags AS text[]) ELSE tags END,
                 is_example=CASE WHEN :set_example THEN :is_example ELSE is_example END,
-                draft_revision=draft_revision+1,updated_at=now() WHERE id=:id AND tenant_id=:t
-                AND draft_revision=:revision RETURNING *""",
+                draft_revision=draft_revision+1,updated_at=now()
+                FROM (SELECT draft AS old_draft,name AS old_name,description AS old_description
+                      FROM agents WHERE id=:id) old
+                WHERE id=:id AND tenant_id=:t
+                AND draft_revision=:revision RETURNING *, old.old_draft, old.old_name, old.old_description""",
                 id=aid,
                 t=tenant,
                 name=body.name,
@@ -195,7 +231,36 @@ class AgentService:
             )
             if not row:
                 raise DomainError("agent_missing_or_revision_conflict", 409)
-            await audit(c, tenant, actor, "agent.updated", aid, revision=row["draft_revision"])
+            # Pop the snapshot columns so the API response keeps its old shape.
+            old_draft = row.pop("old_draft") or {}
+            old_values = {
+                "name": row.pop("old_name"),
+                "description": row.pop("old_description"),
+            }
+            # JSON-safe dump so UUID values (model_profile_id,
+            # knowledge_base_ids) match the old JSONB draft shape and the
+            # audit details stay json.dumps-able (AC-11).
+            new_draft = body.config.model_dump(mode="json")
+            changes = {
+                key: {"from": old_draft.get(key), "to": new_draft.get(key)}
+                for key in sorted(set(old_draft) | set(new_draft))
+                if old_draft.get(key) != new_draft.get(key)
+            }
+            for field in ("name", "description"):
+                if old_values[field] != getattr(body, field):
+                    changes[field] = {
+                        "from": old_values[field],
+                        "to": getattr(body, field),
+                    }
+            await audit(
+                c,
+                tenant,
+                actor,
+                "agent.updated",
+                aid,
+                revision=row["draft_revision"],
+                changes=changes,
+            )
             return row
 
     async def versions(self, tenant, aid):

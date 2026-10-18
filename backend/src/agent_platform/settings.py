@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # for the write side: when off, no extraction task is dispatched and
     # behaviour degrades exactly to Phase 1.
     memory_extract_enabled: bool = True
+    # Read-side kill switch (Phase 5, D1): when off, no customer memory is
+    # injected, regardless of any agent config. Complements the Phase 2
+    # write-side ``memory_extract_enabled`` above.
+    memory_inject_enabled: bool = True
     # Recent messages feeding one extraction call.
     memory_extract_recent_messages: int = Field(default=20, ge=1, le=100)
     # Per-conversation extraction debounce: at most one task per window.
@@ -97,6 +101,10 @@ class Settings(BaseSettings):
     memory_event_ttl_days: int = Field(default=180, ge=1, le=3650)
     # Upper bound for one memory_search call (the tool default is 5).
     memory_search_limit_max: int = Field(default=10, ge=1, le=50)
+    # Agent-facing default AND ceiling for one memory_search call (Phase 5,
+    # D2): the agent-level memory_search_limit is min-capped at this value.
+    # memory_search_limit_max above remains the store's second-line clamp.
+    memory_search_limit: int = Field(default=5, ge=1, le=50)
     # Search mode: auto probes pgvector plus the embedding profile at startup,
     # false forces keyword (TSVECTOR) mode, true forces vector mode.
     memory_vector_enabled: Literal["auto", "true", "false"] = "auto"

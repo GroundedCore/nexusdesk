@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_platform.modules.agent_config.memory import resolve_agent_memory
 from agent_platform.modules.agent_runtime.schemas import RunRequest
 from agent_platform.modules.conversation.service import add_message
 from agent_platform.modules.memory.events import enqueue_event_task
@@ -85,29 +86,37 @@ class CustomerService:
                     ),
                 )
                 return {"conversation_id": cid, "run": None}
+            # Phase 5 (C-4): the agent snapshot is fetched up front (when the
+            # conversation is agent-bound) so its blacklist-handoff switch can
+            # combine with the platform one; a conversation without an agent
+            # falls back to the platform value. Fetched once and reused for the
+            # run below, so the non-blacklist path gains no extra query.
+            agent_snapshot = None
+            if conv["agent_id"]:
+                agent_snapshot = await self.agents.snapshot(tenant, conv["agent_id"], c)
             # Phase 4 (R13): a blacklisted customer goes straight to a human.
             # The message is recorded and the handoff requested inside this
-            # transaction — no run is submitted. Default-off switch, so
-            # existing behaviour is unchanged unless a deployment opts in.
-            if (
-                self.memory is not None
-                and getattr(self.settings, "memory_blacklist_auto_handoff", False)
-                and conv["customer_id"]
-            ):
-                flags = await self.memory.active_flags(
-                    tenant,
-                    conv["customer_id"],
-                    getattr(self.settings, "memory_flag_inject_max", 3),
+            # transaction — no run is submitted. Enabling is the tightening
+            # direction, so the effective value is platform OR agent.
+            if self.memory is not None and conv["customer_id"]:
+                effective = resolve_agent_memory(
+                    agent_snapshot.get("config") if agent_snapshot else None, self.settings
                 )
-                if any(flag["key"] == "blacklist" for flag in flags):
-                    await add_message(c, cid, "user", message)
-                    handoff = await self.handoffs.request(
-                        tenant, actor, cid, "黑名单客户自动转人工", c
+                if effective.blacklist_auto_handoff:
+                    flags = await self.memory.active_flags(
+                        tenant,
+                        conv["customer_id"],
+                        getattr(self.settings, "memory_flag_inject_max", 3),
                     )
-                    return {"conversation_id": cid, "run": None, "handoff": handoff}
+                    if any(flag["key"] == "blacklist" for flag in flags):
+                        await add_message(c, cid, "user", message)
+                        handoff = await self.handoffs.request(
+                            tenant, actor, cid, "黑名单客户自动转人工", c
+                        )
+                        return {"conversation_id": cid, "run": None, "handoff": handoff}
             snapshot = dict(self.snapshot)
-            if conv["agent_id"]:
-                snapshot["agent"] = await self.agents.snapshot(tenant, conv["agent_id"], c)
+            if agent_snapshot is not None:
+                snapshot["agent"] = agent_snapshot
             elif self.settings.model_backend == "unconfigured":
                 raise DomainError("model_not_configured", 409)
             row = await self.repository.submit(

@@ -64,7 +64,11 @@ COMMITMENT_PREFIX = "commitment:"
 
 # Confidence routing (FR-2): high confidence takes effect immediately, medium
 # waits for human confirmation, low is dropped. Thresholds are settings.
-def route_confidence(confidence, auto_threshold, pending_threshold):
+# Phase 5 (C-4): ``write_mode="review"`` bypasses the thresholds and routes
+# every extraction into the pending queue for human confirmation.
+def route_confidence(confidence, auto_threshold, pending_threshold, write_mode="auto"):
+    if write_mode == "review":
+        return "pending"
     if confidence >= auto_threshold:
         return "active"
     if confidence >= pending_threshold:
@@ -276,9 +280,16 @@ class MemoryService:
                 lim=limit,
             )
 
-    async def injection_items(self, tenant, customer_id, max_items, max_tokens=INJECT_MAX_TOKENS):
-        """Service-layer trimming: count and token budgets applied here (FR-3)."""
-        items = await self.active_items(tenant, customer_id, limit=max_items)
+    async def injection_items(
+        self, tenant, customer_id, max_items, types=("profile", "preference"), max_tokens=INJECT_MAX_TOKENS
+    ):
+        """Service-layer trimming: count and token budgets applied here (FR-3).
+
+        Phase 5 (C-4/C-5): ``types`` narrows the injected profile/preference
+        subset to the agent's allowed types; ``flag`` is never routed through
+        here and is unaffected by the filter.
+        """
+        items = await self.active_items(tenant, customer_id, types=types, limit=max_items)
         return trim_items(items, max_items, max_tokens)
 
     # ------------------------------------------------------------------
@@ -409,7 +420,9 @@ class MemoryService:
             )
         return row
 
-    async def apply_extracted(self, c, tenant, customer_id, ops, source_ref, auto, pending):
+    async def apply_extracted(
+        self, c, tenant, customer_id, ops, source_ref, auto, pending, write_mode="auto", types=None
+    ):
         """Apply validated extraction ops inside the caller's transaction.
 
         - op=add never overwrites: the same-key unique constraint absorbs
@@ -423,7 +436,12 @@ class MemoryService:
           a pending ``:suggested`` item instead of vanishing.
         - Phase 4 (R5): content is PII-masked before it persists; the batch
           hit count rides back in ``counts['pii_masked']`` for the audit.
+        - Phase 5 (C-4/C-5): ``write_mode`` (auto/review) is routed through
+          ``route_confidence``; ``types`` drops any profile/preference item
+          outside the agent's allowed set (counted in ``dropped``). ``flag``
+          can never be written by extraction and is already excluded above.
         """
+        allowed_types = set(types) if types else {"profile", "preference"}
         counts = {"added": 0, "updated": 0, "pending": 0, "dropped": 0, "noop": 0, "pii_masked": 0}
         for op in ops:
             if op["op"] == "noop":
@@ -434,7 +452,10 @@ class MemoryService:
             if op["type"] not in ("profile", "preference"):
                 counts["dropped"] += 1
                 continue
-            status = route_confidence(op["confidence"], auto, pending)
+            if op["type"] not in allowed_types:
+                counts["dropped"] += 1
+                continue
+            status = route_confidence(op["confidence"], auto, pending, write_mode)
             if status is None:
                 counts["dropped"] += 1
                 continue

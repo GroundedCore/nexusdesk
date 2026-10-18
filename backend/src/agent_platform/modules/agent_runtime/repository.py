@@ -304,6 +304,8 @@ class RunRepository:
                         cid,
                         conversation["customer_id"],
                         memory.get("extract_debounce", 300),
+                        memory.get("write_mode", "auto"),
+                        memory.get("types"),
                     )
                     if task_id:
                         await self._event(

@@ -36,7 +36,7 @@
 | P5-UT-05 | 黑名单 OR 语义 | 平台 false + Agent true → 生效 true；平台 true + Agent false → 生效 true | 03 §黑名单 |
 | P5-UT-06 | 总开关联动 | `memory_enabled=false` → read/write/search 全 false（无论子开关） | FR-3 |
 | P5-UT-07 | 检索依赖读 | read 关闭时 search 强制 false | FR-3 |
-| P5-UT-08 | pydantic 校验 | `memory_types=[]` → 422；非法枚举值 → 422；上限越界 → 422 | FR-1 |
+| P5-UT-08 | pydantic 校验 | `memory_types=[]` → 422；非法枚举值 → 422；下限越界（≤0）→ 422；超平台上限值（如 999）**允许保存**、运行时截断（AC-7） | FR-1/AC-7 |
 | P5-UT-09 | 存量快照兼容 | 仅含旧三键的 config JSON 反序列化成功，新字段取默认值，求值结果与旧行为一致 | AC-9 |
 | P5-UT-10 | review 路由 | `route_confidence(write_mode="review")`：置信度 0.95 也返回 pending；human/rule 来源不经此路由 | FR-4 |
 | P5-UT-11 | types 过滤 | types=["profile"] 时 preference/event 条目注入查询被过滤；抽取产出 preference/event 计 dropped | FR-1/AC-5 |
@@ -61,7 +61,7 @@
 | 编号 | 用例 | 预期 | 溯源 |
 |---|---|---|---|
 | P5-API-01 | 配置保存/读取 | 新字段完整往返；operator 可写、viewer 403、未认证 401 | FR-6 |
-| P5-API-02 | 非法配置拒绝 | types 空、枚举非法、上限越界 → 422 且错误信息明确 | FR-1 |
+| P5-API-02 | 非法配置拒绝 | types 空、枚举非法、下限越界（≤0）→ 422 且响应 detail 指明字段名；超平台上限值（999）保存成功、运行时截断（AC-7） | FR-1/AC-7 |
 | P5-API-03 | 平台上限提示接口 | caps 接口返回平台开关与上限值；与 settings 一致 | 03 §前端 |
 | P5-API-04 | 配置审计 | 保存后审计记录含操作人与变更前后值 | AC-11 |
 | P5-API-05 | 平台级能力不外泄 | Agent 配置 GET 响应中无 PII/衰退/淘汰等平台级键 | 原则 4 |
@@ -71,7 +71,7 @@
 | 编号 | 用例 | 预期 | 溯源 |
 |---|---|---|---|
 | P5-FE-01 | 分组渲染 | 10 项配置按 4 组展示，默认值正确 | AC-1 |
-| P5-FE-02 | 总开关联动 | 关闭"客户长期记忆"→ 子项全部置灰 | FR-3 |
+| P5-FE-02 | 总开关联动 | 关闭"客户长期记忆"→ 子项全部隐藏并提示，重新开启后恢复 | FR-3 |
 | P5-FE-03 | 条件显隐 | 写关时 write_mode 隐藏；检索开才显示 search_limit | FR-3 |
 | P5-FE-04 | 预设应用 | 逐套预设：应用后表单值符合预设表，可再修改，保存生效 | AC-8 |
 | P5-FE-05 | 平台禁用提示 | mock 平台关闭注入：对应项禁用 + "平台已禁用"提示 | AC-6 |

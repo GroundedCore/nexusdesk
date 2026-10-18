@@ -48,11 +48,11 @@ class AgentConfig(BaseModel):
     memory_blacklist_auto_handoff: bool = False           # 新增
 ```
 
-校验：`memory_types` 至少一项（pydantic validator，空列表 422）；`memory_inject_max_items ∈ [1,100]`、`memory_search_limit ∈ [1,20]`（前端再做平台上限提示）。
+校验：`memory_types` 至少一项（pydantic validator，空列表 422）；`memory_inject_max_items` / `memory_search_limit` 仅校验下界 `ge=1`——**超平台上限不拒绝保存**，由运行时 `resolve_memory_config` 按平台上限截断（AC-7「保存时提示、生效截断」契约；前端保存前做截断提示）。
 
 ### 生效值求值（运行时统一入口）
 
-在 `agent_runtime/worker.py` 增加纯函数（供注入/抽取/检索三处复用，也供前端预览 API 复用）：
+求值纯函数落在**新增的 `agent_config/memory.py`**（实现定稿位置；供 worker 注入/抽取门控、platform_tools 检索门控、customer_service 黑名单联动四处复用，也供前端预览 API 复用）：
 
 ```python
 @dataclass
@@ -71,14 +71,17 @@ def resolve_memory_config(cfg: AgentConfig, s: Settings) -> EffectiveMemoryConfi
     master = s.memory_extract_enabled or True  # 见 D1：全局门控逐项对齐
     return EffectiveMemoryConfig(
         summary = s.summary_enabled and cfg.summary_enabled,
-        read    = cfg.memory_enabled and cfg.memory_read_enabled,
+        read    = s.memory_inject_enabled and cfg.memory_enabled and cfg.memory_read_enabled,
         write   = s.memory_extract_enabled and cfg.memory_enabled and cfg.memory_write,
         types   = frozenset(cfg.memory_types),
-        search  = cfg.memory_enabled and cfg.memory_read_enabled and cfg.memory_search_enabled,
+        # 检索属读侧能力，同样受平台读侧总开关门控（D1，AC-6「平台关闭 => 运行时全关」）
+        search  = s.memory_inject_enabled and cfg.memory_enabled and cfg.memory_read_enabled
+                  and cfg.memory_search_enabled,
         write_mode = cfg.memory_write_mode,
         inject_max_items = min(cfg.memory_inject_max_items or s.memory_inject_max_items,
                                s.memory_inject_max_items),          # 只能收紧
-        search_limit     = min(cfg.memory_search_limit or 5, 5),    # 平台上限见 D2
+        search_limit     = min(cfg.memory_search_limit or s.memory_search_limit,
+                               s.memory_search_limit),              # 平台上限见 D2
         blacklist_auto_handoff = s.memory_blacklist_auto_handoff
                                or cfg.memory_blacklist_auto_handoff,  # 收紧方向为 true，取 OR
     )
@@ -93,6 +96,7 @@ def resolve_memory_config(cfg: AgentConfig, s: Settings) -> EffectiveMemoryConfi
 ### `memory_types` 与 `review` 的语义细节
 
 - **注入过滤**：`_customer_memory` 查 `MemoryService.active_items` 时按 types 过滤（`flag` 不受过滤——治理标记永远注入，Phase 4 语义不变）；
+- **事件条数上限（FR-1）**：`memory_inject_max_items` 同时覆盖画像/偏好/事件三类条目，事件段生效条数 = `min(effective.inject_max_items, settings.memory_event_inject_max)`——默认 Agent（跟随平台 inject 上限 20）下取 5，与 Phase 3 行为逐位一致；Agent 调低注入上限后事件段同步收紧（只能收紧方向）；
 - **抽取过滤**：`apply_extracted` 入口按 types 丢弃不允许的类型，计入 dropped（审计 details 沿用既有字段）；
 - **review 模式**：`write_mode` 在 `enqueue_extract_task` 时从 run config 快照写入任务 payload（任务异步执行时 Agent 配置可能已变更，必须快照）；`route_confidence` 增加 `write_mode` 参数，`review` 时任何置信度一律 `pending`。人工/规则来源（`source_type in ('human','rule')`）不受影响。
 
