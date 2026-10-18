@@ -11,7 +11,6 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-
 from test_memory_customers_postgres import (
     conversation_detail,
     extract_tasks,
@@ -241,7 +240,7 @@ async def test_p5_it_05_inject_cap_bounds_prompt_items(platform):
 
 
 async def test_types_filter_drops_disallowed_extracted_types(platform):
-    client, services, settings = platform
+    _client, services, settings = platform
     engine, tenant = services.repository.engine, settings.tenant_id
     memory = services.platform.memory
     async with engine.begin() as c:
@@ -266,7 +265,7 @@ async def test_types_filter_drops_disallowed_extracted_types(platform):
 async def test_p5_it_06_search_limit_clamps_and_switch_unregisters(platform):
     """C-4: the effective search limit tightens the model-supplied one; with
     search off the tool is not registered and a direct call is refused."""
-    _client, services, settings = platform
+    _client, _services, settings = platform
     store = _SearchStore()
     # search_limit=2 clamps the model-supplied limit=10 down to 2.
     tools = tools_for(settings, store, {"memory_search_limit": 2})
@@ -387,7 +386,7 @@ async def test_p5_it_10_blacklist_handoff_sinks_to_agent_switch(platform):
     blacklisted customer's message is handed straight to a human (OR semantics
     applied to the conversation's agent snapshot)."""
     client, services, settings = platform
-    engine, tenant = services.repository.engine, settings.tenant_id
+    tenant = settings.tenant_id
     agent, body = await create_agent(client)
     body["config"]["memory_blacklist_auto_handoff"] = True
     await set_config(client, agent, body, 1, 2)
