@@ -3,6 +3,10 @@ ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG NGINX_IMAGE=nginx:1.28-alpine
 FROM ${NODE_IMAGE} AS frontend-build
 WORKDIR /build
+# Only the quickstart image opts in (see deploy/quickstart/compose.yaml and the
+# CD workflow); every other build leaves the login form empty.
+ARG VITE_PREFILL_LOGIN=false
+ENV VITE_PREFILL_LOGIN=${VITE_PREFILL_LOGIN}
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./

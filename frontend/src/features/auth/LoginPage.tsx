@@ -21,11 +21,13 @@ export function loginError(code:string) {
 // deployment credentials do not need retyping (admin / nexusdesk, which force a
 // password change on first login and are already documented in deploy/README.md).
 //
-// Guarded by import.meta.env.DEV, which Vite replaces with `false` in a
-// production build, so the pre-fill cannot happen outside `npm run dev`. Anyone
-// who changes the default credentials can override both values through
-// frontend/.env.development (see .env.example) without editing this file.
-const devCredentials = import.meta.env.DEV
+// `import.meta.env.DEV` covers `npm run dev`, and Vite replaces it with `false`
+// in a production build. The quickstart image opts back in with the build arg
+// VITE_PREFILL_LOGIN=true: its account is public by design (see deploy/README.md),
+// and pre-filling it removes a pointless typing step for demo users. Real
+// deployments never set that flag, so their bundles stay credential-free.
+const prefillLogin = import.meta.env.DEV || import.meta.env.VITE_PREFILL_LOGIN === 'true';
+const devCredentials = prefillLogin
   ? {
       username:String(import.meta.env.VITE_DEV_LOGIN_USER||'admin'),
       password:String(import.meta.env.VITE_DEV_LOGIN_PASSWORD||'nexusdesk'),

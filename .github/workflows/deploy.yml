@@ -67,6 +67,9 @@ jobs:
         with:
           context: .
           target: quickstart
+          # The quickstart account is public by design, so pre-fill the form.
+          build-args: |
+            VITE_PREFILL_LOGIN=true
           push: true
           tags: |
             ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:${{ env.IMAGE_TAG }}
