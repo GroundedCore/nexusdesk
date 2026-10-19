@@ -22,8 +22,12 @@ def service(platform):
     return LocalAdmin(runtime.platform.engine, settings.tenant_id)
 
 
-async def login(client, password=PASSWORD, username="rescue.admin"):
-    return await client.post(ROOT + "/login", json={"username": username, "password": password})
+async def login(client, password=PASSWORD, username="rescue.admin", headers=None):
+    return await client.post(
+        ROOT + "/login",
+        json={"username": username, "password": password},
+        headers=headers,
+    )
 
 
 async def test_login_logout_and_no_secret_leak(platform):
@@ -33,7 +37,8 @@ async def test_login_logout_and_no_secret_leak(platform):
     unknown = await login(client, "incorrect-password", "missing")
     assert wrong.status_code == unknown.status_code == 401
     assert wrong.json() == unknown.json()
-    response = await login(client)
+    forwarded_ip = "203.0.113.30"
+    response = await login(client, headers={"X-Real-IP": forwarded_ip})
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     assert PASSWORD not in response.text and "password_hash" not in response.text
@@ -42,6 +47,13 @@ async def test_login_logout_and_no_secret_leak(platform):
     me = await client.get("/api/v1/me", headers=headers)
     assert me.status_code == 200 and me.json()["role"] == "admin"
     assert me.json()["actor"] == "enterprise:" + admin["id"]
+    async with runtime.platform.engine.connect() as c:
+        session = await one(
+            c,
+            "SELECT ip FROM local_admin_sessions WHERE tenant_id=:t",
+            t=settings.tenant_id,
+        )
+    assert session["ip"] == forwarded_ip
     assert (await client.post(ROOT + "/logout", headers=headers)).status_code == 204
     assert (await client.get("/api/v1/me", headers=headers)).status_code == 401
     async with runtime.platform.engine.connect() as c:
@@ -51,6 +63,14 @@ async def test_login_logout_and_no_secret_leak(platform):
             t=settings.tenant_id,
         )
         assert row["password_hash"] != PASSWORD
+        login_audit = await one(
+            c,
+            """SELECT ip FROM audit_records
+            WHERE tenant_id=:t AND action='local_admin.login'
+            ORDER BY created_at DESC LIMIT 1""",
+            t=settings.tenant_id,
+        )
+        assert login_audit["ip"] == forwarded_ip
         audit = await one(
             c,
             "SELECT string_agg(details::text,'') AS data FROM audit_records WHERE tenant_id=:t",

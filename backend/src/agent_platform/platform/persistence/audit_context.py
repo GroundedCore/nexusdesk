@@ -1,7 +1,21 @@
 from contextvars import ContextVar
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 
 audit_ip: ContextVar[str | None] = ContextVar("audit_ip", default=None)
+
+TRUSTED_PROXY_NETWORKS = tuple(
+    ip_network(value)
+    for value in (
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10",
+    )
+)
 
 
 def _normalized_ip(value: str | None) -> str | None:
@@ -21,7 +35,9 @@ def _trusted_proxy(host: str | None) -> bool:
     if not candidate:
         return False
     parsed = ip_address(candidate)
-    return parsed.is_private or parsed.is_loopback
+    if parsed.version == 6 and parsed.ipv4_mapped:
+        parsed = parsed.ipv4_mapped
+    return any(parsed in network for network in TRUSTED_PROXY_NETWORKS)
 
 
 def client_ip(scope) -> str | None:
@@ -37,12 +53,13 @@ def client_ip(scope) -> str | None:
         if name in {"x-forwarded-for", "x-real-ip"}:
             headers[name] = value.decode("latin-1")
 
+    # Our Nginx entry points overwrite X-Real-IP with $remote_addr, so it is
+    # more trustworthy than a client-appendable X-Forwarded-For chain.
+    real_ip = _normalized_ip(headers.get("x-real-ip"))
+    if real_ip:
+        return real_ip
     forwarded = headers.get("x-forwarded-for", "").split(",", 1)[0]
-    return (
-        _normalized_ip(forwarded)
-        or _normalized_ip(headers.get("x-real-ip"))
-        or peer
-    )
+    return _normalized_ip(forwarded) or peer
 
 
 class AuditContextMiddleware:
