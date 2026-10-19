@@ -79,25 +79,54 @@ class ObservabilityService:
             )
             return result
 
-    async def runs(self, tenant):
+    async def runs(self, tenant, page=1, page_size=10):
         async with self.engine.connect() as c:
-            return await many(
+            total = await one(
+                c, "SELECT count(*) AS total FROM runtime_runs WHERE tenant_id=:t", t=tenant
+            )
+            items = await many(
                 c,
                 """SELECT r.id,r.conversation_id,r.status,r.error_code,r.created_at,r.started_at,
                 r.finished_at,""" + TTFC_EXPRESSION + """ AS ttfc_ms
                 FROM runtime_runs r LEFT JOIN LATERAL (""" + ANSWER_ROUND + """) a ON true
-                WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT 100""",
+                WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT :lim OFFSET :off""",
                 t=tenant,
+                lim=page_size,
+                off=(page - 1) * page_size,
             )
+            return {"items": items, "total": total["total"], "page": page, "page_size": page_size}
 
-    async def audit(self, tenant, after=0):
+    async def audit(self, tenant, page=1, page_size=10, action_type=None):
         async with self.engine.connect() as c:
-            return await many(
-                c,
-                "SELECT * FROM audit_records WHERE tenant_id=:t AND id>:after ORDER BY id DESC LIMIT 100",
-                t=tenant,
-                after=after,
+            where = "tenant_id=:t"
+            params = {"t": tenant}
+            if action_type:
+                where += " AND action=:action_type"
+                params["action_type"] = action_type
+            total = await one(
+                c, f"SELECT count(*) AS total FROM audit_records WHERE {where}", **params
             )
+            items = await many(
+                c,
+                f"""SELECT * FROM audit_records WHERE {where}
+                ORDER BY id DESC LIMIT :lim OFFSET :off""",
+                **params,
+                lim=page_size,
+                off=(page - 1) * page_size,
+            )
+            action_types = await many(
+                c,
+                """SELECT action, count(*)::int AS count FROM audit_records
+                WHERE tenant_id=:t GROUP BY action ORDER BY action""",
+                t=tenant,
+            )
+            return {
+                "items": items,
+                "total": total["total"],
+                "page": page,
+                "page_size": page_size,
+                "action_types": action_types,
+            }
 
     async def gateways(self, tenant):
         async with self.engine.connect() as c:

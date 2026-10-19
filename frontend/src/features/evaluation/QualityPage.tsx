@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Pagination } from 'antd';
 import { errorText, t } from '../../i18n/index';
 import type {
     QualityAgentRow,
@@ -22,6 +23,8 @@ const FILTERS = [
 const percent = (value: number | null | undefined) =>
     value == null ? '—' : `${Math.round(value * 100)}%`;
 
+const PAGE_SIZE = 10;
+
 function count(value: number, kind = '') {
     return <span className={`quality-count ${value === 0 ? 'zero' : kind}`}>{value}</span>;
 }
@@ -43,6 +46,24 @@ function AgentCell({ name, version }: { name: string; version: number | null }) 
     return <div className="quality-agent">
         <strong>{name}</strong>
         <span>{version == null ? t("未评测") : `v${version}`}</span>
+    </div>;
+}
+
+function BoardPagination({ current, total, onChange }: {
+    current: number;
+    total: number;
+    onChange: (page: number) => void;
+}) {
+    return <div className="quality-pagination">
+        <Pagination
+            current={current}
+            pageSize={PAGE_SIZE}
+            total={total}
+            showSizeChanger={false}
+            hideOnSinglePage
+            showTotal={value => t("共 {{v0}} 条", { v0: value })}
+            onChange={onChange}
+        />
     </div>;
 }
 
@@ -122,9 +143,12 @@ function RegressionTable({ items, onOpen }: { items: QualityRegressionItem[]; on
 
 export function QualityPage({ onNavigate }: { onNavigate: (path: string) => void }) {
     const [status, setStatus] = useState<string>('needs_review');
+    const [overviewPage, setOverviewPage] = useState(1);
+    const [reviewPage, setReviewPage] = useState(1);
+    const [regressionPage, setRegressionPage] = useState(1);
     const overview = useResource<QualityOverview>('/evaluation/overview');
-    const reviews = useResource<QualityReviews>(`/evaluation/reviews?status=${status}&page_size=50`);
-    const regressions = useResource<QualityRegressions>('/evaluation/regressions');
+    const reviews = useResource<QualityReviews>(`/evaluation/reviews?status=${status}&page=${reviewPage}&page_size=${PAGE_SIZE}`);
+    const regressions = useResource<QualityRegressions>(`/evaluation/regressions?page=${regressionPage}&page_size=${PAGE_SIZE}`);
     const summary = overview.data?.summary;
     const openAgent = (agentId: string) => onNavigate(`/agents/${agentId}/evaluation`);
     const cards: [string, string, string][] = [
@@ -136,6 +160,7 @@ export function QualityPage({ onNavigate }: { onNavigate: (path: string) => void
         [t("回归"), regressions.data ? String(regressions.data.total) : '—', t("较上次由通过转为未通过")],
     ];
     const counts = reviews.data?.counts || {};
+    const overviewRows = (overview.data?.agents || []).slice((overviewPage - 1) * PAGE_SIZE, overviewPage * PAGE_SIZE);
 
     return <div className="quality-board">
         <Alert error={overview.error || reviews.error || regressions.error}/>
@@ -148,7 +173,10 @@ export function QualityPage({ onNavigate }: { onNavigate: (path: string) => void
         </div>
         <Panel title={t("质量概览")}>
             {overview.data && overview.data.agents.length
-                ? <OverviewTable rows={overview.data.agents} onOpen={openAgent}/>
+                ? <>
+                    <OverviewTable rows={overviewRows} onOpen={openAgent}/>
+                    <BoardPagination current={overviewPage} total={overview.data.agents.length} onChange={setOverviewPage}/>
+                </>
                 : <Empty>{t("还没有 Agent 配置评测用例，可在 Agent 的评测页添加。")}</Empty>}
         </Panel>
         <Panel title={t("待复核队列")} action={<div className="quality-filters">
@@ -156,16 +184,22 @@ export function QualityPage({ onNavigate }: { onNavigate: (path: string) => void
                 key={key}
                 className={status === key ? 'selected' : ''}
                 aria-pressed={status === key}
-                onClick={() => setStatus(key)}>{t(label)}<small>{counts[key] ?? 0}</small></button>)}
+                onClick={() => { setStatus(key); setReviewPage(1); }}>{t(label)}<small>{counts[key] ?? 0}</small></button>)}
         </div>}>
             {reviews.data && reviews.data.items.length
-                ? <ReviewTable items={reviews.data.items} onOpen={openAgent}/>
+                ? <>
+                    <ReviewTable items={reviews.data.items} onOpen={openAgent}/>
+                    <BoardPagination current={reviewPage} total={reviews.data.total} onChange={setReviewPage}/>
+                </>
                 : <Empty>{status === 'needs_review' ? t("所有待复核项都已处理") : t("暂无数据")}</Empty>}
         </Panel>
         <Panel title={t("回归用例")}>
             <p className="hint">{t("仅比较每个 Agent 最近两次评测：上次通过、这次没通过的用例。")}</p>
             {regressions.data && regressions.data.items.length
-                ? <RegressionTable items={regressions.data.items} onOpen={openAgent}/>
+                ? <>
+                    <RegressionTable items={regressions.data.items} onOpen={openAgent}/>
+                    <BoardPagination current={regressionPage} total={regressions.data.total} onChange={setRegressionPage}/>
+                </>
                 : <Empty>{t("最近两次评测之间没有出现回退。")}</Empty>}
         </Panel>
     </div>;

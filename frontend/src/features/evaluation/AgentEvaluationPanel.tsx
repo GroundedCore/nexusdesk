@@ -454,7 +454,7 @@ export function AgentEvaluationPanel({ agentId, publishedVersion, disabled = fal
                 size="small"
                 dataSource={compareRows}
                 columns={compareColumns}
-                pagination={false}
+                pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }}
                 scroll={{ x: 560 }}
                 locale={{ emptyText: <Empty>{t("暂无记录")}</Empty> }}
                 rowClassName={row => {
@@ -511,7 +511,7 @@ function ReportCasesTable({ report }: { report: EvaluationReport }) {
             size="small"
             dataSource={rows}
             columns={columns}
-            pagination={false}
+            pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }}
             scroll={{ x: 700 }}
             expandable={{
                 rowExpandable: row => Boolean(row.judge || row.judge_error || row.similarity),

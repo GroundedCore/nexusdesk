@@ -311,7 +311,7 @@ test('observability page renders the memory governance section', async ({ page }
     if (path.endsWith('/me')) return route.fulfill({ json: { role: 'viewer', tenant: '测试企业' } });
     if (path.endsWith('/observability/memory')) return route.fulfill({ json: memory });
     if (path.endsWith('/observability/summary')) return route.fulfill({ json: {} });
-    if (path.endsWith('/observability/runs')) return route.fulfill({ json: [] });
+    if (path.endsWith('/observability/runs')) return route.fulfill({ json: { items: [], total: 0, page: 1, page_size: 10 } });
     if (path.endsWith('/observability/gateways')) return route.fulfill({ json: { models: [], tools: [], known_usage: [] } });
     if (path.endsWith('/modules')) return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });

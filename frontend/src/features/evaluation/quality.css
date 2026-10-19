@@ -5,17 +5,18 @@
 .quality-metric-sub { font-size: 11px; color: var(--ui-muted); margin-top: 6px; }
 
 .quality-filters { display: flex; gap: 8px; flex-wrap: wrap; }
-.quality-filters button {
+.console-layout .module-evaluation .quality-filters button:not(.ant-btn) {
   background: transparent;
   color: #5c6273;
   border: 1px solid var(--ui-line);
+  min-height: 28px;
   padding: 5px 14px;
   font-size: 12px;
   font-weight: 500;
   border-radius: 20px;
 }
-.quality-filters button:hover { background: #f3f4f9; }
-.quality-filters button.selected {
+.console-layout .module-evaluation .quality-filters button:not(.ant-btn):hover { background: #f3f4f9; }
+.console-layout .module-evaluation .quality-filters button.selected {
   background: #eef0ff;
   border-color: #c9cdff;
   color: #4d55c8;
@@ -43,6 +44,8 @@
 .quality-reason.mono { font-family: "Cascadia Code", Consolas, monospace; color: #a4624e; }
 .quality-route { font-size: 12px; color: var(--ui-muted); }
 .quality-route span { color: #b04a4a; }
+.quality-pagination { display: flex; justify-content: flex-end; }
+.quality-pagination .ant-pagination { margin-top: 16px; }
 
 @media (max-width: 640px) {
   .quality-board { gap: 16px; }

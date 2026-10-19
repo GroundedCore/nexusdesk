@@ -698,13 +698,26 @@ async def unified_trace(rid: UUID, request: Request, user: Reader):
 
 
 @router.get("/observability/runs")
-async def runs(request: Request, user: Reader):
-    return await services(request).observability.runs(user.tenant)
+async def runs(
+    request: Request,
+    user: Reader,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+):
+    return await services(request).observability.runs(user.tenant, page, page_size)
 
 
 @router.get("/audit")
-async def audit(request: Request, user: Admin):
-    return await services(request).observability.audit(user.tenant)
+async def audit(
+    request: Request,
+    user: Admin,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    action_type: Annotated[str | None, Query(max_length=160)] = None,
+):
+    return await services(request).observability.audit(
+        user.tenant, page, page_size, action_type
+    )
 
 
 @router.get("/agents/{aid}/evaluation-cases")
@@ -822,9 +835,10 @@ async def evaluation_reviews(
 async def evaluation_regressions(
     request: Request,
     user: Reader,
-    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
-    return await services(request).evaluation.regressions(user.tenant, limit)
+    return await services(request).evaluation.regressions(user.tenant, page, page_size)
 
 
 @router.get("/policy")

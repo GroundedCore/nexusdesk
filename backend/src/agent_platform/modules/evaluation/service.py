@@ -511,9 +511,10 @@ class EvaluationService:
             "counts": counts,
         }
 
-    async def regressions(self, tenant, limit=50):
+    async def regressions(self, tenant, page=1, page_size=20):
         """Cases that passed in the previous report and no longer pass."""
-        limit = max(1, min(int(limit), 200))
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
         async with self.engine.connect() as c:
             buckets = await self._latest_reports(c, tenant, 500)
         items = []
@@ -540,7 +541,13 @@ class EvaluationService:
                     }
                 )
         items.sort(key=lambda row: (-row["created_at"].timestamp(), row["agent_name"]))
-        return {"items": items[:limit], "total": len(items), "limit": limit}
+        start = (page - 1) * page_size
+        return {
+            "items": items[start : start + page_size],
+            "total": len(items),
+            "page": page,
+            "page_size": page_size,
+        }
 
     async def _environment(self, tenant, snapshot, c):
         config = snapshot.get("config") or {}
