@@ -508,14 +508,35 @@ async def test_evaluation_never_executes_live_business_tools(platform):
 async def test_metrics_and_audit_reflect_real_operations(platform):
     client, services, settings = platform
     conv = await conversation(client)
-    await client.post(f"/api/v1/conversations/{conv['id']}/messages", json={"content": "你好"})
+    await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages",
+        json={"content": "你好"},
+        headers={"X-Forwarded-For": "203.0.113.77, 127.0.0.1"},
+    )
     await execute_next(services, settings)
     metrics = (await client.get("/api/v1/observability/summary")).json()
     assert metrics["total"] == 1 and metrics["completed"] == 1
     assert metrics["p95_seconds"] is not None
+    runs = (await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})).json()
+    assert len(runs["items"]) == 1
+    assert runs["total"] == 1 and runs["page"] == 1 and runs["page_size"] == 1
     audit = await client.get("/api/v1/audit")
-    assert any(r["action"] == "run.submitted" for r in audit.json())
+    audit_body = audit.json()
+    assert any(r["action"] == "run.submitted" for r in audit_body["items"])
+    assert next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"] == "203.0.113.77"
+    assert audit_body["total"] >= len(audit_body["items"])
+    assert audit_body["page"] == 1 and audit_body["page_size"] == 10
     assert "platform-admin" not in audit.text
+    submitted = (
+        await client.get("/api/v1/audit", params={"action_type": "run.submitted"})
+    ).json()
+    assert submitted["total"] >= 1
+    assert all(row["action"] == "run.submitted" for row in submitted["items"])
+    assert any(row["action"] == "run.submitted" for row in submitted["action_types"])
+    missing = (
+        await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})
+    ).json()
+    assert missing["total"] == 0 and missing["items"] == []
 
 
 async def test_recent_messages_and_bounded_human_context(platform):
@@ -594,8 +615,11 @@ async def test_evaluation_quality_board_reviews_and_regressions(platform):
     assert [item["name"] for item in failed["items"]] == ["回归用例"]
     assert failed["items"][0]["agent_id"] == aid
 
-    regressions = (await client.get("/api/v1/evaluation/regressions")).json()
+    regressions = (
+        await client.get("/api/v1/evaluation/regressions", params={"page": 1, "page_size": 10})
+    ).json()
     assert regressions["total"] == 1
+    assert regressions["page"] == 1 and regressions["page_size"] == 10
     assert regressions["items"][0]["case_id"] == cid
     assert regressions["items"][0]["previous_status"] == "passed"
 

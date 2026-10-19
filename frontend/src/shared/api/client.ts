@@ -112,8 +112,8 @@ export interface QualityRegressionItem {
     previous_agent_version: number; created_at: string; case_id: string | null; name: string | null;
     status: string; previous_status: string; error: string | null; judge_error: string | null;
 }
-export interface QualityRegressions { items: QualityRegressionItem[]; total: number; limit: number }
-export interface Audit { id: number; actor: string; action: string; resource: string; created_at: string }
+export interface QualityRegressions { items: QualityRegressionItem[]; total: number; page: number; page_size: number }
+export interface Audit { id: number; actor: string; action: string; resource: string; ip: string | null; created_at: string }
 
 // Phase 2 · customer entity + profile/preference memory (console API contract §5).
 export interface MemoryCustomer { id: string; external_keys: string[]; item_count: number; last_active_at: string | null; created_at: string }

@@ -24,6 +24,7 @@ from agent_platform.modules.open_platform.routes import management as open_manag
 from agent_platform.modules.open_platform.routes import public as open_public
 from agent_platform.modules.tool_gateway.routes import router as tool_workspace_router
 from agent_platform.platform.identity.local_routes import router as local_auth_router
+from agent_platform.platform.persistence.audit_context import AuditContextMiddleware
 from agent_platform.platform.persistence.store import DomainError
 from agent_platform.settings import Settings
 
@@ -81,6 +82,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.add_middleware(AuditContextMiddleware)
 
     @app.middleware("http")
     async def private_identity_responses(request: Request, call_next):

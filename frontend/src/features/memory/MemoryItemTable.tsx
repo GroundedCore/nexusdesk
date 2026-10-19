@@ -38,7 +38,12 @@ export function MemoryItemTable({ items, operator, busy, emptyText, onEdit, onDe
     <Table<MemoryItem>
       rowKey="id"
       dataSource={items}
-      pagination={false}
+      pagination={{
+        pageSize: 10,
+        hideOnSinglePage: true,
+        showSizeChanger: false,
+        showTotal: total => t('共 {{v0}} 条', { v0: total }),
+      }}
       scroll={{ x: 1080 }}
       locale={{ emptyText: emptyText }}
       columns={[
