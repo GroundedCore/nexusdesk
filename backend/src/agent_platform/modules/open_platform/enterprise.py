@@ -233,7 +233,17 @@ class Enterprise:
             )
         return row
 
-    async def issue(self, c, user, app_id=None, provider=None, key_id=None, embed_revision=None):
+    async def issue(
+        self,
+        c,
+        user,
+        app_id=None,
+        provider=None,
+        key_id=None,
+        embed_revision=None,
+        ip=None,
+        user_agent=None,
+    ):
         if not user["enabled"]:
             raise DomainError("enterprise_user_disabled", 403)
         if not app_id and not user["role"]:
@@ -242,8 +252,10 @@ class Enterprise:
         expiry = datetime.now(UTC) + timedelta(minutes=15 if app_id else 60)
         await execute(
             c,
-            """INSERT INTO enterprise_sessions(id,tenant_id,user_id,app_id,provider_id,provider_revision,key_id,embed_revision,token_hash,expires_at)
-            VALUES(:id,:t,:u,:a,:p,:rev,:key,:embed,:hash,:expiry)""",
+            """INSERT INTO enterprise_sessions(
+            id,tenant_id,user_id,app_id,provider_id,provider_revision,key_id,
+            embed_revision,token_hash,expires_at,ip,user_agent)
+            VALUES(:id,:t,:u,:a,:p,:rev,:key,:embed,:hash,:expiry,:ip,:agent)""",
             id=uuid4(),
             t=self.tenant,
             u=user["id"],
@@ -254,6 +266,13 @@ class Enterprise:
             embed=embed_revision,
             hash=digest(token),
             expiry=expiry,
+            ip=ip,
+            agent=(user_agent or "")[:500] or None,
+        )
+        await execute(
+            c,
+            "UPDATE enterprise_users SET last_login_at=now() WHERE id=:u",
+            u=user["id"],
         )
         return {
             "access_token": token,

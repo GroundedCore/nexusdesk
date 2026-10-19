@@ -28,12 +28,23 @@ async def platform():
         embedded_channel_worker=True,
         model_backend="demo",
         tools_file=None,
+        require_password_change=True,
         api_token=SecretStr("platform-admin"),
         operator_api_token=SecretStr("platform-operator"),
         viewer_api_token=SecretStr("platform-viewer"),
         # Keep tests hermetic: a local .env may narrow the outbound allowlist,
         # which would break tests that rely on the built-in defaults.
+        tool_allowed_hosts=Settings.model_fields["tool_allowed_hosts"].default,
         model_gateway_allowed_hosts=Settings.model_fields["model_gateway_allowed_hosts"].default,
+        # Object storage and vector indexes are optional integrations. Unit and
+        # API tests must not depend on a developer's local MinIO/Milvus setup.
+        milvus_url=None,
+        milvus_token=None,
+        knowledge_parser_url=None,
+        knowledge_s3_endpoint=None,
+        knowledge_s3_bucket=None,
+        knowledge_s3_access_key=None,
+        knowledge_s3_secret_key=None,
     )
     app = create_app(settings)
     async with app.router.lifespan_context(app):  # noqa: SIM117

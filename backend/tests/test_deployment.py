@@ -153,8 +153,12 @@ async def test_existing_encrypted_credentials_require_original_key(tmp_path, mon
 def test_deployment_topologies_and_no_secret_copy():
     import yaml
 
-    quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text())
-    prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text())
+    quick = yaml.safe_load(
+        (ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8")
+    )
+    prod = yaml.safe_load(
+        (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
+    )
     assert set(quick["services"]) == {"postgres", "app"}
     # Quickstart must default to loopback-only; NEXUSDESK_BIND may widen it.
     assert quick["services"]["app"]["ports"][0].startswith("${NEXUSDESK_BIND:-127.0.0.1}:")
@@ -185,26 +189,38 @@ def test_deployment_topologies_and_no_secret_copy():
         "-m",
         "agent_platform.apps.worker.memory",
     ]
-    assert "__LOCAL_TOKEN__" not in (ROOT / "deploy/production/nginx.conf").read_text()
+    assert (
+        "__LOCAL_TOKEN__"
+        not in (ROOT / "deploy/production/nginx.conf").read_text(encoding="utf-8")
+    )
     # Quickstart loads the industry case set; production stays clean unless opted in.
     assert quick["services"]["app"]["environment"]["AGENT_SEED_INDUSTRIES"] == "true"
     for name in ("api", "runtime-worker", "channel-worker", "knowledge-worker", "memory-worker"):
         assert "AGENT_SEED_INDUSTRIES" not in prod["services"][name]["environment"]
-    assert "AGENT_SEED_INDUSTRIES=false" in (ROOT / "deploy/production/.env.example").read_text()
-    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()
+    assert (
+        "AGENT_SEED_INDUSTRIES=false"
+        in (ROOT / "deploy/production/.env.example").read_text(encoding="utf-8")
+    )
+    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(
+        encoding="utf-8"
+    )
     assert "proxy_set_header Authorization $http_authorization;" in quick_nginx
     # Neither entry point injects an identity: an unauthenticated request must
     # reach the API unchanged and be rejected there.
     assert "__LOCAL_TOKEN__" not in quick_nginx
     assert "nexusdesk_auth" not in quick_nginx
-    assert "**/*.key" in (ROOT / ".dockerignore").read_text()
+    assert "**/*.key" in (ROOT / ".dockerignore").read_text(encoding="utf-8")
 
 
 def test_quickstart_serves_https_and_production_leaves_tls_outside():
     import yaml
 
-    quick = yaml.safe_load((ROOT / "deploy/quickstart/compose.yaml").read_text())
-    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text()
+    quick = yaml.safe_load(
+        (ROOT / "deploy/quickstart/compose.yaml").read_text(encoding="utf-8")
+    )
+    quick_nginx = (ROOT / "deploy/quickstart/nginx.conf.template").read_text(
+        encoding="utf-8"
+    )
 
     # Quickstart terminates TLS itself so a LAN address is still a secure context.
     assert "listen 8080 ssl;" in quick_nginx
@@ -216,18 +232,26 @@ def test_quickstart_serves_https_and_production_leaves_tls_outside():
     assert "AGENT_TLS_HOSTS" in quick["services"]["app"]["environment"]
 
     # Production must stay untouched: TLS belongs to the host or an ingress proxy.
-    production_nginx = (ROOT / "deploy/production/nginx.conf").read_text()
+    production_nginx = (ROOT / "deploy/production/nginx.conf").read_text(encoding="utf-8")
     assert "ssl" not in production_nginx
-    prod = yaml.safe_load((ROOT / "deploy/production/compose.yaml").read_text())
+    prod = yaml.safe_load(
+        (ROOT / "deploy/production/compose.yaml").read_text(encoding="utf-8")
+    )
     for name in ("api", "web"):
         assert "AGENT_TLS_HOSTS" not in prod["services"][name].get("environment", {})
 
-    assert "https://localhost:${NEXUSDESK_PORT:-8080}" in (ROOT / "nexusdesk").read_text()
-    assert "https://localhost:$port" in (ROOT / "nexusdesk.ps1").read_text()
+    assert (
+        "https://localhost:${NEXUSDESK_PORT:-8080}"
+        in (ROOT / "nexusdesk").read_text(encoding="utf-8")
+    )
+    assert (
+        "https://localhost:$port"
+        in (ROOT / "nexusdesk.ps1").read_text(encoding="utf-8")
+    )
 
 
 def test_healthcheck_matches_the_quickstart_scheme():
-    healthcheck = (ROOT / "deploy/container/healthcheck.py").read_text()
+    healthcheck = (ROOT / "deploy/container/healthcheck.py").read_text(encoding="utf-8")
     assert 'url = "https://127.0.0.1:8080/api/v1/ready"' in healthcheck
     # The generated certificate is self-signed, so the probe cannot verify it.
     assert "verify_mode = ssl.CERT_NONE" in healthcheck
@@ -254,7 +278,9 @@ def test_tls_hosts_accepts_a_comma_separated_list(monkeypatch):
 def test_deploy_workflow_forwards_the_tls_host_list():
     import yaml
 
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    )
     deploy = workflow["jobs"]["deploy"]
     # The server is reached by its public address, so the certificate has to cover
     # it. Without this the SAN stays loopback-only and a browser reports a name
@@ -270,7 +296,9 @@ def test_deploy_workflow_forwards_the_tls_host_list():
 def test_docker_hub_mirror_cannot_fail_a_deploy():
     import yaml
 
-    workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yml").read_text())
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    )
     mirror = workflow["jobs"]["mirror"]
 
     # Separate job: an expired Docker Hub token or an outage there must not turn a

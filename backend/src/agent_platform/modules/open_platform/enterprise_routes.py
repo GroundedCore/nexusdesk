@@ -289,7 +289,13 @@ async def callback(
                 await one(c, "SELECT * FROM enterprise_users WHERE id=:u FOR UPDATE", u=user["id"])
             )
             result["session"] = await e.issue(
-                c, user, app_id, current, embed_revision=cfg["revision"] if cfg else None
+                c,
+                user,
+                app_id,
+                current,
+                embed_revision=cfg["revision"] if cfg else None,
+                ip=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent", ""),
             )
             await audit(
                 c,
@@ -341,5 +347,11 @@ async def chat_token(body: ChatTokenInput, request: Request, identity: Identity)
             body.name or body.external_user_id,
         )
         return await e.issue(
-            c, user, identity.app_id, key_id=identity.key_id, embed_revision=cfg["revision"]
+            c,
+            user,
+            identity.app_id,
+            key_id=identity.key_id,
+            embed_revision=cfg["revision"],
+            ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", ""),
         )

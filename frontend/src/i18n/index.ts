@@ -68,6 +68,18 @@ export function errorText(message:string) {
     judge_response_not_json:'Judge 模型没有返回 JSON，请更换支持结构化输出的 Chat 方案。',
     judge_response_invalid:'Judge 返回的 JSON 不符合评分结构，请重试或更换方案。',
     judge_tool_calls_forbidden:'Judge 方案开启了工具调用，评分不允许调用工具。',
+    insufficient_permission:t('当前角色没有执行此操作的权限'),
+    member_not_found:t('成员不存在或已被删除。'),
+    member_revision_conflict:t('成员信息已更新，请刷新后重试。'),
+    last_admin_protected:t('不能停用或降级最后一名管理员。'),
+    cannot_modify_self:t('不能修改自己的角色或启停状态。'),
+    local_username_exists:t('登录账号已存在，请更换。'),
+    invalid_local_username:t('登录账号格式不正确。'),
+    local_credential_not_configured:t('该成员没有本地登录账号，无法重置密码。'),
+    independent_admin_protected:t('应急管理员受保护，不能修改角色、停用或关联企业身份。'),
+    cannot_reset_own_password:t('请通过账户安全修改自己的密码。'),
+    member_session_not_found:t('会话不存在或已失效。'),
+    identity_session_required:t('当前凭据不支持成员会话管理。'),
   };
   if(code)return `${t(known[code]||'请求失败，请重试或联系管理员')} (${message})`;
   if(/^422 ·/.test(message))return `${t('请检查必填项和输入格式')} (422)`;
