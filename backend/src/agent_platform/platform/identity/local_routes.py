@@ -55,6 +55,7 @@ async def login(body: LoginInput, request: Request):
         body.username,
         body.password.get_secret_value(),
         request.client.host if request.client else "unknown",
+        request.headers.get("user-agent", ""),
     )
 
 
