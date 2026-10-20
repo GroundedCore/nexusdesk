@@ -2,6 +2,7 @@ import json
 from collections import OrderedDict
 
 from agent_platform.integrations.business_tools.platform_tools import BUILTIN_SCHEMAS, PlatformTools
+from agent_platform.modules.access_control.service import MemberDirectory
 from agent_platform.modules.agent_config.service import AgentService
 from agent_platform.modules.agent_runtime.engine import RuntimeEngine
 from agent_platform.modules.agent_runtime.schemas import RuntimeFault
@@ -41,6 +42,7 @@ class PlatformServices:
         self.tool_workspace = ToolWorkspace(self.tools, model_client)
         self.tools.workspace = self.tool_workspace
         self.staff = StaffDirectory(engine)
+        self.members = MemberDirectory(engine)
         self.policy = ExecutionPolicy(self.tools)
         self.gateway = ModelGateway(engine, settings, model_client)
         self.agents = AgentService(engine, self.tools, self.gateway.catalog)

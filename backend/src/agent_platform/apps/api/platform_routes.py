@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,7 +17,13 @@ from agent_platform.modules.evaluation.service import EvaluationCase
 from agent_platform.modules.knowledge.chunking import ChunkingPolicy, chunk_document
 from agent_platform.modules.knowledge.service import DocumentInput
 from agent_platform.modules.tool_gateway.service import HttpTool, ToolInput
-from agent_platform.platform.identity.access import Admin, Operator, Reader
+from agent_platform.platform.identity.access import (
+    Admin,
+    Operator,
+    Principal,
+    Reader,
+    require_permission,
+)
 from agent_platform.platform.persistence.store import DomainError, many
 
 router = APIRouter(tags=["platform"])
@@ -137,21 +143,41 @@ def services(request):
 
 @router.get("/me")
 async def me(user: Reader):
-    return {"tenant": user.tenant, "role": user.role, "actor": user.actor}
+    return {
+        "tenant": user.tenant,
+        "role": user.role,
+        "actor": user.actor,
+        "user_id": user.user_id,
+        "auth_source": user.auth_source,
+        "session_id": user.session_id,
+        "permissions": sorted(user.permissions),
+    }
 
 
 @router.get("/staff")
-async def staff(request: Request, user: Admin):
+async def staff(
+    request: Request,
+    user: Annotated[Principal, Depends(require_permission("credential.read"))],
+):
     return await services(request).staff.list(user.tenant)
 
 
 @router.post("/staff", status_code=201)
-async def create_staff(body: StaffInput, request: Request, user: Admin):
+async def create_staff(
+    body: StaffInput,
+    request: Request,
+    user: Annotated[Principal, Depends(require_permission("credential.manage"))],
+):
     return await services(request).staff.create(user.tenant, user.actor, body.name, body.role)
 
 
 @router.patch("/staff/{sid}")
-async def enable_staff(sid: UUID, body: EnabledInput, request: Request, user: Admin):
+async def enable_staff(
+    sid: UUID,
+    body: EnabledInput,
+    request: Request,
+    user: Annotated[Principal, Depends(require_permission("credential.manage"))],
+):
     return await services(request).staff.enable(user.tenant, user.actor, sid, body.enabled)
 
 
@@ -698,13 +724,26 @@ async def unified_trace(rid: UUID, request: Request, user: Reader):
 
 
 @router.get("/observability/runs")
-async def runs(request: Request, user: Reader):
-    return await services(request).observability.runs(user.tenant)
+async def runs(
+    request: Request,
+    user: Reader,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+):
+    return await services(request).observability.runs(user.tenant, page, page_size)
 
 
 @router.get("/audit")
-async def audit(request: Request, user: Admin):
-    return await services(request).observability.audit(user.tenant)
+async def audit(
+    request: Request,
+    user: Admin,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 10,
+    action_type: Annotated[str | None, Query(max_length=160)] = None,
+):
+    return await services(request).observability.audit(
+        user.tenant, page, page_size, action_type
+    )
 
 
 @router.get("/agents/{aid}/evaluation-cases")
@@ -794,6 +833,38 @@ async def evaluation_trend(
 @router.post("/agents/{aid}/evaluate")
 async def evaluate(aid: UUID, request: Request, user: Admin, body: ScoringOptions | None = None):
     return await services(request).evaluation.run(user.tenant, user.actor, aid, body)
+
+
+@router.get("/evaluation/overview")
+async def evaluation_overview(
+    request: Request,
+    user: Reader,
+    report_limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+):
+    """Cross-agent quality board; replaces the per-agent picker that duplicated
+    the agent-scoped evaluation tab."""
+    return await services(request).evaluation.overview(user.tenant, report_limit)
+
+
+@router.get("/evaluation/reviews")
+async def evaluation_reviews(
+    request: Request,
+    user: Reader,
+    status: Literal["needs_review", "error", "failed", "passed", "all"] = "needs_review",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    return await services(request).evaluation.reviews(user.tenant, status, page, page_size)
+
+
+@router.get("/evaluation/regressions")
+async def evaluation_regressions(
+    request: Request,
+    user: Reader,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    return await services(request).evaluation.regressions(user.tenant, page, page_size)
 
 
 @router.get("/policy")

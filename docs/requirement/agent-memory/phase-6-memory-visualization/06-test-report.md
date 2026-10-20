@@ -13,7 +13,7 @@
 | 环境 | 配置 | 用途 |
 |---|---|---|
 | 后端单测 | `backend/.venv/bin/pytest tests/ -q` | P6-UT 与全量非 PG 回归 |
-| 后端 PG 集成 | 容器 `nexusdesk-p5-pg`（pgvector/pg17，alembic head 已确认 = `0039_memory_injection_log`），`TEST_DATABASE_URL=postgresql+asyncpg://agent:agent_dev@127.0.0.1:5433/agent_platform` | P6-IT / P6-API 与 Phase 1-5 PG 回归 |
+| 后端 PG 集成 | 容器 `nexusdesk-p5-pg`（pgvector/pg17，alembic head 已确认 = `0041_memory_injection_log`），`TEST_DATABASE_URL=postgresql+asyncpg://agent:agent_dev@127.0.0.1:5433/agent_platform` | P6-IT / P6-API 与 Phase 1-5 PG 回归 |
 | 迁移双向校验 | 同一容器 `alembic upgrade head` → `\d memory_injection_log`（表/3 索引/section CHECK 齐全、无外键，符合 D1）→ `downgrade 0038` → 再 `upgrade head` | 0039 迁移可升可降 |
 | 前端类型检查 | `npx tsc --noEmit`（复核：零错误） | 静态类型 |
 | 前端 i18n | `node scripts/check-i18n.mjs`（复核：Verified 1487 translations in zh-CN, zh-TW, en, hi） | 新增 47 key 四语同步 |

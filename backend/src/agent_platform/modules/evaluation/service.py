@@ -28,6 +28,49 @@ MAX_CASES = 20
 INVALID_FILENAME = re.compile(r'[\\/:*?"<>|\r\n\t]+')
 
 
+def result_bucket(result):
+    """Classify one case result into exactly one review bucket.
+
+    Execution errors and rule violations are hard failures, so they outrank the
+    judge's own verdict; a scored case that the judge wants reviewed is pending,
+    never a pass.
+    """
+    if result.get("status") == "error" or result.get("error"):
+        return "error"
+    if result.get("status") == "needs_review":
+        return "needs_review"
+    return "passed" if result.get("passed") else "failed"
+
+
+def result_counts(results):
+    counts = dict.fromkeys(("passed", "failed", "needs_review", "errors"), 0)
+    for result in results or []:
+        bucket = result_bucket(result)
+        counts["errors" if bucket == "error" else bucket] += 1
+    total = len(results or [])
+    # The trend line and the board must agree on this ratio, so it stays raw
+    # passes over cases rather than passes over decided cases.
+    counts["total"] = total
+    counts["pass_rate"] = (counts["passed"] / total) if total else None
+    return counts
+
+
+def regressed_cases(latest_results, previous_results):
+    """List (case_id, before, now) for cases that used to pass and no longer do."""
+    if not latest_results or not previous_results:
+        return []
+    before = {item.get("case_id"): item for item in previous_results}
+    regressed = []
+    for now in latest_results:
+        case_id = now.get("case_id")
+        earlier = before.get(case_id)
+        if earlier is None or not earlier.get("passed"):
+            continue
+        if result_bucket(now) != "passed":
+            regressed.append((case_id, earlier, now))
+    return regressed
+
+
 class MockTools:
     def __init__(self, schemas, responses):
         self.schemas, self.responses, self.calls = schemas, responses, []
@@ -298,6 +341,213 @@ class EvaluationService:
                 }
             )
         return {"points": points, "limit": limit}
+
+    async def _latest_reports(self, c, tenant, limit, depth=2):
+        """Newest reports per agent, joined with agent names.
+
+        The quality board is cross-agent, so it needs the latest report (and the
+        one before it, for regression) for every agent rather than the flat list
+        a single agent would page through.
+        """
+        rows = await many(
+            c,
+            """SELECT r.id,r.agent_id,r.agent_version,r.created_at,r.results,
+            a.name AS agent_name,a.archived AS agent_archived,a.published_version
+            FROM evaluation_reports r
+            JOIN agents a ON a.id=r.agent_id AND a.tenant_id=r.tenant_id
+            WHERE r.tenant_id=:t ORDER BY r.created_at DESC LIMIT :lim""",
+            t=tenant,
+            lim=max(1, int(limit)),
+        )
+        buckets = {}
+        for row in rows:
+            bucket = buckets.setdefault(row["agent_id"], [])
+            if len(bucket) < depth:
+                bucket.append(row)
+        return buckets
+
+    async def overview(self, tenant, report_limit=500):
+        """Quality board: one row per evaluated agent plus tenant-wide totals."""
+        async with self.engine.connect() as c:
+            buckets = await self._latest_reports(c, tenant, report_limit)
+            report_total = (
+                await one(
+                    c,
+                    "SELECT count(*) AS n FROM evaluation_reports WHERE tenant_id=:t",
+                    t=tenant,
+                )
+            )["n"]
+            case_rows = await many(
+                c,
+                """SELECT agent_id,count(*) AS n FROM evaluation_cases
+                WHERE tenant_id=:t GROUP BY agent_id""",
+                t=tenant,
+            )
+            agent_rows = await many(
+                c,
+                """SELECT id,name,archived,published_version FROM agents
+                WHERE tenant_id=:t""",
+                t=tenant,
+            )
+        cases = {row["agent_id"]: row["n"] for row in case_rows}
+        known = {row["id"]: row for row in agent_rows}
+
+        # Agents with cases but no report still belong on the board: they are the
+        # coverage gap. Agents with neither never evaluated anything, so they stay off.
+        tracked = set(cases) | set(buckets)
+        agents = []
+        summary = dict.fromkeys(
+            ("passed", "failed", "needs_review", "errors"), 0
+        )
+        summary["cases"] = sum(cases.values())
+        for aid in tracked:
+            agent = known.get(aid)
+            if agent is None:
+                continue
+            bucket = buckets.get(aid) or []
+            latest = bucket[0] if bucket else None
+            previous = bucket[1] if len(bucket) > 1 else None
+            counts = result_counts(latest["results"] if latest else [])
+            for key in ("passed", "failed", "needs_review", "errors"):
+                summary[key] += counts[key]
+            previous_counts = result_counts(previous["results"] if previous else [])
+            pass_rate = counts["pass_rate"] if latest else None
+            previous_rate = previous_counts["pass_rate"] if previous else None
+            agents.append(
+                {
+                    "agent_id": aid,
+                    "agent_name": agent["name"],
+                    "archived": bool(agent["archived"]),
+                    "published_version": agent["published_version"],
+                    "cases": cases.get(aid, 0),
+                    "report_id": str(latest["id"]) if latest else None,
+                    "agent_version": latest["agent_version"] if latest else None,
+                    "created_at": latest["created_at"] if latest else None,
+                    "pass_rate": pass_rate,
+                    "previous_pass_rate": previous_rate,
+                    "delta": (
+                        pass_rate - previous_rate
+                        if pass_rate is not None and previous_rate is not None
+                        else None
+                    ),
+                    "regressions": (
+                        len(regressed_cases(latest["results"], previous["results"]))
+                        if latest and previous
+                        else 0
+                    ),
+                    **counts,
+                }
+            )
+        # Attention first: anything pending or erroring outranks a clean run.
+        agents.sort(
+            key=lambda row: (
+                -(row["needs_review"] + row["errors"]),
+                -(row["regressions"]),
+                row["created_at"] is None,
+                -(
+                    row["created_at"].timestamp()
+                    if row["created_at"] is not None
+                    else 0
+                ),
+                row["agent_name"],
+            )
+        )
+        evaluated = sum(1 for row in agents if row["report_id"])
+        decided = summary["passed"] + summary["failed"]
+        summary["agents"] = len(agents)
+        summary["evaluated"] = evaluated
+        summary["reports"] = report_total
+        summary["pass_rate"] = (summary["passed"] / decided) if decided else None
+        return {"summary": summary, "agents": agents}
+
+    async def reviews(self, tenant, status="needs_review", page=1, page_size=20):
+        """Cross-agent queue of case results that are not a clean pass."""
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        async with self.engine.connect() as c:
+            buckets = await self._latest_reports(c, tenant, 500, depth=1)
+        everything = []
+        for bucket in buckets.values():
+            for row in bucket:
+                for result in row["results"] or []:
+                    everything.append(
+                        {
+                            "agent_id": row["agent_id"],
+                            "agent_name": row["agent_name"],
+                            "agent_archived": bool(row["agent_archived"]),
+                            "report_id": str(row["id"]),
+                            "agent_version": row["agent_version"],
+                            "created_at": row["created_at"],
+                            "case_id": result.get("case_id"),
+                            "name": result.get("name"),
+                            "status": result_bucket(result),
+                            "raw_status": result.get("status"),
+                            "error": result.get("error"),
+                            "judge_error": result.get("judge_error"),
+                            "rule_violations": result.get("rule_violations") or [],
+                        }
+                    )
+        counts = dict.fromkeys(("needs_review", "error", "failed", "passed"), 0)
+        for row in everything:
+            counts[row["status"]] = counts.get(row["status"], 0) + 1
+        items = everything if status == "all" else [
+            row for row in everything if row["status"] == status
+        ]
+        order = {"needs_review": 0, "error": 1, "failed": 2, "passed": 3}
+        items.sort(
+            key=lambda row: (
+                order.get(row["status"], 9),
+                -row["created_at"].timestamp(),
+                row["agent_name"],
+            )
+        )
+        start = (page - 1) * page_size
+        return {
+            "items": items[start : start + page_size],
+            "total": len(items),
+            "page": page,
+            "page_size": page_size,
+            "status": status,
+            "counts": counts,
+        }
+
+    async def regressions(self, tenant, page=1, page_size=20):
+        """Cases that passed in the previous report and no longer pass."""
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        async with self.engine.connect() as c:
+            buckets = await self._latest_reports(c, tenant, 500)
+        items = []
+        for bucket in buckets.values():
+            if len(bucket) < 2:
+                continue
+            latest, previous = bucket[0], bucket[1]
+            for case_id, before, now in regressed_cases(latest["results"], previous["results"]):
+                items.append(
+                    {
+                        "agent_id": latest["agent_id"],
+                        "agent_name": latest["agent_name"],
+                        "report_id": str(latest["id"]),
+                        "previous_report_id": str(previous["id"]),
+                        "agent_version": latest["agent_version"],
+                        "previous_agent_version": previous["agent_version"],
+                        "created_at": latest["created_at"],
+                        "case_id": case_id,
+                        "name": now.get("name"),
+                        "status": result_bucket(now),
+                        "previous_status": result_bucket(before),
+                        "error": now.get("error"),
+                        "judge_error": now.get("judge_error"),
+                    }
+                )
+        items.sort(key=lambda row: (-row["created_at"].timestamp(), row["agent_name"]))
+        start = (page - 1) * page_size
+        return {
+            "items": items[start : start + page_size],
+            "total": len(items),
+            "page": page,
+            "page_size": page_size,
+        }
 
     async def _environment(self, tenant, snapshot, c):
         config = snapshot.get("config") or {}

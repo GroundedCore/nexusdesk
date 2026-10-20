@@ -28,12 +28,23 @@ async def platform():
         embedded_channel_worker=True,
         model_backend="demo",
         tools_file=None,
+        require_password_change=True,
         api_token=SecretStr("platform-admin"),
         operator_api_token=SecretStr("platform-operator"),
         viewer_api_token=SecretStr("platform-viewer"),
         # Keep tests hermetic: a local .env may narrow the outbound allowlist,
         # which would break tests that rely on the built-in defaults.
+        tool_allowed_hosts=Settings.model_fields["tool_allowed_hosts"].default,
         model_gateway_allowed_hosts=Settings.model_fields["model_gateway_allowed_hosts"].default,
+        # Object storage and vector indexes are optional integrations. Unit and
+        # API tests must not depend on a developer's local MinIO/Milvus setup.
+        milvus_url=None,
+        milvus_token=None,
+        knowledge_parser_url=None,
+        knowledge_s3_endpoint=None,
+        knowledge_s3_bucket=None,
+        knowledge_s3_access_key=None,
+        knowledge_s3_secret_key=None,
     )
     app = create_app(settings)
     async with app.router.lifespan_context(app):  # noqa: SIM117
@@ -508,14 +519,35 @@ async def test_evaluation_never_executes_live_business_tools(platform):
 async def test_metrics_and_audit_reflect_real_operations(platform):
     client, services, settings = platform
     conv = await conversation(client)
-    await client.post(f"/api/v1/conversations/{conv['id']}/messages", json={"content": "你好"})
+    await client.post(
+        f"/api/v1/conversations/{conv['id']}/messages",
+        json={"content": "你好"},
+        headers={"X-Forwarded-For": "203.0.113.77, 127.0.0.1"},
+    )
     await execute_next(services, settings)
     metrics = (await client.get("/api/v1/observability/summary")).json()
     assert metrics["total"] == 1 and metrics["completed"] == 1
     assert metrics["p95_seconds"] is not None
+    runs = (await client.get("/api/v1/observability/runs", params={"page": 1, "page_size": 1})).json()
+    assert len(runs["items"]) == 1
+    assert runs["total"] == 1 and runs["page"] == 1 and runs["page_size"] == 1
     audit = await client.get("/api/v1/audit")
-    assert any(r["action"] == "run.submitted" for r in audit.json())
+    audit_body = audit.json()
+    assert any(r["action"] == "run.submitted" for r in audit_body["items"])
+    assert next(r for r in audit_body["items"] if r["action"] == "run.submitted")["ip"] == "203.0.113.77"
+    assert audit_body["total"] >= len(audit_body["items"])
+    assert audit_body["page"] == 1 and audit_body["page_size"] == 10
     assert "platform-admin" not in audit.text
+    submitted = (
+        await client.get("/api/v1/audit", params={"action_type": "run.submitted"})
+    ).json()
+    assert submitted["total"] >= 1
+    assert all(row["action"] == "run.submitted" for row in submitted["items"])
+    assert any(row["action"] == "run.submitted" for row in submitted["action_types"])
+    missing = (
+        await client.get("/api/v1/audit", params={"action_type": "does.not.exist"})
+    ).json()
+    assert missing["total"] == 0 and missing["items"] == []
 
 
 async def test_recent_messages_and_bounded_human_context(platform):
@@ -556,6 +588,51 @@ async def test_recent_messages_and_bounded_human_context(platform):
     detail = (await client.get(f"/api/v1/conversations/{cid}")).json()
     assert len(detail["history"]) == settings.history_turns * 2
     assert detail["history"][-1]["content"] == f"客服{settings.history_turns + 1}"
+
+
+async def test_evaluation_quality_board_reviews_and_regressions(platform):
+    """The cross-agent board replaces the duplicate per-agent evaluation page."""
+    client, _, _ = platform
+    agent, _ = await create_agent(client)
+    aid = agent["id"]
+    created = await client.post(
+        f"/api/v1/agents/{aid}/evaluation-cases",
+        json={"name": "回归用例", "input": "你好", "expected_contains": ["演示模式"]},
+    )
+    assert created.status_code == 201, created.text
+    cid = created.json()["id"]
+    assert (await client.post(f"/api/v1/agents/{aid}/evaluate")).status_code == 200
+    # Rewrite the assertion so the same case can only fail on the next run.
+    assert (
+        await client.patch(
+            f"/api/v1/agents/{aid}/evaluation-cases/{cid}",
+            json={"name": "回归用例", "input": "你好", "expected_contains": ["绝不出现的断言"]},
+        )
+    ).status_code == 200
+    assert (await client.post(f"/api/v1/agents/{aid}/evaluate")).status_code == 200
+
+    board = (await client.get("/api/v1/evaluation/overview")).json()
+    assert board["summary"]["evaluated"] == 1
+    assert board["summary"]["reports"] == 2
+    row = next(item for item in board["agents"] if item["agent_id"] == aid)
+    assert row["cases"] == 1 and row["failed"] == 1 and row["passed"] == 0
+    assert row["pass_rate"] == 0.0 and row["previous_pass_rate"] == 1.0
+    assert row["delta"] == -1.0 and row["regressions"] == 1
+
+    reviews = (await client.get("/api/v1/evaluation/reviews")).json()
+    assert reviews["status"] == "needs_review" and reviews["items"] == []
+    failed = (await client.get("/api/v1/evaluation/reviews", params={"status": "failed"})).json()
+    assert failed["counts"]["failed"] == 1
+    assert [item["name"] for item in failed["items"]] == ["回归用例"]
+    assert failed["items"][0]["agent_id"] == aid
+
+    regressions = (
+        await client.get("/api/v1/evaluation/regressions", params={"page": 1, "page_size": 10})
+    ).json()
+    assert regressions["total"] == 1
+    assert regressions["page"] == 1 and regressions["page_size"] == 10
+    assert regressions["items"][0]["case_id"] == cid
+    assert regressions["items"][0]["previous_status"] == "passed"
 
 
 async def test_evaluation_case_limit_is_atomic(platform):

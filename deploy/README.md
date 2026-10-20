@@ -16,7 +16,7 @@ Windows PowerShell：
 .\nexusdesk.ps1 quickstart
 ```
 
-启动成功后访问 https://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。用内置账号 admin / nexusdesk 登录即可进入（该环境不强制改密）。体验入口不注入任何身份，未携带凭据的请求会被 API 直接拒绝；但默认口令是公开的，放开绑定时仍请用安全组/防火墙把端口限制为可信 IP。
+启动成功后访问 https://localhost:8080。仅启动 `app`、`postgres` 两个容器。数据库不映射宿主机端口，Web 默认绑定 `127.0.0.1`（可用 `NEXUSDESK_BIND` 覆盖）。登录页已预填内置账号 admin / nexusdesk，直接点“登录”即可进入（该环境不强制改密）。体验入口不注入任何身份，未携带凭据的请求会被 API 直接拒绝；但默认口令是公开的，放开绑定时仍请用安全组/防火墙把端口限制为可信 IP。
 
 ### 体验模式的 HTTPS
 
@@ -40,7 +40,7 @@ NEXUSDESK_TLS_HOSTS=192.168.1.50,nexusdesk.test sh nexusdesk quickstart
 
 如果此前在体验环境配置过企业身份或嵌入应用，数据库里保存的“平台公开地址”仍是 `http://`，登录时校验来源会不通过。把开放平台中登记的地址改成实际访问的 `https://` 地址即可。
 
-应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk；体验模式不强制首次改密（`AGENT_REQUIRE_PASSWORD_CHANGE=false`），用该账号直接登录。Nginx 只原样透传 `Authorization` 头，不注入身份。启动时仍会生成一个本地服务令牌持久化在数据卷中，供运维用登录页的“服务令牌”入口应急登录，它不写入前端资源或启动输出。
+应用容器使用 tini 与 Supervisor 管理 Nginx、API（含 Runtime Worker）、知识库 Worker；子进程自动重启，无法恢复的子进程失败将停止容器。首次执行数据库迁移、初始化主密钥、幂等导入演示数据与行业案例（9 个知识库、18 个 Agent 草稿、36 篇虚构案例文档）；再次启动保留数据。案例 Agent 自动绑定演示 Chat 方案，可在 Agent 管理页用“仅看案例”筛选。部署自动初始化本地管理员 admin / nexusdesk；体验模式不强制首次改密（`AGENT_REQUIRE_PASSWORD_CHANGE=false`），用该账号直接登录。quickstart 镜像在构建时传入 `VITE_PREFILL_LOGIN=true`，登录页因此预填该公开演示账号；普通 `npm run build` 与生产镜像不传该参数，登录页保持空白，不会把口令写进产物。Nginx 只原样透传 `Authorization` 头，不注入身份。启动时仍会生成一个本地服务令牌持久化在数据卷中，供运维用登录页的“服务令牌”入口应急登录，它不写入前端资源或启动输出。
 
 进入“会话工作台”选择 `sample-support`：
 

@@ -63,7 +63,8 @@ async def protect_local_admin(c, tenant, *ids):
     for uid in ids:
         if await one(
             c,
-            "SELECT user_id FROM local_admin_credentials WHERE tenant_id=:t AND user_id=:u",
+            """SELECT user_id FROM local_admin_credentials
+            WHERE tenant_id=:t AND user_id=:u AND is_emergency""",
             t=tenant,
             u=uid,
         ):
@@ -97,7 +98,9 @@ class LocalAdmin:
             )
             await execute(
                 c,
-                "INSERT INTO local_admin_credentials(user_id,tenant_id,username,password_hash) VALUES(:u,:t,:n,:p)",
+                """INSERT INTO local_admin_credentials(
+                user_id,tenant_id,username,password_hash,is_emergency)
+                VALUES(:u,:t,:n,:p,true)""",
                 u=uid,
                 t=self.tenant,
                 n=login,
@@ -125,7 +128,7 @@ class LocalAdmin:
         if denied:
             raise DomainError("local_login_rate_limited", 429)
 
-    async def login(self, login, password, peer):
+    async def login(self, login, password, peer, user_agent=""):
         login = login.strip().lower()
         await self.limit(login, peer)
         async with self.engine.connect() as c:
@@ -152,27 +155,40 @@ class LocalAdmin:
                 valid
                 and current
                 and current["enabled"]
-                and current["role"] == "admin"
+                and current["role"] in ("admin", "operator", "viewer")
                 and current["password_hash"] == row["password_hash"]
             )
             if not valid:
                 await audit(c, self.tenant, "anonymous", "local_admin.login_failed", "login")
             else:
                 token = "local_" + secrets.token_urlsafe(32)
-                await execute(c, "DELETE FROM local_admin_sessions WHERE expires_at<now()")
                 await execute(
                     c,
-                    """INSERT INTO local_admin_sessions(token_hash,user_id,tenant_id,expires_at)
-                    VALUES(:h,:u,:t,now()+interval '1 hour')""",
+                    "DELETE FROM local_admin_sessions WHERE tenant_id=:t AND expires_at<now()",
+                    t=self.tenant,
+                )
+                await execute(
+                    c,
+                    """INSERT INTO local_admin_sessions(
+                    id,token_hash,user_id,tenant_id,expires_at,ip,user_agent)
+                    VALUES(:id,:h,:u,:t,now()+interval '1 hour',:ip,:agent)""",
+                    id=uuid4(),
                     h=digest(token),
                     u=current["user_id"],
                     t=self.tenant,
+                    ip=peer,
+                    agent=user_agent[:500] or None,
+                )
+                await execute(
+                    c,
+                    "UPDATE enterprise_users SET last_login_at=now() WHERE id=:u",
+                    u=current["user_id"],
                 )
                 await audit(
                     c,
                     self.tenant,
                     "enterprise:" + str(current["user_id"]),
-                    "local_admin.login",
+                    "local_admin.login" if current["is_emergency"] else "local_account.login",
                     current["user_id"],
                 )
         if not valid:
@@ -182,16 +198,21 @@ class LocalAdmin:
             "token_type": "Bearer",
             "expires_in": 3600,
             "must_change_password": current["must_change_password"],
-            "user": {"id": current["user_id"], "name": current["name"], "role": "admin"},
+            "user": {
+                "id": current["user_id"],
+                "name": current["name"],
+                "role": current["role"],
+            },
         }
 
     async def session(self, c, token):
         row = await one(
             c,
-            """SELECT s.user_id,u.name,u.role,a.must_change_password FROM local_admin_sessions s
+            """SELECT s.id AS session_id,s.user_id,u.name,u.role,a.must_change_password
+            FROM local_admin_sessions s
             JOIN enterprise_users u ON u.id=s.user_id JOIN local_admin_credentials a ON a.user_id=u.id
             WHERE s.tenant_id=:t AND a.tenant_id=:t AND u.tenant_id=:t AND s.token_hash=:h
-            AND s.expires_at>now() AND u.enabled AND u.role='admin'""",
+            AND s.expires_at>now() AND u.enabled AND u.role IS NOT NULL""",
             t=self.tenant,
             h=digest(token),
         )

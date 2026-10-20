@@ -1,0 +1,37 @@
+/* Shared nexusdesk wordmark + orbit glyph.
+   The word is one weight, one gradient, plus a trailing gradient dot. Tones come
+   from CSS variables so the single markup works everywhere: the dark login panel
+   uses the defaults, while light surfaces such as the console sidebar swap in a
+   darker gradient (see console.css / login.css). */
+.brand-mark{display:inline-flex;align-items:center;gap:14px}
+.brand-mark__body{display:flex;flex-direction:column}
+.brand-mark__word{display:inline-flex;align-items:baseline;font-weight:600;line-height:1.05;letter-spacing:-.5px}
+.brand-mark__name{color:var(--brand-ink,#fff);background-image:var(--brand-gradient,linear-gradient(100deg,#fff 5%,#c3c1ff 55%,#8f8bff 100%));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.brand-mark__dot{display:inline-block;border-radius:50%;margin-left:.14em;transform:translateY(-.1em);background:var(--brand-dot,radial-gradient(circle at 32% 30%,#fff,#8f8bff 45%,#5b57f0))}
+.brand-mark__subtitle{display:block;font-weight:400;font-size:12px;letter-spacing:5px;margin-top:12px;color:var(--brand-subtitle,#d1d5ed)}
+.brand-glyph{flex:0 0 auto;display:block}
+
+.brand-mark--lg{gap:16px}
+.brand-mark--lg .brand-glyph{width:50px;height:50px}
+.brand-mark--lg .brand-mark__word{font-size:36px}
+.brand-mark--lg .brand-mark__dot{width:9px;height:9px}
+
+.brand-mark--md{gap:10px}
+.brand-mark--md .brand-glyph{width:30px;height:30px}
+.brand-mark--md .brand-mark__word{font-size:24px;letter-spacing:-.3px}
+.brand-mark--md .brand-mark__dot{width:6px;height:6px}
+.brand-mark--md .brand-mark__subtitle{font-size:11px;letter-spacing:3px;margin-top:8px}
+
+/* The login panel is the only large logo, and it is the one that has to shrink
+   on narrow / short viewports (mirrors the layout breakpoints in login.css). */
+@media(max-width:700px){
+  .brand-mark--lg{gap:12px}
+  .brand-mark--lg .brand-glyph{width:40px;height:40px}
+  .brand-mark--lg .brand-mark__word{font-size:28px}
+  .brand-mark--lg .brand-mark__dot{width:7px;height:7px}
+  .brand-mark--lg .brand-mark__subtitle{font-size:10px;letter-spacing:3px}
+}
+@media(max-width:700px) and (max-height:700px){
+  .brand-mark--lg .brand-glyph{width:32px;height:32px}
+  .brand-mark--lg .brand-mark__word{font-size:22px}
+}

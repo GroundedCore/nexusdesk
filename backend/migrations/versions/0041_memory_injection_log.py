@@ -19,8 +19,8 @@ ranking score), plus its three lookup indexes.
 
 from alembic import op
 
-revision = "0039_memory_injection_log"
-down_revision = "0038_evaluation_environment"
+revision = "0041_memory_injection_log"
+down_revision = "0040_access_control"
 branch_labels = None
 depends_on = None
 

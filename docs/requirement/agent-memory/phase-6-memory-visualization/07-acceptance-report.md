@@ -18,7 +18,7 @@
 | 研发负责人 | 环境保障（5433 PG 容器、前端 dev server）已由子代理完成；D1 性能整改评估待办 |
 | 客服主管/运营 | 未参与（§4 排障情景 UAT 待办） |
 
-验收环境：后端 PG 集成使用容器 `nexusdesk-p5-pg`（pgvector/pg17，迁移 head 已确认为 `0039_memory_injection_log`，`\d memory_injection_log` 核对表结构、3 索引、section 四值 CHECK、无外键（D1 决策）齐全；upgrade/downgrade 双向可迁移），`TEST_DATABASE_URL=postgresql+asyncpg://agent:agent_dev@127.0.0.1:5433/agent_platform`；前端 e2e 使用本地临时 dev server（5173，测完已停）。类生产环境（真实模型 + 累积数据）与 quickstart 双容器形态未执行。
+验收环境：后端 PG 集成使用容器 `nexusdesk-p5-pg`（pgvector/pg17，迁移 head 已确认为 `0041_memory_injection_log`，`\d memory_injection_log` 核对表结构、3 索引、section 四值 CHECK、无外键（D1 决策）齐全；upgrade/downgrade 双向可迁移），`TEST_DATABASE_URL=postgresql+asyncpg://agent:agent_dev@127.0.0.1:5433/agent_platform`；前端 e2e 使用本地临时 dev server（5173，测完已停）。类生产环境（真实模型 + 累积数据）与 quickstart 双容器形态未执行。
 
 除测试套件外，验收使用了独立对抗探针 `/tmp/p6_accept_verify.py`（非仓库文件，自建租户驱动真实 run 后直查 DB 与接口，探针数据已自清），对落库正确性、事件兼容、泄露面、权限、级联清理做了独立于产品测试的复核。
 
@@ -107,7 +107,7 @@
 
 理由：
 
-1. A1~A12 自动化验收项全部通过：迁移 0039 双向可迁移；PG 集成套件真实执行非 skip（test_memory_injection_postgres.py 18/18、单测 8/8、治理与 decay 回归 48/48）；全量后端回归（同一 PG）550 passed, 20 skipped（20 个 skip 经 `-rs` 确认全为 CREATEDB 角色/opt-in Milvus/无 embedding 列等环境性跳过，无功能 PG 用例被 skip）；非 PG 套件 265 passed, 297 skipped；前端 tsc 零告警、i18n 四 locale 键集完全一致、Playwright Phase 6 范围 26/26 全绿；ruff check 零告警。
+1. A1~A12 自动化验收项全部通过：迁移 0041 双向可迁移；PG 集成套件真实执行非 skip（test_memory_injection_postgres.py 18/18、单测 8/8、治理与 decay 回归 48/48）；全量后端回归（同一 PG）550 passed, 20 skipped（20 个 skip 经 `-rs` 确认全为 CREATEDB 角色/opt-in Milvus/无 embedding 列等环境性跳过，无功能 PG 用例被 skip）；非 PG 套件 265 passed, 297 skipped；前端 tsc 零告警、i18n 四 locale 键集完全一致、Playwright Phase 6 范围 26/26 全绿；ruff check 零告警。
 2. 三条一票否决项 C1（泄露面）、C2（删除级联）、C4（租户隔离）与热路径批量写入一票否决项均有双层证据（PG 集成测试 + 独立对抗探针直查 DB）通过；C3、C5 通过。
 3. `memory.injected` 事件消费方未受影响：Phase 4 观测 hit_rate 聚合用 EXISTS 语义与 payload 无关（observability/service.py），Phase 4 事件 payload 精确匹配用例（含 item_ids）全绿；Phase 1-5 回归套件全绿。
 4. 无 P0/P1 未关闭。

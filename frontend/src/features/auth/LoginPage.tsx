@@ -4,6 +4,7 @@ import {ArrowRightOutlined, LockOutlined, UserOutlined, SafetyOutlined} from '@a
 import {t} from '../../i18n';
 import {LanguageSelector} from '../../i18n/LanguageSelector';
 import {setToken} from '../../shared/api/client';
+import {BrandMark} from '../../shared/components/BrandMark';
 import {ssoLogin, type LoginProvider} from '../open-platform/SsoLogin';
 import './login.css';
 
@@ -20,11 +21,13 @@ export function loginError(code:string) {
 // deployment credentials do not need retyping (admin / nexusdesk, which force a
 // password change on first login and are already documented in deploy/README.md).
 //
-// Guarded by import.meta.env.DEV, which Vite replaces with `false` in a
-// production build, so the pre-fill cannot happen outside `npm run dev`. Anyone
-// who changes the default credentials can override both values through
-// frontend/.env.development (see .env.example) without editing this file.
-const devCredentials = import.meta.env.DEV
+// `import.meta.env.DEV` covers `npm run dev`, and Vite replaces it with `false`
+// in a production build. The quickstart image opts back in with the build arg
+// VITE_PREFILL_LOGIN=true: its account is public by design (see deploy/README.md),
+// and pre-filling it removes a pointless typing step for demo users. Real
+// deployments never set that flag, so their bundles stay credential-free.
+const prefillLogin = import.meta.env.DEV || import.meta.env.VITE_PREFILL_LOGIN === 'true';
+const devCredentials = prefillLogin
   ? {
       username:String(import.meta.env.VITE_DEV_LOGIN_USER||'admin'),
       password:String(import.meta.env.VITE_DEV_LOGIN_PASSWORD||'nexusdesk'),
@@ -52,7 +55,7 @@ export function LoginPage({complete, expired=false}:{complete:()=>void;expired?:
   }
   async function enterprise(provider:LoginProvider){setBusy(provider.id);setError('');try{const session=await ssoLogin(provider);setToken(session.access_token);complete();}catch(e){setError((e as Error).message);}finally{setBusy('');}}
   return <main className="login-page">
-    <section className="login-brand-panel" aria-label="nexusdesk"><div className="login-brand">nexus<span>desk</span><small>{t('智能客服平台')}</small></div>
+    <section className="login-brand-panel" aria-label="nexusdesk"><BrandMark size="lg" subtitle={t('智能客服平台')}/>
       <div className="login-story"><h1>{t('让智能，融入每一次服务')}</h1><p>{t('连接企业知识、业务工具与服务团队')}</p></div>
       <div className="login-brand-footer">Agent · {t('知识库')} · {t('模型网关')}</div>
     </section>

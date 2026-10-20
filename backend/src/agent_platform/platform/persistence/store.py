@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 
 from sqlalchemy import text
 
+from agent_platform.platform.persistence.audit_context import audit_ip
+
 
 class DomainError(Exception):
     def __init__(self, code, status=400):
@@ -35,13 +37,14 @@ async def execute(conn, sql, **params):
 async def audit(conn, tenant, actor, action, resource, **details):
     await execute(
         conn,
-        """INSERT INTO audit_records(tenant_id,actor,action,resource,details)
-        VALUES (:tenant,:actor,:action,:resource,CAST(:details AS jsonb))""",
+        """INSERT INTO audit_records(tenant_id,actor,action,resource,details,ip)
+        VALUES (:tenant,:actor,:action,:resource,CAST(:details AS jsonb),:ip)""",
         tenant=tenant,
         actor=actor,
         action=action,
         resource=str(resource),
         details=json.dumps(details),
+        ip=audit_ip.get(),
     )
 
 

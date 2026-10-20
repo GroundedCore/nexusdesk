@@ -48,6 +48,8 @@ HTTP 错误：401 无效令牌；404 运行不存在或不在当前租户；409 
 
 Agent、知识库、会话、人工队列、工单、渠道、评测与审计的接口分组见 [平台使用说明](platform.md)。完整请求与响应字段以运行服务的 `/docs` 为准。
 
+成员、固定角色、权限码和活动会话接口见 [用户权限模块 P0](access-control.md)。
+
 ## 模型网关
 
 新增 `/api/v1/model-gateway`，支持连接、模型、版本方案、六种 operation、Chat SSE、临时媒体和调用记录。路径、权限及请求示例见 [网关实际协议](../backend/src/agent_platform/modules/model_gateway/PROTOCOL.md)。Runtime 运行事件仍是轮次/工具事件；逐段模型输出使用独立 `/model-gateway/stream` 接口。

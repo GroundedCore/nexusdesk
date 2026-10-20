@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const modelSections = ['connections', 'models', 'profiles', 'playground', 'logs', 'monitor', 'access_keys', 'sensitive_words', 'alert_rules', 'quota'] as const;
 export type ModelSection = typeof modelSections[number];
-const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access'];
+const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'handoff', 'tickets', 'memory', 'open-platform', 'evaluation', 'observability', 'access', 'members', 'roles', 'security'];
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);

@@ -11,6 +11,7 @@ from agent_platform.apps.api.platform_routes import ingress
 from agent_platform.apps.api.platform_routes import router as platform_router
 from agent_platform.apps.api.routes import router
 from agent_platform.apps.api.runtime_routes import router as runtime_router
+from agent_platform.modules.access_control.routes import router as access_control_router
 from agent_platform.modules.agent_runtime.bootstrap import runtime_services
 from agent_platform.modules.agent_runtime.schemas import BusyError, CapacityError
 from agent_platform.modules.knowledge.routes import router as knowledge_router
@@ -24,6 +25,7 @@ from agent_platform.modules.open_platform.routes import management as open_manag
 from agent_platform.modules.open_platform.routes import public as open_public
 from agent_platform.modules.tool_gateway.routes import router as tool_workspace_router
 from agent_platform.platform.identity.local_routes import router as local_auth_router
+from agent_platform.platform.persistence.audit_context import AuditContextMiddleware
 from agent_platform.platform.persistence.store import DomainError
 from agent_platform.settings import Settings
 
@@ -81,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.add_middleware(AuditContextMiddleware)
 
     @app.middleware("http")
     async def private_identity_responses(request: Request, call_next):
@@ -90,6 +93,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "/api/v1/auth/local/",
                 "/api/v1/sso/",
                 "/api/v1/open-platform/identity/",
+                "/api/v1/members/",
+                "/api/v1/sessions",
+                "/api/v1/roles",
+                "/api/v1/permissions",
                 "/openapi/v1/chat/",
             )
         ):
@@ -105,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(runtime_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(platform_router, prefix="/api/v1")
+    app.include_router(access_control_router, prefix="/api/v1")
     app.include_router(ingress, prefix="/api/v1")
     app.include_router(gateway_management_router, prefix="/api/v1")
     app.include_router(model_router, prefix="/api/v1")

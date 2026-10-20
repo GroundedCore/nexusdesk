@@ -1,8 +1,9 @@
-# 独立本地管理员
+# 本地账号与独立应急管理员
 
-本地应急管理员使用用户名和密码登录，与企业 SSO 提供方独立。用户主体复用
-`enterprise_users`，凭据和会话分别保存在 `local_admin_credentials`、
-`local_admin_sessions`。其审计主体仍为 `enterprise:<user_id>`。
+本地账号使用用户名和密码登录，与企业 SSO 提供方独立。普通成员和应急管理员
+都复用 `enterprise_users` 作为成员主体，凭据和会话分别保存在
+`local_admin_credentials`、`local_admin_sessions`。应急管理员通过
+`is_emergency=true` 区分并受到额外保护。审计主体仍为 `enterprise:<user_id>`。
 
 ## 部署默认账号
 
@@ -37,9 +38,11 @@ SQL 使用 `nexusdesk.tenant_id` 会话设置选择租户，缺省为 `local`；
 | `POST /api/v1/auth/local/password` | 携带本地会话及 `old_password`、`new_password`，改密后撤销所有本地会话，须重新登录 |
 | `GET /api/v1/me` | 本地会话复用现有角色鉴权，返回 admin 和固定用户主体 |
 
-不提供公开注册、浏览器匿名初始化或通过企业管理员重置应急密码的接口。
-不提供应急账户停用、删除、降权和 SSO 绑定入口；企业用户修改和身份关联接口显式拒绝操作此账户。
-因此无法通过现有用户管理误删或停用最后一个独立管理员。服务器/数据库拥有者仍可进行人工恢复。
+不提供公开注册或浏览器匿名初始化。管理员可以在“系统管理 → 成员管理”中邀请
+普通本地成员、重置其密码并撤销会话；应急管理员不能通过成员或企业身份接口停用、
+删除、降权或绑定 SSO。服务器/数据库拥有者仍可进行人工恢复。
+
+完整权限模型、接口和固定角色矩阵见 [用户权限模块 P0](access-control.md)。
 
 ## 密码和会话
 

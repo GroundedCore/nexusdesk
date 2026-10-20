@@ -1,0 +1,54 @@
+/* Cross-agent quality board. Neutral surfaces, colour reserved for status. */
+.quality-board { display: flex; flex-direction: column; gap: 22px; }
+.quality-metrics { margin-bottom: 0; }
+.quality-metrics .metric strong { font-size: 26px; }
+.quality-metric-sub { font-size: 11px; color: var(--ui-muted); margin-top: 6px; }
+
+.quality-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.console-layout .module-evaluation .quality-filters button:not(.ant-btn) {
+  background: transparent;
+  color: #5c6273;
+  border: 1px solid var(--ui-line);
+  min-height: 28px;
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 20px;
+}
+.console-layout .module-evaluation .quality-filters button:not(.ant-btn):hover { background: #f3f4f9; }
+.console-layout .module-evaluation .quality-filters button.selected {
+  background: #eef0ff;
+  border-color: #c9cdff;
+  color: #4d55c8;
+  font-weight: 600;
+}
+.quality-filters button small { display: inline; margin-left: 6px; color: inherit; opacity: .7; }
+
+.quality-rate { display: inline-flex; align-items: baseline; gap: 8px; }
+.quality-rate strong { font-size: 15px; font-weight: 600; }
+.quality-delta { font-size: 11px; font-weight: 600; }
+.quality-delta.up { color: #358566; }
+.quality-delta.down { color: #b04a4a; }
+.quality-delta.flat { color: var(--ui-muted); }
+
+.quality-count { font-variant-numeric: tabular-nums; }
+.quality-count.zero { color: #b9bdc9; }
+.quality-count.alert { color: #b04a4a; font-weight: 600; }
+.quality-count.warn { color: #9f8440; font-weight: 600; }
+
+.quality-agent { display: flex; flex-direction: column; gap: 2px; }
+.quality-agent strong { font-size: 13px; font-weight: 600; }
+.quality-agent span { font-size: 11px; color: var(--ui-muted); }
+.quality-muted { color: var(--ui-muted); font-size: 12px; }
+.quality-reason { color: #7b808f; font-size: 12px; max-width: 360px; white-space: normal; }
+.quality-reason.mono { font-family: "Cascadia Code", Consolas, monospace; color: #a4624e; }
+.quality-route { font-size: 12px; color: var(--ui-muted); }
+.quality-route span { color: #b04a4a; }
+.quality-pagination { display: flex; justify-content: flex-end; }
+.quality-pagination .ant-pagination { margin-top: 16px; }
+
+@media (max-width: 640px) {
+  .quality-board { gap: 16px; }
+  .quality-metrics .metric strong { font-size: 22px; }
+  .quality-reason { max-width: none; }
+}

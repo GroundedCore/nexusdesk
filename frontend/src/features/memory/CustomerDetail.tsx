@@ -76,7 +76,12 @@ function OverviewTab({ detail }: OverviewProps) {
         <Table<MemoryIdentity>
           rowKey="id"
           dataSource={detail.identities || []}
-          pagination={false}
+          pagination={{
+            pageSize: 10,
+            hideOnSinglePage: true,
+            showSizeChanger: false,
+            showTotal: total => t('共 {{v0}} 条', { v0: total }),
+          }}
           locale={{ emptyText: <Empty description={t('暂无身份绑定')} /> }}
           columns={[
             { title: t('来源'), dataIndex: 'source', width: 140, render: (value: string) => identitySourceLabels()[value] || value },
