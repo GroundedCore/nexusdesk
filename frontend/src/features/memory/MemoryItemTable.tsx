@@ -13,6 +13,8 @@ interface Props {
   onDelete: (item: MemoryItem) => void;
   onRestore: (item: MemoryItem) => void;
   onRelease?: (item: MemoryItem) => void;
+  /** Row click opens the single-item detail drawer (FR-5). */
+  onOpenDetail?: (item: MemoryItem) => void;
 }
 
 /** Conversation deep link consumed by ConversationsPage (?focus=). */
@@ -26,21 +28,26 @@ export function SourceRef({ item }: { item: MemoryItem }) {
       <Typography.Text type="secondary">{sourceTypeLabels()[item.source_type] || item.source_type}</Typography.Text>
       {item.source_ref && (
         <Tooltip title={item.source_ref}>
-          <Typography.Link href={conversationHref(item.source_ref)}>{t('来源会话')}</Typography.Link>
+          <Typography.Link href={conversationHref(item.source_ref)} onClick={event => event.stopPropagation()}>{t('来源会话')}</Typography.Link>
         </Tooltip>
       )}
     </Space>
   );
 }
 
-export function MemoryItemTable({ items, operator, busy, emptyText, onEdit, onDelete, onRestore, onRelease }: Props) {
+export function MemoryItemTable({ items, operator, busy, emptyText, onEdit, onDelete, onRestore, onRelease, onOpenDetail }: Props) {
   return (
     <Table<MemoryItem>
       rowKey="id"
       dataSource={items}
       pagination={false}
-      scroll={{ x: 1080 }}
+      scroll={{ x: 1280 }}
       locale={{ emptyText: emptyText }}
+      onRow={record => ({
+        onClick: () => onOpenDetail?.(record),
+        style: onOpenDetail ? { cursor: 'pointer' } : undefined,
+        'aria-label': onOpenDetail ? t('查看记忆详情') : undefined,
+      })}
       columns={[
         {
           title: t('键'), dataIndex: 'key', width: 170,
@@ -71,11 +78,19 @@ export function MemoryItemTable({ items, operator, busy, emptyText, onEdit, onDe
           title: t('最近引用'), dataIndex: 'last_referenced_at', width: 160,
           render: (value: string | null | undefined) => (value ? time(value) : '—'),
         },
+        {
+          title: t('引用次数'), dataIndex: 'reference_count', width: 90,
+          render: (value: number | null | undefined) => (value ?? '—'),
+        },
+        {
+          title: t('修订版本'), dataIndex: 'revision', width: 90,
+          render: (value: number | null | undefined) => (value ?? '—'),
+        },
         { title: t('更新时间'), dataIndex: 'updated_at', width: 160, render: (value: string) => time(value) },
         ...(operator ? [{
           title: t('操作'), key: 'actions', width: 240,
           render: (_: unknown, row: MemoryItem) => (
-            <Space size={4} wrap>
+            <Space size={4} wrap onClick={event => event.stopPropagation()}>
               {row.status !== 'deleted' && (
                 <>
                   <Button size="small" disabled={busy} onClick={() => onEdit(row)}>{t('编辑')}</Button>

@@ -6,7 +6,7 @@ const pages = ['overview', 'conversations', 'agents', 'knowledge', 'tools', 'han
 export function normalizeRoute(value: string) {
   const [base, query] = value.split('?');
   const path = normalizePath(base);
-  return (path.startsWith('/agents') || path.startsWith('/conversations')) && query ? `${path}?${new URLSearchParams(query)}` : path;
+  return (path.startsWith('/agents') || path.startsWith('/conversations') || path.startsWith('/memory')) && query ? `${path}?${new URLSearchParams(query)}` : path;
 }
 function normalizePath(value: string) {
   const path = value.replace(/^#/, '').replace(/\/+$/, '') || '/overview';

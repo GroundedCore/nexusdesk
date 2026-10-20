@@ -612,7 +612,14 @@ async def test_p4_it_06_delete_customer_cascades_and_reentry_rebuilds(platform):
     ticket_id = await make_ticket(engine, tenant, customer_id)
 
     result = await memory.delete_customer(tenant, "operator", customer_id)
-    assert result == {"items_deleted": 2, "identities_deleted": 1, "conversations_unlinked": 1}
+    assert result == {
+        "items_deleted": 2,
+        "identities_deleted": 1,
+        "conversations_unlinked": 1,
+        # Phase 6 (AC-12): injection detail rows cascade in the same
+        # transaction; this customer had none.
+        "injection_logs_deleted": 0,
+    }
 
     assert await items_of(engine, tenant, customer_id) == []
     assert await db_rows(engine, "SELECT 1 AS x FROM memory_identities WHERE tenant_id=:t", t=tenant) == []
@@ -1314,7 +1321,13 @@ async def test_p4_it_12_l3_overlap_enqueues_reinforce_at_run_finish(platform):
         t=tenant,
     )
     assert len(events) == 1
-    assert events[0]["data"] == {"items": 1, "flags": 0, "events": 0}
+    # Phase 6 (FR-1): the counts are unchanged and the payload gains item_ids.
+    assert events[0]["data"] == {
+        "items": 1,
+        "flags": 0,
+        "events": 0,
+        "item_ids": [str(item_id)],
+    }
 
     # Sampling off: a second run enqueues nothing more.
     services.worker.settings = settings.model_copy(update={"memory_reinforce_sample_rate": 0.0})

@@ -69,11 +69,12 @@ for (const role of ['admin', 'viewer']) {
     await page.getByLabel('搜索客户标识').press('Enter');
     await expect(page.getByRole('button', { name: 'sha256:abc' })).toBeVisible();
 
-    // Customer detail: identities + items grouped by type.
+    // Customer detail: identities on the overview tab + items grouped by type tabs.
     await page.getByRole('button', { name: 'sha256:abc' }).click();
     await expect(page).toHaveURL(/#\/memory\/customers\/cust-1$/);
     await expect(page.getByRole('heading', { name: '客户详情' })).toBeVisible();
     await expect(page.getByText('身份绑定')).toBeVisible();
+    await page.getByRole('tab', { name: '客户画像' }).click();
     await expect(page.getByText('13800001111')).toBeVisible();
     await expect(page.getByRole('link', { name: '来源会话' }).first()).toHaveAttribute('href', '#/conversations/_all?focus=conv-1');
 
@@ -95,7 +96,8 @@ for (const role of ['admin', 'viewer']) {
     await expect(page.getByText('记忆已更新')).toBeVisible();
     await expect(page.locator('td').filter({ hasText: '张三丰' })).toBeVisible();
 
-    // Soft delete then restore.
+    // Soft delete then restore (preference tab).
+    await page.getByRole('tab', { name: '客户偏好' }).click();
     await page.locator('tr').filter({ hasText: '用英文回复' }).getByRole('button', { name: /删\s*除/ }).click();
     await page.locator('.ant-popover').getByRole('button', { name: /确\s*认/ }).click();
     await expect(page.getByText('记忆已删除')).toBeVisible();
@@ -113,6 +115,120 @@ for (const role of ['admin', 'viewer']) {
     await page.screenshot({ path: `test-results/memory-${role}.png`, fullPage: true });
   });
 }
+
+// Phase 6 · memory visualization: stats columns, 8-tab detail, injection explainability.
+function phase6Items() {
+  return [
+    { id: 'item-1', type: 'profile', key: 'name', content: '张三丰', prev_content: '张三', confidence: 1.0, status: 'active', source_type: 'human', source_ref: 'conv-1', revision: 3, protected: true, last_referenced_at: '2026-10-12T10:00:00Z', reference_count: 4, effective_confidence: 1.0, created_at: '2026-09-30T10:00:00Z', updated_at: '2026-10-12T10:00:00Z' },
+    { id: 'pend-1', type: 'preference', key: 'contact_channel', content: '偏好邮件联系', confidence: 0.6, status: 'pending', source_type: 'extracted', source_ref: 'conv-1', revision: 1, updated_at: '2026-10-11T10:00:00Z' },
+  ];
+}
+
+const phase6Customer = { id: 'cust-1', external_keys: ['sha256:abc'], item_count: 2, last_active_at: '2026-10-12T10:00:00Z', created_at: '2026-09-30T10:00:00Z', memory_stats: { total: 2, profile: 1, preference: 1, event: 0, pending: 1, flags: ['vip'], last_updated_at: '2026-10-12T10:00:00Z' } };
+const phase6Injections = [{ run_id: 'run-1', injected_at: '2026-10-13T09:00:00Z', item_count: 2, conversation_id: 'conv-1' }];
+const phase6RunDetail = [
+  { item_id: 'item-1', key: 'name', type: 'profile', status: 'active', section: 'profile', score: 0.87, item_deleted: false },
+  { item_id: 'item-gone', key: null, type: null, status: null, section: 'preference', score: 0.5, item_deleted: true },
+];
+const phase6Timeline = [
+  { id: 2, actor: 'operator@corp', action: 'memory.item.edited', resource: 'memory_item:item-1', details: { revision: 3 }, created_at: '2026-10-12T10:00:00Z' },
+  { id: 1, actor: 'agent:extractor', action: 'memory.extract.applied', resource: 'memory_item:item-1', details: { added: 1 }, created_at: '2026-10-01T08:00:00Z' },
+];
+const phase6ItemInjections = [{ run_id: 'run-1', injected_at: '2026-10-13T09:00:00Z', section: 'profile', score: 0.87, conversation_id: 'conv-1' }];
+
+function phase6Routes(items: any[]) {
+  return async (route: any) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'operator', tenant: '测试企业' } });
+    if (path.endsWith('/memory/customers') && request.method() === 'GET') return route.fulfill({ json: { items: [phase6Customer], total: 1, page: 1, page_size: 20 } });
+    if (path.endsWith('/memory/customers/cust-1/injections')) return route.fulfill({ json: { items: phase6Injections } });
+    if (path.endsWith('/memory/customers/cust-1/audit')) return route.fulfill({ json: { items: phase6Timeline } });
+    if (path.endsWith('/memory/customers/cust-1')) return route.fulfill({ json: { id: 'cust-1', created_at: phase6Customer.created_at, identities: [identity], items } });
+    if (path.endsWith('/memory/runs/run-1/injections')) return route.fulfill({ json: { run_id: 'run-1', items: phase6RunDetail } });
+    if (path.endsWith('/memory/runs/run-old/injections')) return route.fulfill({ json: { run_id: 'run-old', items: [] } });
+    if (path.endsWith('/memory/items/item-1/timeline')) return route.fulfill({ json: { item: phase6Items()[0], timeline: phase6Timeline, injection_count: 1, last_injected_at: '2026-10-13T09:00:00Z' } });
+    if (path.endsWith('/memory/items/item-1/injections')) return route.fulfill({ json: { items: phase6ItemInjections } });
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  };
+}
+
+test('memory visualization: stats columns, pending deep link, injections drill-down, item drawer', async ({ page }) => {
+  await page.route('**/api/v1/**', phase6Routes(phase6Items()));
+  await page.goto('/#/memory');
+
+  // FR-2: stats columns, VIP badge, highlighted pending count deep-links to the pending tab.
+  await expect(page.getByText('1 条待确认')).toBeVisible();
+  await expect(page.getByText('VIP 客户')).toBeVisible();
+  await page.getByRole('button', { name: '1 条待确认' }).click();
+  await expect(page).toHaveURL(/#\/memory\/customers\/cust-1\?tab=pending$/);
+  await expect(page.getByText('偏好邮件联系')).toBeVisible();
+
+  // FR-3: overview tab shows stats and identity; audit tab renders the memory.* timeline.
+  await page.getByRole('tab', { name: '概览' }).click();
+  await expect(page.getByText('身份绑定')).toBeVisible();
+  await page.getByRole('tab', { name: '审计记录' }).click();
+  const auditPanel = page.getByRole('tabpanel', { name: '审计记录' });
+  await expect(auditPanel.getByText('自动抽取')).toBeVisible();
+  await expect(auditPanel.getByText('人工编辑')).toBeVisible();
+
+  // FR-4: injections tab lists runs; expanding a run shows item details incl. deleted items.
+  await page.getByRole('tab', { name: '注入记录' }).click();
+  const runRow = page.locator('tr').filter({ hasText: 'run-1'.slice(0, 8) }).first();
+  await expect(runRow).toBeVisible();
+  await runRow.locator('.ant-table-row-expand-icon').click();
+  await expect(page.getByRole('button', { name: 'name' })).toBeVisible();
+  await expect(page.getByText('已删除').first()).toBeVisible();
+
+  // FR-5: clicking an injected item opens the detail drawer with fields, diff, timeline, injections.
+  await page.getByRole('button', { name: 'name' }).click();
+  const drawer = page.getByRole('dialog', { name: '记忆详情' });
+  await expect(drawer.locator('.memory-item-fields').getByText('张三丰')).toBeVisible();
+  await expect(drawer.getByText('内容变更（上一版 → 当前）')).toBeVisible();
+  await expect(drawer.getByLabel('上一版内容').getByText('张三', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('生命周期时间线')).toBeVisible();
+  await expect(drawer.getByText('自动抽取')).toBeVisible();
+  await expect(drawer.getByText('最近注入')).toBeVisible();
+  await expect(drawer.getByText('0.87').first()).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
+test('conversation workbench drawer shows per-run injections with pre-launch empty state', async ({ page }) => {
+  const conversation = { id: 'conv-1', external_id: 'sess-abc', mode: 'bot', agent_id: null, assigned_to: null, customer_id: 'cust-1', revision: 1, source: 'business', updated_at: '2026-10-13T10:00:00Z' };
+  const runs = [
+    { id: 'run-1', conversation_id: 'conv-1', status: 'completed', error_code: null, created_at: '2026-10-13T09:00:00Z' },
+    { id: 'run-old', conversation_id: 'conv-1', status: 'completed', error_code: null, created_at: '2026-09-01T09:00:00Z' },
+  ];
+  await page.route('**/api/v1/**', async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/me')) return route.fulfill({ json: { role: 'viewer', tenant: '测试企业' } });
+    if (path.endsWith('/conversations') && request.method() === 'GET') return route.fulfill({ json: { items: [conversation], total: 1, page: 1, page_size: 10 } });
+    if (path.endsWith('/conversations/conv-1')) return route.fulfill({ json: { ...conversation, messages: [], runs, actions: [] } });
+    if (path.endsWith('/agents')) return route.fulfill({ json: [] });
+    if (path.endsWith('/memory/customers/cust-1')) return route.fulfill({ json: { id: 'cust-1', created_at: phase6Customer.created_at, identities: [identity], items: phase6Items() } });
+    if (path.endsWith('/memory/runs/run-1/injections')) return route.fulfill({ json: { run_id: 'run-1', items: phase6RunDetail } });
+    if (path.endsWith('/memory/runs/run-old/injections')) return route.fulfill({ json: { run_id: 'run-old', items: [] } });
+    if (path.endsWith('/memory/items/item-1/timeline')) return route.fulfill({ json: { item: phase6Items()[0], timeline: phase6Timeline, injection_count: 1, last_injected_at: '2026-10-13T09:00:00Z' } });
+    if (path.endsWith('/memory/items/item-1/injections')) return route.fulfill({ json: { items: phase6ItemInjections } });
+    if (path.endsWith('/modules')) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto('/#/conversations/_all?focus=conv-1');
+  await expect(page.getByRole('heading', { name: 'sess-abc' })).toBeVisible();
+
+  // FR-6: the newest run expands by default with its injected items (viewer read-only).
+  await page.getByRole('button', { name: '客户画像' }).click();
+  const drawer = page.getByRole('dialog', { name: '客户画像与偏好' });
+  await expect(drawer.getByText('本次对话注入')).toBeVisible();
+  await expect(drawer.locator('.memory-run-injections').getByText('name', { exact: true })).toBeVisible();
+
+  // AC-8: a pre-launch run shows the explicit empty state instead of an error.
+  await drawer.getByText('run-old').click();
+  await expect(drawer.getByText('该会话无注入明细记录（功能上线前数据）')).toBeVisible();
+});
 
 test('ticket detail links to customer memory', async ({ page }) => {
   const ticket = { id: 'ticket-1', ticket_no: 'TK-100', title: '设备无法启动', description: '客户反馈开机无响应', status: 'open', note: '', revision: 1, priority: 2, customer_id: 'cust-1', updated_at: '2026-10-05T10:00:00Z' };
@@ -196,8 +312,8 @@ test('memory governance: flags, protected release, expired restore, delete custo
   await page.goto('/#/memory/customers/cust-1');
   await expect(page.getByRole('heading', { name: '客户详情' })).toBeVisible();
 
-  // Flag card: existing VIP flag plus the two unflagged keys.
-  await expect(page.getByText('服务标记')).toBeVisible();
+  // Flag tab: existing VIP flag plus the two unflagged keys.
+  await page.getByRole('tab', { name: '服务标记' }).click();
   await expect(page.getByText('年框客户')).toBeVisible();
   await expect(page.getByText('未标记').nth(1)).toBeVisible();
 
@@ -218,7 +334,8 @@ test('memory governance: flags, protected release, expired restore, delete custo
   await page.locator('.ant-popover').getByRole('button', { name: /确\s*认/ }).click();
   await expect(page.getByText('标记已解除')).toBeVisible();
 
-  // Protected human item: badge + release back to automatic management.
+  // Protected human item: badge + release back to automatic management (profile tab).
+  await page.getByRole('tab', { name: '客户画像' }).click();
   const protectedRow = page.locator('tr').filter({ hasText: '张三' });
   await expect(protectedRow.getByText('人工保护')).toBeVisible();
   await protectedRow.getByRole('button', { name: '恢复自动管理' }).click();
@@ -226,7 +343,8 @@ test('memory governance: flags, protected release, expired restore, delete custo
   await expect(page.getByText('已恢复自动管理')).toBeVisible();
   await expect(protectedRow.getByText('人工保护')).toHaveCount(0);
 
-  // Expired item can be restored (refreshing its decay clock server-side).
+  // Expired item can be restored (refreshing its decay clock server-side; preference tab).
+  await page.getByRole('tab', { name: '客户偏好' }).click();
   await page.locator('tr').filter({ hasText: '用英文回复' }).getByRole('button', { name: /恢\s*复/ }).click();
   await expect(page.getByText('记忆已恢复')).toBeVisible();
 

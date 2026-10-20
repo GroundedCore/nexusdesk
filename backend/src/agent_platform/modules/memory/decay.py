@@ -95,6 +95,22 @@ def injection_filter_sql(settings):
     return clause, params
 
 
+def injection_score_sql():
+    """SELECT expression for the injected rows' ranking score (Phase 6, FR-1).
+
+    The SQL twin of :func:`effective_confidence` restricted to the injection
+    population: protected rows and non-profile/preference types keep their
+    stored confidence (the same immunity rules as :func:`injection_filter_sql`),
+    everything else decays by age since the last reference. Bind params are
+    the same ``:hl_profile``/``:hl_preference`` names the filter clause
+    already provides, so one param dict serves both fragments.
+    """
+    return """CASE WHEN protected OR type NOT IN ('profile','preference') THEN confidence
+        ELSE confidence * exp(-ln(2) * EXTRACT(EPOCH FROM (now()-last_referenced_at))
+            / (CASE type WHEN 'profile' THEN CAST(:hl_profile AS numeric)
+               ELSE CAST(:hl_preference AS numeric) END * 86400.0)) END"""
+
+
 # The shared SQL twin of effective_confidence for the daily pass: per-type
 # half-life in days, flags excluded by the surrounding WHERE clause. Bind
 # params sit inside an untyped CASE, so each branch is CAST explicitly —

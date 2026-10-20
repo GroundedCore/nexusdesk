@@ -15,10 +15,13 @@ export function MemoryPage({ route, onNavigate }: Props) {
   const base = route.split('?')[0];
   const detail = base.match(/^\/memory\/customers\/([0-9a-zA-Z_-]+)$/);
   if (detail) {
+    const tabParam = new URLSearchParams(route.split('?')[1] || '').get('tab') || undefined;
     return (
       <CustomerDetail
+        key={tabParam ? `${detail[1]}:${tabParam}` : detail[1]}
         customerId={detail[1]}
         operator={operator}
+        initialTab={tabParam}
         onBack={() => onNavigate('/memory')}
       />
     );
@@ -30,7 +33,7 @@ export function MemoryPage({ route, onNavigate }: Props) {
         activeKey={tab}
         onChange={key => onNavigate(key === 'pending' ? '/memory/pending' : '/memory')}
         items={[
-          { key: 'customers', label: t('客户列表'), children: <CustomerList onOpen={id => onNavigate(`/memory/customers/${id}`)} /> },
+          { key: 'customers', label: t('客户列表'), children: <CustomerList onOpen={(id, tabKey) => onNavigate(`/memory/customers/${id}${tabKey ? `?tab=${tabKey}` : ''}`)} /> },
           { key: 'pending', label: t('待确认队列'), children: <PendingQueue operator={operator} onOpenCustomer={id => onNavigate(`/memory/customers/${id}`)} /> },
         ]}
       />

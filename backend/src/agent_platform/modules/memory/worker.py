@@ -257,6 +257,19 @@ class MemoryWorker:
             )
             if expired:
                 logger.info("Memory TTL pass expired %d event items", len(expired))
+            # Phase 6 (D3): expired injection detail rows ride the same daily
+            # pass, single DELETE in the same transaction.
+            retention = getattr(self.settings, "memory_injection_log_retention_days", 90)
+            purged = await many(
+                c,
+                """DELETE FROM memory_injection_log
+                WHERE tenant_id=:t AND injected_at<now()-:days*interval '1 day'
+                RETURNING id""",
+                t=tenant,
+                days=retention,
+            )
+            if purged:
+                logger.info("Memory TTL pass purged %d injection log rows", len(purged))
             retry = []
             if self.store is not None and self.store.available() == "vector":
                 retry = await many(

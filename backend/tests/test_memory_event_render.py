@@ -43,12 +43,15 @@ def test_render_event_injection_formats_and_orders():
         {"key": "open_ticket:TK-008", "content": "物流异常补发"},
         {"key": "commitment:17", "content": "48 小时内退款"},
     ]
-    rendered = render_event_injection(items)
+    rendered, injected = render_event_injection(items)
     assert rendered == (
         "【待跟进事项】\n- 工单 TK-008 处理中：物流异常补发\n- 承诺待兑现：48 小时内退款"
     )
+    # Phase 6: both rendered rows land in the injected list as event entries.
+    assert [entry[1:] for entry in injected] == [("event", None), ("event", None)]
 
 
 def test_render_event_injection_ignores_plain_event_rows_and_empty():
-    assert render_event_injection([{"key": "ticket:TK-1:created", "content": "x"}]) is None
-    assert render_event_injection([]) is None
+    # Plain event rows are neither rendered nor logged (Phase 6).
+    assert render_event_injection([{"key": "ticket:TK-1:created", "content": "x"}]) == (None, [])
+    assert render_event_injection([]) == (None, [])

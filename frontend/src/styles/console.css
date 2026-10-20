@@ -41,3 +41,34 @@ html[lang="hi"] .agent-filter-row>strong { width: 52px; }
 .memory-drawer-item dt{flex:0 0 auto}
 .memory-drawer-item dd{margin:0;overflow-wrap:anywhere}
 @media(max-width:640px){.memory-search{max-width:none;width:100%}.memory-toolbar>.ant-typography{margin-left:0}}
+
+/* Phase 6 · 记忆可视化与注入可解释性 */
+.memory-flag-filter{min-width:180px}
+.memory-type-counts{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:#4e5562;white-space:nowrap}
+.memory-pending-link{padding-left:0;font-weight:600;color:#cf3f24!important}
+.memory-pending-link:hover{color:#a83218!important}
+.memory-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.memory-stat{background:#f5f6f8;border-radius:14px;padding:14px 18px}
+.memory-stat>span{display:block;font-size:12px;color:#6d7481;margin-bottom:6px}
+.memory-stat>strong{font-size:24px;font-weight:650;color:#202124;letter-spacing:-.4px}
+.memory-overview-facts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.memory-overview-facts dt{font-size:12px;color:#6d7481;margin-bottom:4px}
+.memory-overview-facts dd{margin:0;color:#353944}
+.memory-timeline{padding-top:8px}
+.memory-timeline-event{display:flex;flex-direction:column;gap:2px}
+.memory-timeline-heading{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.memory-timeline-action{font-size:11px}
+.memory-timeline-details{margin:0!important;font-size:12px;overflow-wrap:anywhere}
+.memory-item-fields{margin-bottom:24px}
+.memory-item-fields .ant-descriptions-item-content{overflow-wrap:anywhere}
+.memory-diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.memory-diff-col{background:#f8f9fb;border-radius:10px;padding:12px 14px;min-width:0}
+.memory-diff-col h4{font-size:12px;font-weight:500;color:#717785;margin:0 0 8px}
+.memory-diff-line{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.8;color:#4e5562;border-radius:4px;padding:0 4px}
+.memory-diff-line.is-del{background:#fff1f0;color:#cf3f24;text-decoration:line-through}
+.memory-diff-line.is-add{background:#eef7e8;color:#2f7a1f}
+.memory-run-injections{margin-bottom:8px}
+.memory-run-injection-label{display:flex;gap:10px;align-items:center}
+.memory-run-injections .ant-table{margin:0 -8px}
+.memory-item-detail .ant-drawer-body{padding-top:20px}
+@media(max-width:640px){.memory-diff{grid-template-columns:1fr}.memory-flag-filter{width:100%}.memory-stats{grid-template-columns:repeat(2,1fr)}}
