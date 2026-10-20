@@ -20,6 +20,7 @@ uv sync
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uv run alembic upgrade head
 uv run python -m agent_platform.apps.seed  # 可选：初始化示例知识库、Agent 和会话
+uv run python -m agent_platform.apps.seed_memory_demo  # 可选：客户记忆可视化演示数据（4 个演示客户、注入明细、生命周期审计；幂等）
 uv run uvicorn agent_platform.apps.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 

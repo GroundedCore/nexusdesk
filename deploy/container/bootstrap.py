@@ -126,6 +126,11 @@ def seed_industry_cases(settings):
     subprocess.run(command, check=True)
 
 
+def seed_memory_demo():
+    """Load the memory-visualization demo dataset. Idempotent."""
+    subprocess.run([sys.executable, "-m", "agent_platform.apps.seed_memory_demo"], check=True)
+
+
 async def check_storage(settings):
     if settings.milvus_url:
         import httpx
@@ -214,11 +219,13 @@ def main(mode):
         asyncio.run(check_storage(settings))
         if settings.seed_industries:
             seed_industry_cases(settings)
+            seed_memory_demo()
         print("Migrations and configured storage checks completed.", flush=True)
         return
     subprocess.run([sys.executable, "-m", "agent_platform.apps.seed"], check=True)
     if settings.seed_industries:
         seed_industry_cases(settings)
+    seed_memory_demo()
     authority = render_nginx_config(settings)
     print(
         "NexusDesk quickstart: https://localhost:8080 — local demonstration only\n"
