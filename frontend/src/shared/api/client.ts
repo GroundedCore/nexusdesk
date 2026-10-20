@@ -116,13 +116,104 @@ export interface QualityRegressions { items: QualityRegressionItem[]; total: num
 export interface Audit { id: number; actor: string; action: string; resource: string; ip: string | null; created_at: string }
 
 // Phase 2 · customer entity + profile/preference memory (console API contract §5).
-export interface MemoryCustomer { id: string; external_keys: string[]; item_count: number; last_active_at: string | null; created_at: string }
+export interface CustomerMemoryStats {
+  /** active + pending item count (FR-2). */
+  total: number;
+  profile: number;
+  preference: number;
+  event: number;
+  pending: number;
+  /** Active service-flag keys (vip / complaint_risk / blacklist). */
+  flags: string[];
+  /** max(updated_at) across the customer's items. */
+  last_updated_at: string | null;
+}
+export interface MemoryCustomer { id: string; external_keys: string[]; item_count: number; last_active_at: string | null; created_at: string; memory_stats?: CustomerMemoryStats | null }
 export interface MemoryCustomerPage { items: MemoryCustomer[]; total: number; page: number; page_size: number }
 export interface MemoryIdentity { id: string; source: string; external_key: string; created_at: string }
 export interface MemoryItem { id: string; type: string; key: string; content: string; confidence: number; status: string; source_type: string; source_ref: string | null; prev_content?: string | null; revision?: number; customer_id?: string; protected?: boolean; last_referenced_at?: string | null; reference_count?: number; effective_confidence?: number | null; updated_at: string; created_at?: string }
 export interface MemoryCustomerDetail { id: string; created_at: string; identities: MemoryIdentity[]; items: MemoryItem[] }
 export interface MemoryPendingItem extends MemoryItem { customer_id: string; customer_external_keys?: string[] }
 export interface MemoryPendingPage { items: MemoryPendingItem[]; total: number; page: number; page_size: number }
+
+// Phase 6 · injection explainability + lifecycle visualization (03-technical-design §2/§3).
+/** Run-dimension injection record: one row per run that injected memory for a customer. */
+export interface MemoryInjection {
+  run_id: string;
+  injected_at: string;
+  /** Number of memory entries injected in that run (flags included). */
+  item_count: number;
+  /** Owning conversation for the deep link, when resolvable. */
+  conversation_id: string | null;
+}
+/** Item-level detail of one run's injection; content is never stored, key/type come from the live join. */
+export interface MemoryInjectionDetail {
+  item_id: string;
+  /** null once the item is deleted (render as 已删除, C3). */
+  key: string | null;
+  type: string | null;
+  status: string | null;
+  /** flag | profile | preference | event (summary is not logged, D2). */
+  section: string;
+  /** effective_confidence at injection time; null for flags. */
+  score: number | null;
+  injected_at?: string;
+  customer_id?: string;
+  item_deleted: boolean;
+}
+/** Reverse lookup row: one run that injected a given item. */
+export interface MemoryItemInjection {
+  run_id: string;
+  injected_at: string;
+  section: string;
+  score: number | null;
+  conversation_id: string | null;
+}
+/** memory.* audit event; details never carry memory content or PII (Phase 4 C4). */
+export interface MemoryAuditEvent {
+  id: number;
+  actor: string;
+  action: string;
+  resource: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+export interface MemoryInjectionList { items: MemoryInjection[] }
+export interface MemoryRunInjections { run_id: string; items: MemoryInjectionDetail[] }
+export interface MemoryItemInjectionList { items: MemoryItemInjection[] }
+export interface MemoryAuditList { items: MemoryAuditEvent[] }
+/** Single-item lifecycle (FR-5): full live fields (null once deleted), audit timeline, injection summary. */
+export interface MemoryItemTimeline {
+  item: MemoryItem | null;
+  timeline: MemoryAuditEvent[];
+  injection_count: number;
+  last_injected_at: string | null;
+}
+export interface MemoryCustomerListQuery {
+  q?: string;
+  page?: number;
+  page_size?: number;
+  with_stats?: boolean;
+  /** Server-side sort: memory total or pending count, descending. */
+  sort?: 'total' | 'pending';
+  /** Service-flag filter (vip / complaint_risk / blacklist). */
+  flag?: string;
+}
+export function getMemoryCustomers(query: MemoryCustomerListQuery = {}, signal?: AbortSignal) {
+  const params = new URLSearchParams();
+  params.set('page', String(query.page ?? 1));
+  params.set('page_size', String(query.page_size ?? 20));
+  if (query.q) params.set('q', query.q);
+  if (query.with_stats) params.set('with_stats', 'true');
+  if (query.sort) params.set('sort', query.sort);
+  if (query.flag) params.set('flag', query.flag);
+  return api<MemoryCustomerPage>(`/memory/customers?${params}`, { signal });
+}
+export const getCustomerInjections = (customerId: string, limit = 50) => api<MemoryInjectionList>(`/memory/customers/${customerId}/injections?limit=${limit}`);
+export const getRunInjections = (runId: string) => api<MemoryRunInjections>(`/memory/runs/${runId}/injections`);
+export const getItemInjections = (itemId: string, limit = 20) => api<MemoryItemInjectionList>(`/memory/items/${itemId}/injections?limit=${limit}`);
+export const getItemTimeline = (itemId: string, limit = 100) => api<MemoryItemTimeline>(`/memory/items/${itemId}/timeline?limit=${limit}`);
+export const getCustomerAudit = (customerId: string, limit = 100) => api<MemoryAuditList>(`/memory/customers/${customerId}/audit?limit=${limit}`);
 
 // Phase 4 · governance observability (GET /observability/memory).
 export interface MemoryExtractionDay { day: string; runs: number; added: number; updated: number; pending: number; dropped: number; pii_masked: number }

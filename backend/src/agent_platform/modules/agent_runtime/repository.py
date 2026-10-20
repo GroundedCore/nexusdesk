@@ -323,9 +323,36 @@ class RunRepository:
                     await enqueue_reinforce_task(conn, row["tenant_id"], memory["reinforce"])
                 # Phase 4 (R10): injection hit-rate telemetry. Written only
                 # when something was actually injected (the worker drops the
-                # key otherwise); data carries section counts, never content.
+                # key otherwise); data carries section counts plus, since
+                # Phase 6 (FR-1), the injected item ids — never content.
                 if memory and memory.get("injected"):
                     await self._event(conn, run_id, "memory.injected", memory["injected"])
+                    # Phase 6 (FR-1): the run × item detail rows share this
+                    # transaction, so the event and its detail commit or roll
+                    # back together. One unnest-based batch INSERT for the
+                    # whole run — never per-row writes on the hot path (AC-9).
+                    # The worker omits "injection_log" entirely when the
+                    # platform switch is off (C5 degradation: counts only).
+                    log_rows = memory.get("injection_log")
+                    if log_rows and conversation["customer_id"]:
+                        await conn.execute(
+                            text("""INSERT INTO memory_injection_log
+                            (tenant_id,run_id,customer_id,item_id,section,score)
+                            SELECT :tenant,:run,:customer,item_id,section,score
+                            FROM unnest(
+                                CAST(:item_ids AS uuid[]),
+                                CAST(:sections AS varchar[]),
+                                CAST(:scores AS real[])
+                            ) AS detail(item_id,section,score)"""),
+                            {
+                                "tenant": row["tenant_id"],
+                                "run": run_id,
+                                "customer": conversation["customer_id"],
+                                "item_ids": [entry["item_id"] for entry in log_rows],
+                                "sections": [entry["section"] for entry in log_rows],
+                                "scores": [entry["score"] for entry in log_rows],
+                            },
+                        )
             await self._event(
                 conn, run_id, "run." + status, {"output": output, "error_code": error}
             )

@@ -172,21 +172,33 @@ class RuntimeWorker:
         for item_id in overlap_ids([*items, *events], row.get("input") or ""):
             key = str(item_id)
             reinforce[key] = reinforce.get(key, 0) + 1
-        sections = [
-            section
-            for section in (
-                render_flag_injection(flags),
-                render_memory_injection(items),
-                render_event_injection(events),
-            )
-            if section
-        ]
+        # Phase 6 (FR-1): each renderer also returns the entries it actually
+        # rendered — (item_id, section, score) — which ride the run dict to
+        # finish() for the memory.injected event (item_ids) and the
+        # memory_injection_log batch insert.
+        flag_text, flag_log = render_flag_injection(flags)
+        memory_text, memory_log = render_memory_injection(items)
+        event_text, event_log = render_event_injection(events)
+        sections = [section for section in (flag_text, memory_text, event_text) if section]
         if sections:
+            rendered = [*flag_log, *memory_log, *event_log]
             row["_memory_injected"] = {
                 "items": len(items),
                 "flags": len(flags),
                 "events": len(events),
+                "item_ids": [str(item_id) for item_id, _, _ in rendered if item_id],
             }
+            row["_memory_injection_log"] = [
+                {
+                    "item_id": str(item_id),
+                    "section": section,
+                    # asyncpg returns the SQL-computed score as Decimal; the
+                    # batch insert binds a real[], so normalise to float here.
+                    "score": round(float(score), 6) if score is not None else None,
+                }
+                for item_id, section, score in rendered
+                if item_id
+            ]
         return "\n\n".join(sections) or None
 
     def _memory_context(self, row, dropped):
@@ -235,6 +247,13 @@ class RuntimeWorker:
             memory["reinforce"] = hits
         if row.get("_memory_injected"):
             memory["injected"] = row["_memory_injected"]
+        # Phase 6 (FR-1/D3): the run × item detail rows are gated by the
+        # platform switch; when off, finish() writes the counts-only event
+        # exactly like Phase 4 (C5 degradation).
+        if row.get("_memory_injection_log") and getattr(
+            self.settings, "memory_injection_log_enabled", True
+        ):
+            memory["injection_log"] = row["_memory_injection_log"]
         return memory or None
 
     def _done(self, task):

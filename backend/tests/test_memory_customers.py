@@ -171,7 +171,7 @@ def test_p2_ut_11_trim_items_token_budget_stops_accumulating():
 
 
 def test_p2_ut_12_injection_rendering_groups_by_type():
-    rendered = render_memory_injection(
+    rendered, injected = render_memory_injection(
         [
             item("profile", "name", "张三"),
             item("preference", "language", "英文回复"),
@@ -181,11 +181,15 @@ def test_p2_ut_12_injection_rendering_groups_by_type():
     profile_section, _, preference_section = rendered.partition("\n\n")
     assert profile_section == f"{PROFILE_HEADER}\n- name: 张三\n- product_model: X200"
     assert preference_section == f"{PREFERENCE_HEADER}\n- language: 英文回复"
+    # Phase 6: the injected list follows render order (profile, then
+    # preference); items without an id/effective score yield None entries.
+    assert [entry[1] for entry in injected] == ["profile", "profile", "preference"]
     # Empty groups are omitted entirely.
-    only_preference = render_memory_injection([item("preference", "style", "简洁")])
+    only_preference, only_injected = render_memory_injection([item("preference", "style", "简洁")])
     assert only_preference == f"{PREFERENCE_HEADER}\n- style: 简洁"
     assert PROFILE_HEADER not in only_preference
-    assert render_memory_injection([]) is None
+    assert [entry[1] for entry in only_injected] == ["preference"]
+    assert render_memory_injection([]) == (None, [])
 
 
 def test_extraction_prompt_carries_vocabulary_existing_keys_and_dialogue():

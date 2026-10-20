@@ -150,6 +150,15 @@ class Settings(BaseSettings):
     # Reference-reinforcement write sampling at dispatch time: 1.0 records
     # every run's hits, 0 disables reinforcement writes entirely (R11).
     memory_reinforce_sample_rate: float = Field(default=1.0, ge=0, le=1)
+    # Injection explainability (Phase 6, FR-1). Master switch for the
+    # run × item detail rows in memory_injection_log: when off the run-finish
+    # path degrades to the Phase 4 behaviour (counts-only memory.injected
+    # event) with zero detail writes.
+    memory_injection_log_enabled: bool = True
+    # Retention for injection detail rows (D3); the worker's daily
+    # maintenance pass deletes rows older than this alongside the event TTL
+    # sweep.
+    memory_injection_log_retention_days: int = Field(default=90, ge=1, le=3650)
     model_backend: Literal["demo", "openai", "unconfigured"] = "demo"
     model_name: str = ""
     model_api_key: SecretStr | None = None

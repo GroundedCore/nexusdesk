@@ -5,6 +5,7 @@ precedent: any authenticated principal reads (``Reader``), writes require
 ``admin`` or ``operator`` (``Operator``); viewers get 403 on mutations.
 """
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
@@ -41,13 +42,75 @@ async def customers(
     q: str = Query(default="", max_length=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    with_stats: bool = Query(default=False),
+    sort: Literal["updated", "pending", "total"] = Query(default="updated"),
+    flag: str | None = Query(default=None, max_length=30),
 ):
-    return await services(request).list_customers(user.tenant, q, page, page_size)
+    # Phase 6 (FR-2): with_stats attaches the batched memory stats columns;
+    # sort orders by pending/total memory counts; flag filters by one active
+    # service flag.
+    return await services(request).list_customers(
+        user.tenant, q, page, page_size, with_stats=with_stats, sort=sort, flag=flag
+    )
 
 
 @router.get("/customers/{cid}")
 async def customer(cid: UUID, request: Request, user: Reader):
     return await services(request).customer_detail(user.tenant, cid)
+
+
+@router.get("/customers/{cid}/injections")
+async def customer_injections(
+    cid: UUID,
+    request: Request,
+    user: Reader,
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    # Phase 6 (FR-4): run-dimension injection history for one customer.
+    return await services(request).list_injections(user.tenant, cid, limit)
+
+
+@router.get("/customers/{cid}/audit")
+async def customer_audit(
+    cid: UUID,
+    request: Request,
+    user: Reader,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    # Phase 6 (FR-3): the customer's memory.* audit timeline (content-free
+    # payloads, Phase 4 C4).
+    return await services(request).customer_audit_timeline(user.tenant, cid, limit)
+
+
+@router.get("/runs/{run_id}/injections")
+async def run_injections(run_id: UUID, request: Request, user: Reader):
+    # Phase 6 (FR-4): one run's item-level injection detail; historical runs
+    # without detail rows return an empty list (AC-8).
+    return await services(request).injection_detail(user.tenant, run_id)
+
+
+@router.get("/items/{iid}/injections")
+async def item_injections(
+    iid: UUID,
+    request: Request,
+    user: Reader,
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    # Phase 6 (FR-4): reverse lookup of the runs one item was injected into.
+    return await services(request).item_injections(user.tenant, iid, limit)
+
+
+@router.get("/items/{iid}/timeline")
+async def item_timeline(
+    iid: UUID,
+    request: Request,
+    user: Reader,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    # Phase 6 (FR-5): single-item lifecycle — full current fields (including
+    # prev_content and the live effective confidence), audit timeline and
+    # injection summary.
+    return await services(request).item_timeline(user.tenant, iid, limit)
 
 
 @router.delete("/customers/{cid}")

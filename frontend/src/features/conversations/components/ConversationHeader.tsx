@@ -100,7 +100,7 @@ export function ConversationHeader({
         <p className="hint">「{detail.deleted_agent.name}」{t('已永久删除。历史对话与运行记录保留，此会话为只读。')}</p>
       )}
       {detail.customer_id && (
-        <CustomerMemoryDrawer customerId={detail.customer_id} open={memoryOpen} onClose={() => setMemoryOpen(false)} />
+        <CustomerMemoryDrawer customerId={detail.customer_id} open={memoryOpen} onClose={() => setMemoryOpen(false)} runs={detail.runs} />
       )}
     </div>
   );

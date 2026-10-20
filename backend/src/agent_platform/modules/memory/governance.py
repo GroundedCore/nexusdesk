@@ -212,6 +212,15 @@ async def delete_customer(engine, tenant, actor, customer_id, store=None):
             t=tenant,
             c=customer_id,
         )
+        # Phase 6 (FR-1, AC-12/C2): injection detail rows have no FK (D1), so
+        # the cascade is explicit here, same transaction — a deleted customer
+        # leaves no traceable injection history behind.
+        injection_logs = await many(
+            c,
+            "DELETE FROM memory_injection_log WHERE tenant_id=:t AND customer_id=:c RETURNING id",
+            t=tenant,
+            c=customer_id,
+        )
         await execute(
             c,
             "DELETE FROM memory_customers WHERE id=:id AND tenant_id=:t",
@@ -227,6 +236,7 @@ async def delete_customer(engine, tenant, actor, customer_id, store=None):
             items_deleted=len(items),
             identities_deleted=len(identities),
             conversations_unlinked=len(conversations),
+            injection_logs_deleted=len(injection_logs),
         )
     if store is not None:
         await store.delete_customer(customer_id)
@@ -234,6 +244,7 @@ async def delete_customer(engine, tenant, actor, customer_id, store=None):
         "items_deleted": len(items),
         "identities_deleted": len(identities),
         "conversations_unlinked": len(conversations),
+        "injection_logs_deleted": len(injection_logs),
     }
 
 
@@ -281,6 +292,17 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
         identities = await many(
             c,
             """UPDATE memory_identities SET customer_id=:target
+            WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
+            target=target_id,
+            t=tenant,
+            source=source_id,
+        )
+        # Phase 6 (FR-1): the source's injection detail rows re-point to the
+        # surviving customer in this same transaction, keeping the injection
+        # history continuous across the merge (no FK to do it for us, D1).
+        injection_logs = await many(
+            c,
+            """UPDATE memory_injection_log SET customer_id=:target
             WHERE tenant_id=:t AND customer_id=:source RETURNING id""",
             target=target_id,
             t=tenant,
@@ -366,6 +388,7 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
             identities_moved=len(identities),
             conversations_moved=len(conversations),
             tickets_relinked=len(tickets),
+            injection_logs_moved=len(injection_logs),
         )
         return {
             "moved": moved,
@@ -373,6 +396,7 @@ async def merge_customers(engine, tenant, actor, source_id, target_id):
             "identities_moved": len(identities),
             "conversations_moved": len(conversations),
             "tickets_relinked": len(tickets),
+            "injection_logs_moved": len(injection_logs),
         }
 
 

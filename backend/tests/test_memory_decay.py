@@ -83,12 +83,12 @@ def test_injection_filter_sql_keeps_threshold_equality():
 
 
 def test_render_flag_injection_none_without_flags():
-    assert render_flag_injection([]) is None
-    assert render_flag_injection(None) is None
+    assert render_flag_injection([]) == (None, [])
+    assert render_flag_injection(None) == (None, [])
 
 
 def test_render_flag_injection_labels_and_content():
-    body = render_flag_injection(
+    body, injected = render_flag_injection(
         [
             {"key": "vip", "content": "优先服务，使用尊称"},
             {"key": "complaint_risk", "content": "避免承诺时限"},
@@ -99,10 +99,12 @@ def test_render_flag_injection_labels_and_content():
     assert "- 投诉风险：避免承诺时限" in body
     # No fixed instruction without a blacklist flag.
     assert "谨慎服务" not in body
+    # Phase 6: flags log with a NULL score (decay-immune, unranked).
+    assert [entry[1:] for entry in injected] == [("flag", None), ("flag", None)]
 
 
 def test_render_flag_injection_blacklist_appends_fixed_instruction():
-    body = render_flag_injection([{"key": "blacklist", "content": "历史恶意投诉"}])
+    body, _ = render_flag_injection([{"key": "blacklist", "content": "历史恶意投诉"}])
     assert "- 黑名单：历史恶意投诉" in body
     assert body.endswith("- 谨慎服务，涉承诺一律转人工确认")
 

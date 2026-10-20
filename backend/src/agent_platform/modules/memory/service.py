@@ -19,6 +19,7 @@ from agent_platform.modules.memory.decay import (
     effective_confidence,
     half_lives,
     injection_filter_sql,
+    injection_score_sql,
 )
 from agent_platform.modules.memory.pii import mask
 from agent_platform.platform.persistence.store import (
@@ -96,48 +97,69 @@ def trim_items(items, max_items, max_tokens=INJECT_MAX_TOKENS):
 def render_memory_injection(items):
     """Render active items as the injected system message body (P2-UT-12).
 
-    Empty groups are omitted entirely; ``None`` means "inject nothing".
+    Returns ``(text, injected)``: the text is byte-identical to the pre-
+    Phase-6 rendering (empty groups omitted, ``None`` meaning "inject
+    nothing"), and ``injected`` lists the rendered entries as
+    ``(item_id, section, score)`` triples in render order for the Phase 6
+    injection log (FR-1). The score is the row's effective confidence when
+    the caller selected it (``active_items`` does), otherwise ``None``.
     """
     groups = {"profile": [], "preference": []}
     for item in items:
         if item["type"] in groups:
             groups[item["type"]].append(item)
     sections = []
+    injected = []
     for item_type, header in (("profile", PROFILE_HEADER), ("preference", PREFERENCE_HEADER)):
         if groups[item_type]:
             lines = "\n".join(f"- {item['key']}: {item['content']}" for item in groups[item_type])
             sections.append(f"{header}\n{lines}")
-    return "\n\n".join(sections) if sections else None
+            injected.extend(
+                (item.get("id"), item_type, item.get("effective_confidence"))
+                for item in groups[item_type]
+            )
+    return ("\n\n".join(sections) if sections else None), injected
 
 
 def render_event_injection(items):
     """Render the high-priority event section (FR-3), appended after the
     profile/preference rendering so the injection order stays
-    summary → profile/preference → pending events. ``None`` means "inject
-    nothing", matching ``render_memory_injection``.
+    summary → profile/preference → pending events.
+
+    Returns ``(text, injected)`` like :func:`render_memory_injection`;
+    ``None`` text means "inject nothing". Event rows carry no ranking score
+    (they are ordered by recency, not confidence), so their score is
+    ``None``.
     """
     lines = []
+    injected = []
     for item in items:
         key = item["key"]
         if key.startswith(OPEN_TICKET_PREFIX):
             lines.append(f"- 工单 {key[len(OPEN_TICKET_PREFIX):]} 处理中：{item['content']}")
         elif key.startswith(COMMITMENT_PREFIX):
             lines.append(f"- 承诺待兑现：{item['content']}")
-    return f"{EVENT_HEADER}\n" + "\n".join(lines) if lines else None
+        else:
+            continue
+        injected.append((item.get("id"), "event", None))
+    return (f"{EVENT_HEADER}\n" + "\n".join(lines) if lines else None), injected
 
 
 def render_flag_injection(flags):
     """Render the flag section (FR-2), placed ahead of the profile section
-    (R15). ``None`` means "inject nothing" — with no flags the message body
+    (R15). Returns ``(text, injected)`` like :func:`render_memory_injection`;
+    ``None`` text means "inject nothing" — with no flags the message body
     stays byte-identical to Phase 3. A blacklist flag appends the fixed
-    instruction line.
+    instruction line. Flags are decay-immune and unranked, so their score is
+    ``None``.
     """
     if not flags:
-        return None
+        return None, []
     lines = [f"- {FLAG_LABELS.get(flag['key'], flag['key'])}：{flag['content']}" for flag in flags]
     if any(flag["key"] == "blacklist" for flag in flags):
         lines.append(f"- {BLACKLIST_INSTRUCTION}")
-    return f"{FLAG_HEADER}\n" + "\n".join(lines)
+    injected = [(flag.get("id"), "flag", None) for flag in flags]
+    return f"{FLAG_HEADER}\n" + "\n".join(lines), injected
 
 
 # L3 reference signal (R11): an injected item counts as referenced when its
@@ -169,6 +191,36 @@ def overlap_ids(items, input_text):
         for item in items
         if item.get("id") and text_tokens(f"{item['key']} {item['content']}") & query
     ]
+
+
+async def _memory_stats(c, tenant, customer_ids):
+    """Batched per-customer memory stats for the list layer (Phase 6, FR-2).
+
+    One GROUP BY query for the whole page (no N+1): non-deleted totals per
+    type (active+pending), the pending count, the active flag keys for the
+    service badges, and the latest item update. Returns ``{customer_id:
+    stats}``; customers without any items are simply absent.
+    """
+    rows = await many(
+        c,
+        """SELECT customer_id,
+        (count(*) FILTER (WHERE status IN ('active','pending')))::int AS total,
+        (count(*) FILTER (WHERE status='pending'))::int AS pending,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='profile'))::int
+            AS profile,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='preference'))::int
+            AS preference,
+        (count(*) FILTER (WHERE status IN ('active','pending') AND type='event'))::int
+            AS event,
+        COALESCE(array_agg(key) FILTER (WHERE status='active' AND type='flag'), '{}') AS flags,
+        max(updated_at) AS last_updated_at
+        FROM memory_items
+        WHERE tenant_id=:t AND customer_id=ANY(:ids) AND status<>'deleted'
+        GROUP BY customer_id""",
+        t=tenant,
+        ids=list(customer_ids),
+    )
+    return {row.pop("customer_id"): row for row in rows}
 
 
 class MemoryService:
@@ -246,16 +298,23 @@ class MemoryService:
         Phase 4 (R7): with decay enabled the profile/preference rows also
         pass the inline effective-confidence threshold; event search never
         gets this filter. With decay off the query is exactly the Phase 3
-        one.
+        one. Phase 6 (FR-1): each row also carries ``effective_confidence``
+        — the SQL-computed decayed score with decay on (same formula as the
+        filter), the stored confidence with decay off — so the injection log
+        can persist the ranking score without a second query.
         """
         clause, decay_params = "", {}
+        score_sql = "confidence"
         if self._decay_enabled():
             clause, decay_params = injection_filter_sql(self.settings)
+            score_sql = injection_score_sql()
         async with self.engine.connect() as c:
             return await many(
                 c,
                 """SELECT id,customer_id,type,key,content,confidence,status,source_type,source_ref,
-                prev_content,revision,updated_at FROM memory_items
+                prev_content,revision,updated_at,"""
+                + score_sql
+                + """ AS effective_confidence FROM memory_items
                 WHERE tenant_id=:t AND customer_id=:c AND status='active' AND type=ANY(:types)"""
                 + clause
                 + " ORDER BY updated_at DESC,id DESC LIMIT :lim",
@@ -526,7 +585,22 @@ class MemoryService:
     # write audit records without memory content (keys and counts only).
     # ------------------------------------------------------------------
 
-    async def list_customers(self, tenant, q="", page=1, page_size=20):
+    async def list_customers(
+        self, tenant, q="", page=1, page_size=20, with_stats=False, sort="updated", flag=None
+    ):
+        """Customer list; Phase 6 (FR-2) adds optional memory stats columns.
+
+        ``with_stats`` attaches one stats dict per row (totals per type,
+        pending count, active flag keys, last update) fetched in a single
+        batched GROUP BY query for the page — no N+1. ``sort`` orders by
+        pending or total memory counts (default: customer recency, the
+        Phase 2 behaviour); ``flag`` filters to customers carrying one
+        active service flag.
+        """
+        if sort not in ("updated", "pending", "total"):
+            raise DomainError("memory_sort_invalid")
+        if flag is not None and flag not in governance.FLAG_KEYS:
+            raise DomainError("memory_flag_key_invalid")
         page = max(page, 1)
         page_size = max(1, min(page_size, 100))
         where = "c.tenant_id=:t"
@@ -535,6 +609,26 @@ class MemoryService:
             where += """ AND EXISTS (SELECT 1 FROM memory_identities x
                 WHERE x.customer_id=c.id AND x.tenant_id=c.tenant_id AND x.external_key ILIKE :pattern)"""
             params["pattern"] = "%" + q + "%"
+        if flag:
+            where += """ AND EXISTS (SELECT 1 FROM memory_items f
+                WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id
+                AND f.type='flag' AND f.status='active' AND f.key=:flag)"""
+            params["flag"] = flag
+        order = "c.updated_at DESC,c.id DESC"
+        if sort == "pending":
+            order = (
+                """(SELECT count(*) FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id AND m.status='pending'
+                ) DESC,"""
+                + order
+            )
+        elif sort == "total":
+            order = (
+                """(SELECT count(*) FROM memory_items m
+                 WHERE m.customer_id=c.id AND m.tenant_id=c.tenant_id
+                 AND m.status IN ('active','pending')) DESC,"""
+                + order
+            )
         async with self.engine.connect() as c:
             total = await one(
                 c,
@@ -555,9 +649,26 @@ class MemoryService:
                 ) AS last_active_at
                 FROM memory_customers c WHERE """
                 + where
-                + " ORDER BY c.updated_at DESC,c.id DESC LIMIT :lim OFFSET :off",
+                + " ORDER BY "
+                + order
+                + " LIMIT :lim OFFSET :off",
                 **params,
             )
+            if with_stats and items:
+                stats = await _memory_stats(c, tenant, [row["id"] for row in items])
+                for row in items:
+                    row["memory_stats"] = stats.get(
+                        row["id"],
+                        {
+                            "total": 0,
+                            "pending": 0,
+                            "profile": 0,
+                            "preference": 0,
+                            "event": 0,
+                            "flags": [],
+                            "last_updated_at": None,
+                        },
+                    )
             return {
                 "items": items,
                 "total": total["total"],
@@ -921,3 +1032,197 @@ class MemoryService:
 
     async def merge_customers(self, tenant, actor, source_id, target_id):
         return await governance.merge_customers(self.engine, tenant, actor, source_id, target_id)
+
+    # ------------------------------------------------------------------
+    # Phase 6 injection explainability and lifecycle queries (FR-2/FR-4/
+    # FR-5). Every query is tenant-scoped; detail rows carry ids, sections
+    # and scores only — item content is joined from the current row at
+    # query time and physically deleted items surface as "已删除" markers,
+    # never reconstructed content (C3/C4).
+    # ------------------------------------------------------------------
+
+    def _effective_now(self, item):
+        """Live effective confidence for one console row (same formula as FR-6.4)."""
+        table = half_lives(self.settings) if self.settings else DEFAULT_HALF_LIVES
+        return round(
+            effective_confidence(
+                item["confidence"],
+                item["type"],
+                item["protected"],
+                item["last_referenced_at"],
+                datetime.now(UTC),
+                table,
+            ),
+            6,
+        )
+
+    async def customer_memory_stats(self, tenant, customer_ids):
+        """Batched list-layer stats for a set of customers (FR-2)."""
+        if not customer_ids:
+            return {}
+        async with self.engine.connect() as c:
+            return await _memory_stats(c, tenant, customer_ids)
+
+    async def list_injections(self, tenant, customer_id, limit=50):
+        """Run-dimension injection history for one customer, newest first (FR-4)."""
+        limit = max(1, min(limit, 200))
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    id=customer_id,
+                    t=tenant,
+                ),
+                "memory_customer_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT l.run_id, max(l.injected_at) AS injected_at,
+                count(*)::int AS item_count, r.conversation_id
+                FROM memory_injection_log l
+                LEFT JOIN runtime_runs r ON r.id=l.run_id
+                WHERE l.tenant_id=:t AND l.customer_id=:c
+                GROUP BY l.run_id, r.conversation_id
+                ORDER BY max(l.injected_at) DESC,l.run_id DESC LIMIT :lim""",
+                t=tenant,
+                c=customer_id,
+                lim=limit,
+            )
+            return {"items": rows}
+
+    async def injection_detail(self, tenant, run_id):
+        """Item-level detail of one run's injection (FR-4; shared by the
+        conversation view and the injection-log drill-down).
+
+        Historical runs without detail rows (pre-Phase-6 data) return an
+        empty list, not an error (AC-8). Items physically deleted since the
+        injection surface as ``item_deleted`` markers with no key/type —
+        content is never reconstructed (C3).
+        """
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM runtime_runs WHERE id=:id AND tenant_id=:t",
+                    id=run_id,
+                    t=tenant,
+                ),
+                "run_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT l.item_id, l.customer_id, l.section, l.score, l.injected_at,
+                m.key, m.type, m.status, (m.id IS NULL) AS item_deleted
+                FROM memory_injection_log l
+                LEFT JOIN memory_items m ON m.id=l.item_id AND m.tenant_id=l.tenant_id
+                WHERE l.tenant_id=:t AND l.run_id=:r
+                ORDER BY l.id""",
+                t=tenant,
+                r=run_id,
+            )
+            return {"run_id": str(run_id), "items": rows}
+
+    async def item_injections(self, tenant, item_id, limit=20):
+        """Reverse lookup: the recent runs one item was injected into (FR-4)."""
+        limit = max(1, min(limit, 100))
+        async with self.engine.connect() as c:
+            rows = await many(
+                c,
+                """SELECT l.run_id, l.section, l.score, l.injected_at, r.conversation_id
+                FROM memory_injection_log l
+                LEFT JOIN runtime_runs r ON r.id=l.run_id
+                WHERE l.tenant_id=:t AND l.item_id=:i
+                ORDER BY l.injected_at DESC,l.id DESC LIMIT :lim""",
+                t=tenant,
+                i=item_id,
+                lim=limit,
+            )
+            if not rows:
+                # An unknown (or cross-tenant) item id is a 404; an existing
+                # item that was simply never injected is an empty list.
+                required(
+                    await one(
+                        c,
+                        "SELECT id FROM memory_items WHERE id=:id AND tenant_id=:t",
+                        id=item_id,
+                        t=tenant,
+                    ),
+                    "memory_item_not_found",
+                )
+            return {"items": rows}
+
+    async def item_timeline(self, tenant, item_id, limit=100):
+        """Single-item lifecycle (FR-5): full current fields, the audit
+        timeline and an injection summary.
+
+        The timeline renders from ``audit_records`` whose payloads never
+        carry memory content (Phase 4 C4). A physically deleted item keeps
+        its timeline and injection summary with ``item=None`` instead of a
+        404 — its history is exactly what the operator came for.
+        """
+        limit = max(1, min(limit, 500))
+        async with self.engine.connect() as c:
+            item = await one(
+                c,
+                "SELECT * FROM memory_items WHERE id=:id AND tenant_id=:t",
+                id=item_id,
+                t=tenant,
+            )
+            timeline = await many(
+                c,
+                """SELECT id,actor,action,resource,details,created_at FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%' AND resource=:rid
+                ORDER BY id DESC LIMIT :lim""",
+                t=tenant,
+                rid=str(item_id),
+                lim=limit,
+            )
+            injection = await one(
+                c,
+                """SELECT count(*)::int AS injection_count, max(injected_at) AS last_injected_at
+                FROM memory_injection_log WHERE tenant_id=:t AND item_id=:i""",
+                t=tenant,
+                i=item_id,
+            )
+            if item is None and not timeline and not injection["injection_count"]:
+                raise DomainError("memory_item_not_found", 404)
+            if item is not None:
+                item["effective_confidence"] = self._effective_now(item)
+            return {
+                "item": item,
+                "timeline": timeline,
+                "injection_count": injection["injection_count"],
+                "last_injected_at": injection["last_injected_at"],
+            }
+
+    async def customer_audit_timeline(self, tenant, customer_id, limit=100):
+        """Customer-dimension ``memory.*`` audit timeline, newest first (FR-3).
+
+        Matches the customer-level audits (resource = customer id) and every
+        item-level audit carrying ``details.customer_id``; payloads are
+        content-free by the Phase 4 C4 invariant, so the response introduces
+        no new disclosure surface.
+        """
+        limit = max(1, min(limit, 500))
+        async with self.engine.connect() as c:
+            required(
+                await one(
+                    c,
+                    "SELECT id FROM memory_customers WHERE id=:id AND tenant_id=:t",
+                    id=customer_id,
+                    t=tenant,
+                ),
+                "memory_customer_not_found",
+            )
+            rows = await many(
+                c,
+                """SELECT id,actor,action,resource,details,created_at FROM audit_records
+                WHERE tenant_id=:t AND action LIKE 'memory.%'
+                AND (resource=:cid OR details->>'customer_id'=:cid)
+                ORDER BY id DESC LIMIT :lim""",
+                t=tenant,
+                cid=str(customer_id),
+                lim=limit,
+            )
+            return {"items": rows}
