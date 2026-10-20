@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_platform.platform.identity.access import Admin
+from agent_platform.platform.persistence.audit_context import client_ip
 from agent_platform.platform.persistence.store import (
     DomainError,
     audit,
@@ -294,7 +295,7 @@ async def callback(
                 app_id,
                 current,
                 embed_revision=cfg["revision"] if cfg else None,
-                ip=request.client.host if request.client else None,
+                ip=client_ip(request.scope),
                 user_agent=request.headers.get("user-agent", ""),
             )
             await audit(
@@ -352,6 +353,6 @@ async def chat_token(body: ChatTokenInput, request: Request, identity: Identity)
             identity.app_id,
             key_id=identity.key_id,
             embed_revision=cfg["revision"],
-            ip=request.client.host if request.client else None,
+            ip=client_ip(request.scope),
             user_agent=request.headers.get("user-agent", ""),
         )

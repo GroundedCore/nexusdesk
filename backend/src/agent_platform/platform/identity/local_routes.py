@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, Request, Response
 from pydantic import BaseModel, Field, SecretStr
 
 from agent_platform.platform.identity.local_admin import LocalAdmin
+from agent_platform.platform.persistence.audit_context import client_ip
 from agent_platform.platform.persistence.store import DomainError, one
 
 router = APIRouter(prefix="/auth/local", tags=["local-admin"])
@@ -54,7 +55,7 @@ async def login(body: LoginInput, request: Request):
     return await service(request).login(
         body.username,
         body.password.get_secret_value(),
-        request.client.host if request.client else "unknown",
+        client_ip(request.scope) or "unknown",
         request.headers.get("user-agent", ""),
     )
 

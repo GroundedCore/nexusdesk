@@ -205,6 +205,9 @@ def test_deployment_topologies_and_no_secret_copy():
         encoding="utf-8"
     )
     assert "proxy_set_header Authorization $http_authorization;" in quick_nginx
+    assert quick_nginx.count("proxy_set_header X-Real-IP $remote_addr;") == 2
+    assert quick_nginx.count("proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;") == 2
+    assert quick_nginx.count("proxy_set_header X-Forwarded-Proto $scheme;") == 2
     # Neither entry point injects an identity: an unauthenticated request must
     # reach the API unchanged and be rejected there.
     assert "__LOCAL_TOKEN__" not in quick_nginx
