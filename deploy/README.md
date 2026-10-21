@@ -171,7 +171,7 @@ HNSW 索引随列级联删除，无需单独处理。清理完成后设 `POSTGRE
 
 ```sh
 # 1. 检出仓库（构建发生在 Actions，服务器只需 compose 文件）
-git clone https://github.com/GroundedCore/nexusdesk.git /home/nexus/nexusdesk
+git clone https://github.com/GroundedCoreAI/nexusdesk.git /home/nexus/nexusdesk
 
 # 2. GHCR 镜像包可见性独立于仓库：首次推送后 package 默认为私有（即使仓库
 #    是 public）。在 GitHub Packages 页面将 nexusdesk-quickstart 设为 public

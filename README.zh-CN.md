@@ -4,7 +4,7 @@
 
 > This is the Simplified Chinese README. The repository home page shows the default [English README](README.md).
 
-[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCore/nexusdesk)](https://github.com/GroundedCore/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
+[![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
 
 **能检索、能行动、能交接的自托管 AI 客服平台。**
 
@@ -174,9 +174,9 @@ flowchart LR
 
 欢迎通过问题反馈、文档改进、测试用例和代码贡献参与建设。
 
-- 提交问题请使用 [issue 模板](https://github.com/GroundedCore/nexusdesk/issues/new/choose)，并提供复现步骤、部署方式和脱敏日志。
+- 提交问题请使用 [issue 模板](https://github.com/GroundedCoreAI/nexusdesk/issues/new/choose)，并提供复现步骤、部署方式和脱敏日志。
 - 贡献代码前请阅读[贡献指南](CONTRIBUTING.md)。
-- 方案讨论欢迎前往 [Discussions](https://github.com/GroundedCore/nexusdesk/discussions)。
+- 方案讨论欢迎前往 [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions)。
 
 请勿在问题报告、截图或代码中包含 API Key、访问令牌及客户隐私数据。
 
