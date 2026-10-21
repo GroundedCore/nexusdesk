@@ -45,7 +45,7 @@ openpyxl==3.1.5
 orjson==3.12.0
 ormsgpack==1.12.2
 packaging==26.3
-pillow==12.3.0
+pillow==13.0.0
 pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
 pydantic==2.13.5
 pydantic-core==2.46.5
