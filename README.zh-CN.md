@@ -6,11 +6,28 @@
 
 [![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top)
 
-**能检索、能行动、能交接的自托管 AI 客服平台。**
+**开源、可自托管、可扩展的通用 Agent 基础平台。**
 
-NexusDesk 面向需要将客服数据保留在自有基础设施中的团队。Agent 可以检索知识、调用业务工具，并根据执行结果决定下一步行动；Harness 负责权限、执行边界、记忆、人工协同与审计。
+NexusDesk 致力于降低企业将 AI 真正落地到业务中的成本与难度。我们不只关注 Agent 能否完成一次推理或工具调用，更关注它能否在明确的权限、安全和执行边界内，持续完成真实业务任务。
 
-这里的 Harness 不是另一个 Agent，而是围绕 Agent 执行过程的工程控制层。
+AI 客服是 NexusDesk 的首个开源参考应用。Agent 可以检索知识、调用业务工具，并根据执行结果调整下一步行动；Harness 则负责执行约束、权限控制、任务管理、人工协同与审计等工程控制能力。Harness 不是另一个 Agent，而是围绕 Agent 执行过程的工程控制层。
+
+NexusDesk 的长期方向是建立一个开放、可扩展的 Agent 平台，并通过真实业务应用持续验证、改进和沉淀平台能力。
+
+平台按四层组织：
+
+| 层次 | 职责 |
+| --- | --- |
+| Core Platform | Agent 执行、任务生命周期、状态管理、安全治理与可观测性 |
+| Extension Contracts | 模型、工具、知识、记忆、渠道与业务能力的稳定扩展契约 |
+| Business Capabilities | 在真实场景中经过验证、配置和测试的可复用业务能力 |
+| Applications | 面向具体用户和场景的产品体验、业务流程与数据模型 |
+
+这四层构成统一的技术与产品体系，但不意味着所有业务能力都必须采用相同的开放策略，也不要求所有模块都实现为动态插件。
+
+各层共享同一条执行闭环：
+
+> 请求 → 检索上下文 → 决策 → 调用工具 → 人工确认 → 执行 → 记录 → 评估
 
 **默认部署只需要 PostgreSQL。** PostgreSQL 同时承担数据存储、任务队列与跨进程消息通道；当吞吐、延迟、隔离或可用性要求提升时，可以按需扩展 Redis、专用消息队列或 Kubernetes 等基础设施。初始部署只需一份 Compose 文件。
 
@@ -97,7 +114,7 @@ Copy-Item deploy/production/.env.example deploy/production/.env
 - **高风险动作保留明确边界**：权限、参数校验、执行限制和人工确认不由模型自行决定。
 - **基础设施按需扩展**：默认只需要 PostgreSQL，Milvus、S3 等能力按需启用；更高规模或更高可用性要求出现后，再引入专用中间件和集群能力。
 
-这不是用 Agent 替代所有工作流。路径必须确定的地方仍应保持确定性控制。
+NexusDesk 不是单纯的知识问答机器人，不是把所有路径提前固化为完整流程的传统工作流系统，也不是只提供 Agent 编排、把执行治理交给应用开发者的通用搭建器。路径必须确定的地方仍应保持确定性控制。
 
 ## 渠道与集成
 
@@ -162,11 +179,16 @@ flowchart LR
 | 接入业务应用 | [API 说明](docs/api.md) · [开放平台](docs/open-platform.md) |
 | 查看版本更新 | [更新日志](CHANGELOG.md) |
 
-## 后续方向
+## 开源与后续方向
 
-- 扩展业务工具和渠道适配，完善真实客服场景。
-- 验证知识检索质量、大文档处理和任务恢复能力。
-- 改进身份接入、运行监控、备份恢复和部署体验。
+NexusDesk 将保持平台内核与扩展契约的开放性，通过真实业务应用验证平台能力，并将经验持续沉淀为可复用、可维护的产品能力。
+
+公开 Roadmap 包含两条相互配合的路线：
+
+| Roadmap | 重点 |
+| --- | --- |
+| Platform Roadmap | 建设稳定、可信、可扩展的 Agent 内核，包括执行与任务生命周期、清晰的模块边界和扩展契约、权限、人工确认、审计、可观测性、评估与失败恢复。 |
+| Open-source Application Roadmap | 将 AI 客服做成完整、真实可用的开源参考应用，包括带引用的知识问答、工单与人工接管、业务工具、渠道接入、部署、监控、评估和用户文档。 |
 
 各模块规划见[模块架构](docs/architecture.md)。
 
@@ -179,8 +201,6 @@ flowchart LR
 - 方案讨论欢迎前往 [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions)。
 
 请勿在问题报告、截图或代码中包含 API Key、访问令牌及客户隐私数据。
-
-商业合作与私有化部署咨询见[官网](https://www.aidet.top/contact.html)。
 
 ## 许可证
 
