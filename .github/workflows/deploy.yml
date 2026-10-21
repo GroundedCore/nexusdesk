@@ -2,8 +2,8 @@ name: CD
 
 # Deploys the quickstart stack to the server after CI passes on main, or on
 # manual dispatch. The image is built here and pushed to GHCR; the server
-# only pulls it (postgres still comes from Docker Hub). A separate job mirrors
-# the result to Docker Hub for discoverability — see the `mirror` job.
+# pulls it from Docker Hub when mirroring is configured, otherwise falls back
+# to GHCR. PostgreSQL still comes directly from Docker Hub.
 on:
   workflow_run:
     workflows: [CI]
@@ -44,18 +44,45 @@ jobs:
       # server is reached; set the NEXUSDESK_TLS_HOSTS repository variable when the
       # addresses differ, and use a comma-separated list for more than one.
       NEXUSDESK_TLS_HOSTS: ${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # The change detector compares the merge commit with its first parent.
+          fetch-depth: 2
+
+      - name: Decide whether this commit needs a deployment
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sha="${{ github.event.workflow_run.head_sha }}"
+          changed="$(git diff --name-only "${sha}^1" "$sha")"
+          runtime_changes="$(printf '%s\n' "$changed" | grep -Ev '^(\.github/|backend/tests/|docs/|.*\.md$)' || true)"
+          printf 'Changed files:\n%s\n' "$changed"
+
+          if [ -n "$runtime_changes" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Only documentation, CI, or test files changed; skipping image build and deployment."
+          fi
 
       - name: Compute GHCR namespace
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
         # GHCR requires a lowercase namespace.
         run: echo "GHCR_NAMESPACE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
 
       - name: Login to GHCR
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -63,6 +90,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push quickstart image
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -77,72 +105,70 @@ jobs:
           cache-from: type=gha,scope=quickstart
           cache-to: type=gha,mode=max,scope=quickstart
 
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: IMAGE_TAG,GHCR_NAMESPACE,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS
-          # The default 10m is not enough for the first image pull on a
-          # slow server-to-GHCR link plus the --wait healthcheck window.
-          command_timeout: 30m
-          script: |
-            set -e
-            cd /home/nexus/nexusdesk
-            export NEXUSDESK_VERSION="${IMAGE_TAG}"
-            export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
-            export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
-            export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
-            docker compose -f deploy/quickstart/compose.yaml pull
-            # Recreates the app container on the new image; the container
-            # bootstrap runs migrations before serving traffic. --wait fails
-            # the deploy if the healthcheck does not pass in time.
-            docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
-            docker compose -f deploy/quickstart/compose.yaml ps
-            docker image prune -f
-
-  mirror:
-    name: Mirror to Docker Hub
-    runs-on: ubuntu-latest
-    # Docker Hub is a mirror, not the critical path: an expired token or a registry
-    # outage there must not fail a deploy, so this is a separate job.
-    needs: deploy
-    # A job-level `if` cannot read secrets — only github, needs, vars and inputs —
-    # so the username lives in a repository variable and doubles as the on/off
-    # switch. Creating it is all it takes to start mirroring.
-    if: ${{ needs.deploy.result == 'success' && vars.DOCKERHUB_USERNAME != '' }}
-    env:
-      IMAGE_TAG: ${{ github.event.workflow_run.head_sha || github.sha }}
-      # Normally the same as the login account. Set DOCKERHUB_NAMESPACE as well when
-      # the destination is an organisation whose name differs from the account that
-      # owns the token.
-      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
-    steps:
-      - name: Compute GHCR namespace
-        # GHCR requires a lowercase namespace.
-        run: echo "GHCR_NAMESPACE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
-
-      - uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
+        id: dockerhub
+        if: ${{ steps.changes.outputs.deploy == 'true' && vars.DOCKERHUB_USERNAME != '' }}
+        continue-on-error: true
         uses: docker/login-action@v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Copy the image between registries
-        # imagetools works registry-to-registry, so nothing is pulled onto the
-        # runner. Layer digests survive and the GHCR index is reproduced as-is
-        # instead of being rebuilt from whichever platform this runner happens to be.
+      - name: Mirror image to Docker Hub
+        id: mirror
+        if: ${{ steps.dockerhub.outcome == 'success' }}
+        continue-on-error: true
+        # Registry-to-registry copy preserves the manifest and layer digests.
         run: |
           docker buildx imagetools create \
             -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}" \
             -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:latest" \
             "ghcr.io/${GHCR_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}"
 
-      - name: Report the published image
-        # A wrong namespace fails in `create`, but printing the manifest makes a
-        # partial or unexpected result obvious in the run log.
-        run: docker buildx imagetools inspect "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}"
+      - name: Select deployment registry
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
+        # The deployment host can reach Docker Hub much faster than GHCR.
+        # Mirror failures are non-fatal: fall back to the authenticated GHCR pull.
+        run: |
+          if [ "${{ steps.mirror.outcome }}" = "success" ]; then
+            echo "NEXUSDESK_IMAGE_REGISTRY=${DOCKERHUB_NAMESPACE}/" >> "$GITHUB_ENV"
+          else
+            echo "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" >> "$GITHUB_ENV"
+          fi
+
+      - name: Deploy to server
+        if: ${{ steps.changes.outputs.deploy == 'true' }}
+        env:
+          GHCR_USER: ${{ github.actor }}
+          # The workflow token can read the private package created by this run.
+          # It is only forwarded to the deployment host for the duration of the job.
+          GHCR_TOKEN: ${{ github.token }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: IMAGE_TAG,NEXUSDESK_IMAGE_REGISTRY,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS,GHCR_NAMESPACE,GHCR_USER,GHCR_TOKEN
+          # Keep headroom for a first pull on a slow server-to-registry link.
+          command_timeout: 60m
+          script: |
+            set -e
+            cd /home/nexus/nexusdesk
+            export NEXUSDESK_VERSION="${IMAGE_TAG}"
+            export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"
+            export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
+            export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            printf '%s' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
+            if ! docker compose -f deploy/quickstart/compose.yaml pull; then
+              echo "::warning::Primary registry pull failed; retrying from GHCR."
+              export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"
+              docker compose -f deploy/quickstart/compose.yaml pull
+            fi
+            # Recreates the app container on the new image; the container
+            # bootstrap runs migrations before serving traffic. --wait fails
+            # the deploy if the healthcheck does not pass in time.
+            docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
+            docker compose -f deploy/quickstart/compose.yaml ps
+            docker image prune -f

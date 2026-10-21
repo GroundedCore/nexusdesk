@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 使用与部署咨询（Discussions）
-    url: https://github.com/GroundedCore/nexusdesk/discussions
+    url: https://github.com/GroundedCoreAI/nexusdesk/discussions
     about: 不确定是否适合、想讨论方案，或问题还不到能复现的程度，欢迎先到 Discussions 聊。
   - name: 文档导航
-    url: https://github.com/GroundedCore/nexusdesk#文档导航
+    url: https://github.com/GroundedCoreAI/nexusdesk#文档导航
     about: 部署、中间件、架构、Runtime、知识库、模型网关等文档入口都在 README 里。
   - name: 安全问题（请勿公开提交）
-    url: https://github.com/GroundedCore/nexusdesk/blob/main/SECURITY.md
+    url: https://github.com/GroundedCoreAI/nexusdesk/blob/main/SECURITY.md
     about: 涉及安全漏洞请按 SECURITY.md 的方式私下报告，不要开公开 issue。
