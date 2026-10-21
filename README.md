@@ -6,11 +6,24 @@
 
 [![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
 
-**Self-hosted AI customer service that can retrieve, act, and hand off.**
+**An open-source, self-hostable, and extensible general-purpose agent platform.**
 
-NexusDesk is built for teams that need to keep customer service data on their own infrastructure. Agents retrieve knowledge, call business tools, and decide what to do next based on execution results. The Harness handles permissions, execution boundaries, memory, human handoff, and audit.
+NexusDesk is built to reduce the cost and difficulty of moving AI from a capability demo into a stable, measurable business service. Its first complete open-source reference application is AI customer service, which validates the platform against real workflows rather than a technical demo.
 
-The Harness is not another agent; it is the engineering control layer around the agent execution loop.
+NexusDesk is organized into four layers:
+
+| Layer | Responsibility |
+| --- | --- |
+| Core Platform | Agent execution, task lifecycle, state management, security governance, and observability |
+| Extension Contracts | Stable interfaces for models, tools, knowledge, memory, channels, and business capabilities |
+| Business Capabilities | Reusable capabilities that have been validated, configured, and tested in real scenarios |
+| Applications | Product experiences, business workflows, and data models for specific users and use cases |
+
+The shared execution loop is:
+
+> Request → retrieve context → decide → call tools → human confirmation → execute → record → evaluate
+
+Agents retrieve knowledge, call business tools, and decide what to do next based on execution results. The Harness handles permissions, execution boundaries, memory, human handoff, and audit. It is not another agent; it is the engineering control layer around the agent execution loop.
 
 **The default deployment requires only PostgreSQL.** PostgreSQL handles data storage, job queues, and cross-process messaging. Redis, dedicated message queues, Kubernetes, and other infrastructure can be added as throughput, latency, isolation, or availability requirements grow. The initial deployment still starts with one Compose file.
 
@@ -97,7 +110,7 @@ When an agent can read tool results and adjust its next action, not every busine
 - **Explicit boundaries for high-impact actions:** permissions, parameter validation, execution limits, and human confirmation are not left to the model.
 - **Infrastructure that scales on demand:** PostgreSQL is the default requirement; Milvus and S3 are optional, and dedicated middleware or cluster capabilities can be added as scale or availability requirements grow.
 
-This is not about replacing every workflow with an agent. Paths that must remain deterministic should stay under deterministic control.
+NexusDesk is not a knowledge Q&A chatbot, a traditional workflow engine that fixes every path in advance, or a generic agent builder that leaves execution governance to application developers. Paths that must remain deterministic stay under deterministic control.
 
 ## Channels and integrations
 
@@ -164,11 +177,16 @@ The documents listed below are currently written in Simplified Chinese.
 | Integrate business applications | [API reference](docs/api.md) · [Open platform](docs/open-platform.md) |
 | See what changed in a release | [Changelog](CHANGELOG.en.md) |
 
-## Roadmap
+## Open source and next steps
 
-- Expand business tool and channel integrations for real customer service scenarios.
-- Validate knowledge retrieval quality, large-document handling, and task recovery.
-- Improve identity integration, runtime monitoring, backup and recovery, and deployment experience.
+NexusDesk keeps its platform core and extension contracts open, validates platform capabilities through real applications, and turns that experience into reusable, maintainable product capabilities.
+
+The public roadmap has two complementary tracks:
+
+| Roadmap | Focus |
+| --- | --- |
+| Platform Roadmap | Establish a stable, trustworthy, and extensible agent core: execution and task lifecycle, clear module boundaries and extension contracts, permissions, human confirmation, audit, observability, evaluation, and failure recovery. |
+| Open-source Application Roadmap | Make AI customer service a complete, real-world open-source reference application: knowledge Q&A with citations, tickets and human takeover, business tools, channels, deployment, monitoring, evaluation, and user documentation. |
 
 See the [module architecture](docs/architecture.md) for module-level plans.
 
@@ -181,8 +199,6 @@ Contributions are welcome through issue reports, documentation improvements, tes
 - Use [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions) for design-level topics.
 
 Do not include API keys, access tokens, or customer privacy data in issue reports, screenshots, or code.
-
-For commercial partnerships and private deployment enquiries, visit the [website](https://www.aidet.top/en/contact.html).
 
 ## License
 
