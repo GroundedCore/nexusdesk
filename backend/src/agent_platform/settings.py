@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Bootstrap loads the full industry demo case set when enabled. Off by default so
     # production stays clean; deploy/quickstart enables it explicitly.
     seed_industries: bool = False
+    # Language of the seeded memory demo datasets, matching the console's i18n
+    # bundles: zh-TW/zh-HK/zh-MO/zh-Hant* → Traditional Chinese, zh* → Simplified
+    # Chinese, en* → English, hi* → Hindi, anything else → Simplified Chinese.
+    # Applied at first seed only: demo identities/agents are created once,
+    # so switching the locale later does not re-seed existing rows.
+    seed_locale: str = "zh-CN"
     # Extra hostnames and IP addresses to put in the quickstart TLS certificate, so a
     # browser reaching the demo over a LAN address gets a name match. Accepts a
     # comma-separated list for convenience. Quickstart only: production terminates TLS
