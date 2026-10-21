@@ -25,6 +25,8 @@ uv run python -m agent_platform.apps.seed_memory_acceptance  # 可选：阶段 1
 uv run uvicorn agent_platform.apps.api.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+记忆演示数据（seed_memory_demo / seed_memory_acceptance）的文案语言由 `AGENT_SEED_LOCALE` 控制，与前端 i18n 语言包一致：`zh-CN`（默认，简体）、`zh-TW`/`zh-HK`/`zh-MO`（繁体）、`en`（英文）、`hi`（印地语）。语言只在**首次**写入时生效——演示身份已入库后切换 locale 不会重写已有数据；如需切换语言，请换一个新数据库重新播种。
+
 在项目根目录新开终端二：
 
 ```powershell

@@ -21,6 +21,7 @@ from uuid import UUID, uuid5
 
 from sqlalchemy import text
 
+from agent_platform.apps.seed_memory_i18n import T, set_locale
 from agent_platform.modules.agent_config.service import AgentConfig, AgentDraft
 from agent_platform.modules.agent_runtime.bootstrap import runtime_services
 from agent_platform.modules.model_gateway.contracts import Connection, Model, Profile
@@ -32,7 +33,13 @@ LOCK_ID = 71432025  # shared advisory lock so seeders never run concurrently
 
 NOW = datetime.now(UTC)
 
-REPLY = "[演示模式] Runtime 已收到消息。发送“查询演示”可验证 HTTP 工具链路。"
+
+def default_reply() -> str:
+    """Canned assistant reply for demo conversations, in the seed locale."""
+    return T(zh="[演示模式] Runtime 已收到消息。发送“查询演示”可验证 HTTP 工具链路。",
+             en='[Demo mode] Runtime received the message. Send "query demo" to verify the HTTP tool chain.',
+             zh_tw="[演示模式] Runtime 已收到訊息。發送「查詢演示」可驗證 HTTP 工具鏈路。",
+             hi='[डेमो मोड] Runtime ने संदेश प्राप्त कर लिया है। HTTP टूल चेन सत्यापित करने के लिए "query demo" भेजें।')
 
 
 def ns(tag: str) -> UUID:
@@ -60,7 +67,7 @@ def pairs(messages: list[str]) -> list[dict]:
     history = []
     for msg in messages:
         history.append({"role": "user", "content": msg})
-        history.append({"role": "assistant", "content": REPLY})
+        history.append({"role": "assistant", "content": default_reply()})
     return history
 
 
@@ -73,13 +80,19 @@ async def ensure_demo_profile(p, tenant, actor):
         existing = next((r for r in rows if r["name"] == body.name), None)
         return existing or await catalog.save(tenant, actor, kind, body)
 
-    connection = await ensure("connections", Connection(name="示例模拟连接", protocol="demo"))
+    connection = await ensure("connections", Connection(
+        name=T(zh="示例模拟连接", en="Sample Demo Connection",
+               zh_tw="示例模擬連接", hi="सैंपल डेमो कनेक्शन"), protocol="demo"))
     model = await ensure(
         "models",
-        Model(name="示例模拟 Chat", connection_id=connection["id"], model_name="demo",
-              operations=["chat"], tool_calling=True),
+        Model(name=T(zh="示例模拟 Chat", en="Sample Demo Chat",
+                     zh_tw="示例模擬 Chat", hi="सैंपल डेमो Chat"), connection_id=connection["id"],
+              model_name="demo", operations=["chat"], tool_calling=True),
     )
-    profile = await ensure("profiles", Profile(name="示例客服模型方案", operation="chat", model_id=model["id"]))
+    profile = await ensure("profiles", Profile(
+        name=T(zh="示例客服模型方案", en="Sample Support Model Profile",
+               zh_tw="示例客服模型方案", hi="सैंपल सपोर्ट मॉडल प्रोफ़ाइल"),
+        operation="chat", model_id=model["id"]))
     version = profile["published_version"]
     if not version:
         published = await catalog.publish(tenant, actor, profile["id"], profile["revision"])
@@ -194,13 +207,14 @@ async def insert_injection_log(conn, tenant, run_id, cid, iid, section, score, a
 
 
 async def insert_run(conn, tenant, namespace, run_key, conv_id, agent, model_backend, msg, hours,
-                     cid=None, injected=None, events=None, reply=REPLY):
+                     cid=None, injected=None, events=None, reply_text=None):
     """One completed run + its two messages + events + injection log rows.
 
     ``injected``: list of (item_id, section, score) logged to memory_injection_log
     and counted in the memory.injected event. ``events``: full (seq, type, data)
     list replacing the default 7-event sequence when given.
     """
+    reply = reply_text if reply_text is not None else default_reply()
     run_id = uid(namespace, "run", run_key)
     created, started, finished = ts(hours), ts(hours) + timedelta(milliseconds=30), ts(hours) + timedelta(milliseconds=235)
     await conn.execute(
@@ -241,17 +255,26 @@ async def insert_audit(conn, tenant, actor, action, resource_id, details, hours_
     )
 
 
-def run_standalone(seed_fn: Callable[..., Awaitable[bool]], label: str):
-    """Standalone entrypoint: run one phase's seed under the shared advisory lock."""
+def run_standalone(seed_fn: Callable[..., Awaitable[bool]], label: str | Callable[[], str]):
+    """Standalone entrypoint: run one phase's seed under the shared advisory lock.
+
+    ``label`` may be a zero-arg callable returning a T() string — it is
+    resolved after ``set_locale`` so standalone runs print in the seed locale.
+    """
 
     async def main():
         settings = Settings()
         tenant = settings.tenant_id
+        set_locale(settings)
         async with runtime_services(settings) as runtime, runtime.platform.engine.connect() as lock:
             await lock.execute(text(f"SELECT pg_advisory_lock({LOCK_ID})"))
             try:
                 inserted = await seed_fn(runtime, settings)
-                print(f"{label}：{'已入库' if inserted else '已存在，跳过'}（租户：{tenant}）。")
+                text_label = label() if callable(label) else label
+                state = (T(zh="已入库", en="seeded", zh_tw="已入庫", hi="सीड हो गया") if inserted
+                         else T(zh="已存在，跳过", en="already present, skipped",
+                                zh_tw="已存在，略過", hi="पहले से मौजूद, छोड़ा गया"))
+                print(f"{text_label}: {state} (tenant: {tenant}).")
             finally:
                 await lock.execute(text(f"SELECT pg_advisory_unlock({LOCK_ID})"))
 

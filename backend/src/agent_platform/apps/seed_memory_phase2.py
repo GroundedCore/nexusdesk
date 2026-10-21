@@ -17,8 +17,8 @@ Boots the console with the extraction lifecycle visible end to end:
 """
 
 from agent_platform.apps.seed_memory_common import (
-    REPLY,
     current_audit_actor,
+    default_reply,
     ensure_agent,
     identity_bound,
     insert_audit,
@@ -33,15 +33,31 @@ from agent_platform.apps.seed_memory_common import (
     run_standalone,
     uid,
 )
+from agent_platform.apps.seed_memory_i18n import T
 from agent_platform.modules.agent_config.service import AgentConfig
 
 NSP = ns("phase2")
-AGENT_NAME = "画像演示助手"
-AGENT_DESC = "阶段 2 客户画像自动抽取演示（抽取落库、改口更新、pending 审核、读写开关）"
-SYSTEM_PROMPT = "你是一名企业客服助手。语气自然简洁，先回应客户处境再给方案，一次推进一件事。"
 
 # 受控词表（extraction.CONTROLLED_KEYS）：profile 用 name/phone/company 等，
 # preference 用 language/style/address_name/contact_channel；custom_* 为扩展键。
+
+
+def _agent_spec():
+    """Agent display strings; built per call so T() sees the active locale."""
+    return {
+        "name": T(zh="画像演示助手", en="Profile Demo Assistant",
+                  zh_tw="畫像演示助手", hi="प्रोफ़ाइल डेमो सहायक"),
+        "description": T(
+            zh="阶段 2 客户画像自动抽取演示（抽取落库、改口更新、pending 审核、读写开关）",
+            en="Phase 2 customer-profile auto-extraction demo (extraction persistence, self-correction updates, pending review, read/write switches)",
+            zh_tw="階段 2 客戶畫像自動抽取演示（抽取落庫、改口更新、pending 審核、讀寫開關）",
+            hi="चरण 2 ग्राहक-प्रोफ़ाइल स्वचालित निष्कर्षण डेमो (निष्कर्षण पर्सिस्टेंस, सेल्फ-करेक्शन अपडेट, पेंडिंग समीक्षा, रीड/राइट स्विच)"),
+        "system_prompt": T(
+            zh="你是一名企业客服助手。语气自然简洁，先回应客户处境再给方案，一次推进一件事。",
+            en="You are an enterprise customer-support assistant. Keep a natural, concise tone; acknowledge the customer's situation before offering solutions; advance one thing at a time.",
+            zh_tw="你是一名企業客服助手。語氣自然簡潔，先回應客戶處境再給方案，一次推進一件事。",
+            hi="आप एक एंटरप्राइज़ ग्राहक-सहायता सहायक हैं। स्वाभाविक, संक्षिप्त लहजा रखें; समाधान देने से पहले ग्राहक की स्थिति को स्वीकार करें; एक बार में एक ही बात आगे बढ़ाएँ।"),
+    }
 
 
 def run_events(run_key, cid, injected, extract=True):
@@ -67,7 +83,7 @@ def run_events(run_key, cid, injected, extract=True):
     if injected:
         events.append((len(events) + 1, "memory.injected",
                        {**counts, "item_ids": [iid for iid, _, _ in injected]}))
-    events.append((len(events) + 1, "run.completed", {"output": REPLY, "error_code": None}))
+    events.append((len(events) + 1, "run.completed", {"output": default_reply(), "error_code": None}))
     return events
 
 
@@ -87,9 +103,10 @@ def extract_audit(conv_id, input_messages, **counts):
 async def seed(runtime, settings) -> bool:
     p = runtime.platform
     tenant = settings.tenant_id
+    spec = _agent_spec()
     agent = await ensure_agent(
-        p, tenant, "seed", AGENT_NAME, AGENT_DESC,
-        AgentConfig(system_prompt=SYSTEM_PROMPT, tool_names=[], knowledge_base_ids=[]),
+        p, tenant, "seed", spec["name"], spec["description"],
+        AgentConfig(system_prompt=spec["system_prompt"], tool_names=[], knowledge_base_ids=[]),
     )
     audit_actor = await current_audit_actor(p, tenant)
     seeded = 0
@@ -112,31 +129,58 @@ async def _seed_chen(p, tenant, model_backend, agent, audit_actor) -> int:
         "preference:address_name", "preference:contact_channel", "preference:style")}
     prof, pref = "profile", "preference"
     items = [
-        (iid["profile:company"], item(prof, "company", "恒瑞机械设备有限公司", .96, sr=str(conv), rc=3, ch=70, uh=70)),
-        (iid["profile:name"], item(prof, "name", "陈国栋", .98, sr=str(conv), rc=2, ch=70, uh=70)),
+        (iid["profile:company"], item(prof, "company", T(zh="恒瑞机械设备有限公司", en="Hengrui Machinery Equipment Co., Ltd.",
+                                                          zh_tw="恆瑞機械設備有限公司", hi="Hengrui Machinery Equipment Co., Ltd."), .96, sr=str(conv), rc=3, ch=70, uh=70)),
+        (iid["profile:name"], item(prof, "name", T(zh="陈国栋", en="Chen Guodong",
+                                                    zh_tw="陳國棟", hi="Chen Guodong"), .98, sr=str(conv), rc=2, ch=70, uh=70)),
         # 手机号经 PII 掩码后落库（审计 pii_masked=1 对应此条）。
         (iid["profile:phone"], item(prof, "phone", "138****6677", .95, sr=str(conv), rc=2, ch=70, uh=70)),
         # “其实叫我陈工就行”：同键 update，prev_content 保留编辑前值，revision=2，不堆叠。
-        (iid["preference:address_name"], item(pref, "address_name", "陈工", .93, sr=str(conv),
-                                              prev="陈国栋", rev=2, rc=2, ch=70, uh=48)),
-        (iid["preference:contact_channel"], item(pref, "contact_channel", "报价单与合同请发采购部邮箱",
+        (iid["preference:address_name"], item(pref, "address_name", T(zh="陈工", en="Engineer Chen",
+                                                                      zh_tw="陳工", hi="इंजीनियर Chen"), .93, sr=str(conv),
+                                              prev=T(zh="陈国栋", en="Chen Guodong",
+                                                     zh_tw="陳國棟", hi="Chen Guodong"), rev=2, rc=2, ch=70, uh=48)),
+        (iid["preference:contact_channel"], item(pref, "contact_channel",
+                                                 T(zh="报价单与合同请发采购部邮箱",
+                                                   en="Please send quotations and contracts to the procurement department email",
+                                                   zh_tw="報價單與合約請發採購部郵箱",
+                                                   hi="कृपया कोटेशन और कॉन्ट्रैक्ट खरीद विभाग के ईमेल पर भेजें"),
                                                  .9, sr=str(conv), rc=1, ch=70, uh=70)),
         # 控制台人工编辑（A4）：source_type=human、protected、confidence=1.0、revision=2。
-        (iid["preference:style"], item(pref, "style", "回复简短直接，结论先行，重要事项分点列出",
+        (iid["preference:style"], item(pref, "style",
+                                       T(zh="回复简短直接，结论先行，重要事项分点列出",
+                                         en="Keep replies short and direct, conclusions first, list important matters as bullet points",
+                                         zh_tw="回覆簡短直接，結論先行，重要事項分點列出",
+                                         hi="जवाब छोटे और सीधे रखें, निष्कर्ष पहले, महत्वपूर्ण बातें बुलेट पॉइंट्स में सूचीबद्ध करें"),
                                        1.0, st="human", sr=audit_actor, prot=True,
-                                       prev="回复简短直接，结论先行", rev=2, rc=1, ch=48, uh=24)),
+                                       prev=T(zh="回复简短直接，结论先行",
+                                              en="Keep replies short and direct, conclusions first",
+                                              zh_tw="回覆簡短直接，結論先行",
+                                              hi="जवाब छोटे और सीधे रखें, निष्कर्ष पहले"),
+                                       rev=2, rc=1, ch=48, uh=24)),
     ]
     inj = lambda *keys: [(iid[k], k.split(":")[0], 0.9) for k in keys]
     runs = [
         # 首次进线：尚无可注入记忆（无 memory.injected 事件），抽取落库 5 条。
         R(key="chen:1", h=70, extract=True,
-             msg="你好，我是恒瑞机械设备的陈国栋，手机号 13866676677，以后报价单请发采购部邮箱。",
+             msg=T(zh="你好，我是恒瑞机械设备的陈国栋，手机号 13866676677，以后报价单请发采购部邮箱。",
+                   en="Hi, this is Chen Guodong from Hengrui Machinery Equipment. My phone number is 13866676677. Please send future quotations to the procurement department email.",
+                   zh_tw="你好，我是恆瑞機械設備的陳國棟，手機號 13866676677，以後報價單請發採購部郵箱。",
+                   hi="नमस्ते, मैं Hengrui Machinery Equipment से Chen Guodong बोल रहा हूँ। मेरा फ़ोन नंबर 13866676677 है। कृपया आगे के सभी कोटेशन खरीद विभाग के ईमेल पर भेजें।"),
              injected=[]),
         # 二次进线：改口"陈工"+ 要求简短回复；注入首轮累积画像（A2）。
-        R(key="chen:2", h=48, extract=True, msg="以后叫我陈工就行，回复尽量简短直接。",
+        R(key="chen:2", h=48, extract=True,
+             msg=T(zh="以后叫我陈工就行，回复尽量简短直接。",
+                   en="Just call me Engineer Chen from now on, and keep replies as short and direct as possible.",
+                   zh_tw="以後叫我陳工就行，回覆儘量簡短直接。",
+                   hi="अब से मुझे बस इंजीनियर Chen कहिए, और जवाब यथासंभव छोटे और सीधे रखिए।"),
              injected=inj("profile:name", "profile:company", "profile:phone", "preference:address_name")),
         # 三次进线：注入含人工编辑后的 style（A4）。
-        R(key="chen:3", h=6, extract=True, msg="在吗？上周说的减速机报价单发我一下。",
+        R(key="chen:3", h=6, extract=True,
+             msg=T(zh="在吗？上周说的减速机报价单发我一下。",
+                   en="Are you there? Send me the gearbox quotation we discussed last week.",
+                   zh_tw="在嗎？上週說的減速機報價單發我一下。",
+                   hi="क्या आप वहाँ हैं? पिछले हफ़्ते जिस गियरबॉक्स कोटेशन की बात हुई थी, वह मुझे भेज दीजिए।"),
              injected=inj("profile:name", "profile:company", "profile:phone",
                           "preference:address_name", "preference:contact_channel", "preference:style")),
     ]
@@ -177,27 +221,51 @@ async def _seed_lin(p, tenant, model_backend, agent, audit_actor) -> int:
     iid = {k: uid(NSP, "item", f"lin:{k}") for k in (
         "profile:company", "preference:language", "profile:custom_region", "preference:contact_channel")}
     items = [
-        (iid["profile:company"], item("profile", "company", "云朵母婴连锁（佛山 6 家门店）",
+        (iid["profile:company"], item("profile", "company",
+                                      T(zh="云朵母婴连锁（佛山 6 家门店）",
+                                        en="Yunduo Mother & Baby chain (6 stores in Foshan)",
+                                        zh_tw="雲朵母嬰連鎖（佛山 6 家門店）",
+                                        hi="Yunduo Mother & Baby चेन (Foshan में 6 स्टोर)"),
                                       .92, sr=str(conv), rc=2, ch=50, uh=50)),
         # 抽取置信 0.62 → pending；控制台 confirm 后转 active，随后轮次开始注入。
-        (iid["preference:language"], item("preference", "language", "希望用粤语沟通",
+        (iid["preference:language"], item("preference", "language",
+                                          T(zh="希望用粤语沟通", en="Prefers to communicate in Cantonese",
+                                            zh_tw="希望用粵語溝通", hi="कैंटोनीज़ में बातचीत करना पसंद करती हैं"),
                                           .62, sr=str(conv), rc=1, ch=50, uh=40)),
         # 抽取置信 0.58 → pending；控制台 reject 后 deleted，注入永不再现。
-        (iid["profile:custom_region"], item("profile", "custom_region", "门店主要分布在佛山禅城区（推测）",
+        (iid["profile:custom_region"], item("profile", "custom_region",
+                                            T(zh="门店主要分布在佛山禅城区（推测）",
+                                              en="Stores mainly located in Chancheng District, Foshan (inferred)",
+                                              zh_tw="門店主要分佈在佛山禪城區（推測）",
+                                              hi="स्टोर मुख्य रूप से Foshan के Chancheng ज़िले में स्थित (अनुमानित)"),
                                             .58, status="deleted", sr=str(conv), ch=50, uh=40)),
         # 仍留在 pending 队列的低置信建议（控制台待审核列表可见）。
-        (iid["preference:contact_channel"], item("preference", "contact_channel", "企业微信沟通",
+        (iid["preference:contact_channel"], item("preference", "contact_channel",
+                                                 T(zh="企业微信沟通", en="Communicate via WeCom (Enterprise WeChat)",
+                                                   zh_tw="企業微信溝通", hi="WeCom (Enterprise WeChat) के माध्यम से संवाद करें"),
                                                  .55, status="pending", sr=str(conv), ch=50, uh=50)),
     ]
     inj = lambda *keys: [(iid[k], k.split(":")[0], 0.62) for k in keys]
     runs = [
-        R(key="lin:1", h=50, msg="我是云朵母婴的林晓芸，门店在佛山，之后方便的话想用粤语沟通。",
+        R(key="lin:1", h=50,
+             msg=T(zh="我是云朵母婴的林晓芸，门店在佛山，之后方便的话想用粤语沟通。",
+                   en="I'm Lin Xiaoyun from Yunduo Mother & Baby; our stores are in Foshan, and I'd like to communicate in Cantonese if convenient.",
+                   zh_tw="我是雲朵母嬰的林曉芸，門店在佛山，之後方便的話想用粵語溝通。",
+                   hi="मैं Yunduo Mother & Baby से Lin Xiaoyun बोल रही हूँ; हमारे स्टोर Foshan में हैं, और अगर सुविधा हो तो मैं कैंटोनीज़ में बातचीत करना चाहूँगी।"),
              injected=[]),
         # confirm 之后：language 条目进入注入。
-        R(key="lin:2", h=30, msg="上次说的奶粉批次问题，帮我跟进下。",
+        R(key="lin:2", h=30,
+             msg=T(zh="上次说的奶粉批次问题，帮我跟进下。",
+                   en="Please follow up on the milk powder batch issue we discussed last time.",
+                   zh_tw="上次說的奶粉批次問題，幫我跟進下。",
+                   hi="पिछली बार चर्चा हुए दूध पाउडर बैच की समस्या पर कृपया फ़ॉलो अप कीजिए।"),
              injected=inj("profile:company", "preference:language")),
         # reject 之后：custom_region 永不注入（注入列表中缺席即证明）。
-        R(key="lin:3", h=8, msg="帮我把上个月的补货清单再发一份。",
+        R(key="lin:3", h=8,
+             msg=T(zh="帮我把上个月的补货清单再发一份。",
+                   en="Please send me another copy of last month's restocking list.",
+                   zh_tw="幫我把上個月的補貨清單再發一份。",
+                   hi="कृपया पिछले महीने की रीस्टॉकिंग सूची की एक और कॉपी मुझे भेज दीजिए।"),
              injected=inj("profile:company", "preference:language")),
     ]
     audits = [
@@ -239,25 +307,50 @@ async def _seed_huang(p, tenant, model_backend, agent, audit_actor) -> int:
     iid = {k: uid(NSP, "item", f"huang:{k}") for k in (
         "profile:company", "preference:contact_channel", "profile:custom_fleet")}
     items = [
-        (iid["profile:company"], item("profile", "company", "远大物流集团",
+        (iid["profile:company"], item("profile", "company",
+                                      T(zh="远大物流集团", en="Yuanda Logistics Group",
+                                        zh_tw="遠大物流集團", hi="Yuanda Logistics Group"),
                                       .9, sr=str(conv), rc=1, ch=60, uh=60)),
-        (iid["preference:contact_channel"], item("preference", "contact_channel", "只接受电话沟通，不接收邮件",
+        (iid["preference:contact_channel"], item("preference", "contact_channel",
+                                                 T(zh="只接受电话沟通，不接收邮件", en="Phone calls only; no email",
+                                                   zh_tw="只接受電話溝通，不接收郵件", hi="केवल फ़ोन कॉल; ईमेल नहीं"),
                                                  .85, sr=str(conv), rc=1, ch=60, uh=60)),
         # 最新一轮抽取产出的 pending 建议（推断信息，置信 0.6）。
-        (iid["profile:custom_fleet"], item("profile", "custom_fleet", "自有车队约 80 辆（推断）",
+        (iid["profile:custom_fleet"], item("profile", "custom_fleet",
+                                           T(zh="自有车队约 80 辆（推断）",
+                                             en="Own fleet of about 80 vehicles (inferred)",
+                                             zh_tw="自有車隊約 80 輛（推斷）",
+                                             hi="लगभग 80 वाहनों का अपना बेड़ा (अनुमानित)"),
                                            .6, status="pending", sr=str(conv), ch=10, uh=10)),
     ]
     inj = lambda *keys: [(iid[k], k.split(":")[0], 0.85) for k in keys]
     runs = [
         R(key="huang:1", h=60, extract=True,
-             msg="你好，我是远大物流的黄志强，有事直接打电话，别发邮件。", injected=[]),
+             msg=T(zh="你好，我是远大物流的黄志强，有事直接打电话，别发邮件。",
+                   en="Hi, this is Huang Zhiqiang from Yuanda Logistics. Call me directly for anything — don't email.",
+                   zh_tw="你好，我是遠大物流的黃志強，有事直接打電話，別發郵件。",
+                   hi="नमस्ते, मैं Yuanda Logistics से Huang Zhiqiang बोल रहा हूँ। किसी भी बात के लिए सीधे फ़ोन कीजिए — ईमेल मत भेजिए।"),
+             injected=[]),
         # memory_write=false 窗口内的 run：completed 但无 memory_extract.queued 事件。
-        R(key="huang:2", h=40, extract=False, msg="上周的干线运输合同续签的事怎么样了？",
+        R(key="huang:2", h=40, extract=False,
+             msg=T(zh="上周的干线运输合同续签的事怎么样了？",
+                   en="How's the renewal of last week's trunk-line transport contract going?",
+                   zh_tw="上週的幹線運輸合約續簽的事怎麼樣了？",
+                   hi="पिछले हफ़्ते के ट्रंक-लाइन ट्रांसपोर्ट कॉन्ट्रैक्ट के नवीनीकरण की क्या स्थिति है?"),
              injected=inj("profile:company", "preference:contact_channel")),
         # memory_enabled=false 窗口内的 run：抽取照常投递（读关不影响写），但无注入。
-        R(key="huang:3", h=26, extract=True, msg="在吗？帮我查下到杭州的运费。", injected=[]),
+        R(key="huang:3", h=26, extract=True,
+             msg=T(zh="在吗？帮我查下到杭州的运费。",
+                   en="Are you there? Please check the shipping rate to Hangzhou for me.",
+                   zh_tw="在嗎？幫我查下到杭州的運費。",
+                   hi="क्या आप वहाँ हैं? कृपया मेरे लिए Hangzhou तक का शिपिंग किराया देखिए।"),
+             injected=[]),
         # 恢复双开：注入回归；本轮抽取演示 dropped=1（低置信直接丢弃，宁缺毋滥）。
-        R(key="huang:4", h=10, extract=True, msg="我们车队大概 80 辆车，华东线路都能跑。",
+        R(key="huang:4", h=10, extract=True,
+             msg=T(zh="我们车队大概 80 辆车，华东线路都能跑。",
+                   en="Our fleet has about 80 vehicles and can cover all East China routes.",
+                   zh_tw="我們車隊大概 80 輛車，華東線路都能跑。",
+                   hi="हमारे बेड़े में लगभग 80 वाहन हैं और वे पूर्वी चीन के सभी रूट कवर कर सकते हैं।"),
              injected=inj("profile:company", "preference:contact_channel")),
     ]
     audits = [
@@ -284,4 +377,5 @@ async def _seed_huang(p, tenant, model_backend, agent, audit_actor) -> int:
 
 
 if __name__ == "__main__":
-    run_standalone(seed, "阶段2客户画像演示数据")
+    run_standalone(seed, lambda: T(zh="阶段2客户画像演示数据", en="Phase 2 customer-profile demo data",
+                                   zh_tw="階段2客戶畫像演示數據", hi="चरण 2 ग्राहक-प्रोफ़ाइल डेमो डेटा"))
