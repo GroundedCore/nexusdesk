@@ -10,9 +10,9 @@ body:
         ⚠️ **请勿粘贴真实凭据**（API Key、角色 Token、数据库密码、`master.key`），日志请先脱敏。
 
         动手排查前建议先看：
-        - [Docker 部署手册](https://github.com/GroundedCore/nexusdesk/blob/main/deploy/README.md)
-        - [中间件说明](https://github.com/GroundedCore/nexusdesk/blob/main/docs/middleware.md)
-        - [本地开发](https://github.com/GroundedCore/nexusdesk/blob/main/docs/local-development.md)
+        - [Docker 部署手册](https://github.com/GroundedCoreAI/nexusdesk/blob/main/deploy/README.md)
+        - [中间件说明](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/middleware.md)
+        - [本地开发](https://github.com/GroundedCoreAI/nexusdesk/blob/main/docs/local-development.md)
   - type: dropdown
     id: path
     attributes:

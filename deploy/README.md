@@ -171,11 +171,11 @@ HNSW 索引随列级联删除，无需单独处理。清理完成后设 `POSTGRE
 
 ```sh
 # 1. 检出仓库（构建发生在 Actions，服务器只需 compose 文件）
-git clone https://github.com/GroundedCore/nexusdesk.git /home/nexus/nexusdesk
+git clone https://github.com/GroundedCoreAI/nexusdesk.git /home/nexus/nexusdesk
 
-# 2. GHCR 镜像包可见性独立于仓库：首次推送后 package 默认为私有（即使仓库
-#    是 public）。在 GitHub Packages 页面将 nexusdesk-quickstart 设为 public
-#    后可跳过本步（匿名即可拉取）；保持私有则需登录（PAT 需 read:packages 权限）
+# 2. GHCR package 首次推送后默认为私有。官方 CD 会用当次 workflow 的临时
+#    GITHUB_TOKEN 在服务器登录并拉取镜像，无需手工执行本步。仅当你在
+#    Actions 之外手工部署且 package 仍为私有时，才需要 PAT（read:packages）：
 docker login ghcr.io -u <github-username> -p <pat>
 
 # 3. 为 Actions 生成专用部署密钥（不要复用个人密钥）

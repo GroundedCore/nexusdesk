@@ -4,7 +4,7 @@
 
 Please report suspected vulnerabilities **privately**, using GitHub Security Advisories:
 
-<https://github.com/GroundedCore/nexusdesk/security/advisories/new>
+<https://github.com/GroundedCoreAI/nexusdesk/security/advisories/new>
 
 Do not open a public issue for a suspected vulnerability.
 
