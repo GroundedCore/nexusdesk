@@ -307,9 +307,16 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
         step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
     }
 
+    checkout = deploy["steps"][0]
+    assert checkout["with"]["fetch-depth"] == 2
+    changes = steps["Decide whether this commit needs a deployment"]
+    assert "git diff --name-only" in changes["run"]
+    assert r"^(\.github/|backend/tests/|docs/|.*\.md$)" in changes["run"]
+
     login = steps["Login to Docker Hub"]
     # An expired Docker Hub token or an outage there must not fail the deploy.
     assert login["continue-on-error"] is True
+    assert "steps.changes.outputs.deploy == 'true'" in login["if"]
     # The gate reads a repository variable, never a secret. Step-level `if` has no
     # access to the secrets context, so gating on the token would silently never match.
     assert "vars.DOCKERHUB_USERNAME" in login["if"]
@@ -335,9 +342,13 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     assert "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" in select_registry
 
     deploy_step = steps["Deploy to server"]
+    assert "steps.changes.outputs.deploy == 'true'" in deploy_step["if"]
     assert "NEXUSDESK_IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
     assert (
         'export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"'
         in deploy_step["with"]["script"]
+    )
+    assert 'export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"' in (
+        deploy_step["with"]["script"]
     )
     assert deploy_step["with"]["command_timeout"] == "60m"

@@ -156,9 +156,9 @@ HNSW 索引随列级联删除，无需单独处理。清理完成后设 `POSTGRE
 
 ## 自动部署（GitHub Actions CI/CD）
 
-`.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。
+`.github/workflows/deploy.yml` 在 main 分支 CI 通过后（或手动触发）自动部署 quickstart 单容器拓扑：Actions 构建 `quickstart` 镜像推送到 GHCR（`ghcr.io/<owner>/nexusdesk-quickstart:<commit-sha>`），再 SSH 登录服务器执行 `docker compose pull && up -d --wait`。容器引导自动执行数据库迁移，健康检查未通过则部署失败。只修改文档、CI 或测试时不会构建和部署新镜像；手工触发始终执行完整部署。
 
-配置 Docker Hub 凭据后，部署前会先用 `buildx imagetools create` 把同一镜像直传到 Docker Hub（`docker.io/<namespace>/nexusdesk-quickstart`），并优先从 Docker Hub 拉取；这样可避开部分服务器访问 GHCR 过慢的问题。同步或登录失败不会阻断部署，会自动回退到使用临时 `GITHUB_TOKEN` 鉴权的 GHCR。若命名空间与登录账号不同（例如目标是组织），另外设仓库变量 `DOCKERHUB_NAMESPACE`，默认取 `DOCKERHUB_USERNAME`。
+配置 Docker Hub 凭据后，部署前会先用 `buildx imagetools create` 把同一镜像直传到 Docker Hub（`docker.io/<namespace>/nexusdesk-quickstart`），并优先从 Docker Hub 拉取；这样可避开部分服务器访问 GHCR 过慢的问题。同步或登录失败会直接回退 GHCR；Docker Hub 拉取超时也会在服务器上自动切换到使用临时 `GITHUB_TOKEN` 鉴权的 GHCR。若命名空间与登录账号不同（例如目标是组织），另外设仓库变量 `DOCKERHUB_NAMESPACE`，默认取 `DOCKERHUB_USERNAME`。
 
 
 自动部署会顺带把访问地址交给证书：`NEXUSDESK_TLS_HOSTS` 默认取 `DEPLOY_HOST`，也就是服务器实际被访问的那个地址；两者不一致时，用仓库变量 `NEXUSDESK_TLS_HOSTS` 覆盖（多个地址用英文逗号分隔）。少了这一步，证书只覆盖回环地址，用公网地址访问时浏览器会提示名称不匹配——注意这和"证书不受信任"是两条不同的警告，导入 `ca.crt` 只能消除后者。
