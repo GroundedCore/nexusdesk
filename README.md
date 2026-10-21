@@ -4,7 +4,7 @@
 
 > Chinese-speaking users: see the [简体中文 README](README.zh-CN.md).
 
-[![CI](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCore/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCore/nexusdesk)](https://github.com/GroundedCore/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
+[![CI](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml/badge.svg)](https://github.com/GroundedCoreAI/nexusdesk/actions/workflows/ci.yml) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![release](https://img.shields.io/github/v/release/GroundedCoreAI/nexusdesk)](https://github.com/GroundedCoreAI/nexusdesk/releases) [![docker pulls](https://img.shields.io/docker/pulls/groundedcore/nexusdesk-quickstart)](https://hub.docker.com/r/groundedcore/nexusdesk-quickstart) [![website](https://img.shields.io/badge/website-aidet.top-blue)](https://www.aidet.top/en/index.html)
 
 **Self-hosted AI customer service that can retrieve, act, and hand off.**
 
@@ -176,9 +176,9 @@ See the [module architecture](docs/architecture.md) for module-level plans.
 
 Contributions are welcome through issue reports, documentation improvements, test cases, and code.
 
-- Use the [issue templates](https://github.com/GroundedCore/nexusdesk/issues/new/choose) and include reproduction steps, deployment mode, and sanitized logs.
+- Use the [issue templates](https://github.com/GroundedCoreAI/nexusdesk/issues/new/choose) and include reproduction steps, deployment mode, and sanitized logs.
 - Read the [contributing guide](CONTRIBUTING.md) before contributing code.
-- Use [Discussions](https://github.com/GroundedCore/nexusdesk/discussions) for design-level topics.
+- Use [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions) for design-level topics.
 
 Do not include API keys, access tokens, or customer privacy data in issue reports, screenshots, or code.
 

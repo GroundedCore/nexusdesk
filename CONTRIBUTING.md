@@ -1,7 +1,7 @@
 # 参与贡献
 
 > English speakers: this document is currently Chinese-only. Feel free to open a
-> [discussion](https://github.com/GroundedCore/nexusdesk/discussions) or an issue in English —
+> [discussion](https://github.com/GroundedCoreAI/nexusdesk/discussions) or an issue in English —
 > we will reply in English and can translate the guidance for you.
 
 感谢你愿意参与 NexusDesk 的建设。可参与的方向包括问题反馈、文档改进、测试用例与代码贡献。
@@ -17,7 +17,7 @@
 1. 使用对应的 issue 模板：**Bug 报告**、**功能建议**、**部署问题**。
 2. 说明**使用场景、复现步骤、部署方式与脱敏日志**。部署问题尤其需要"部署方式 / 中间件 / 日志"这三样。
 3. 如果还不确定是否适合你的场景，或问题还不到能复现的程度，欢迎先到
-   [Discussions](https://github.com/GroundedCore/nexusdesk/discussions) 讨论。
+   [Discussions](https://github.com/GroundedCoreAI/nexusdesk/discussions) 讨论。
 
 ⚠️ **请勿在问题报告、截图或代码中包含 API Key、访问令牌、数据库密码及客户隐私数据。**
 
