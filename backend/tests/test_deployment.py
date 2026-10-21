@@ -302,21 +302,24 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
     )
-    mirror = workflow["jobs"]["mirror"]
+    deploy = workflow["jobs"]["deploy"]
+    steps = {
+        step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
+    }
 
-    # Separate job: an expired Docker Hub token or an outage there must not turn a
-    # successful deploy into a failed run.
-    assert mirror["needs"] == "deploy"
-    # The gate reads a repository variable, never a secret. A job-level `if` has no
+    login = steps["Login to Docker Hub"]
+    # An expired Docker Hub token or an outage there must not fail the deploy.
+    assert login["continue-on-error"] is True
+    # The gate reads a repository variable, never a secret. Step-level `if` has no
     # access to the secrets context, so gating on the token would silently never match.
-    assert "vars.DOCKERHUB_USERNAME" in mirror["if"]
-    assert "secrets." not in mirror["if"]
+    assert "vars.DOCKERHUB_USERNAME" in login["if"]
+    assert "secrets." not in login["if"]
 
-    script = next(
-        step["run"]
-        for step in mirror["steps"]
-        if step.get("name") == "Copy the image between registries"
-    )
+    mirror = steps["Mirror image to Docker Hub"]
+    assert mirror["continue-on-error"] is True
+    assert "steps.dockerhub.outcome" in mirror["if"]
+
+    script = mirror["run"]
     # Registry-to-registry copy: the GHCR index is reproduced rather than rebuilt
     # from the runner's own platform.
     assert "imagetools create" in script
@@ -324,3 +327,17 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     # The destination comes from configuration so a fork can publish under its own
     # account without editing the workflow.
     assert "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart" in script
+
+    # A mirror failure selects the authenticated GHCR path and still deploys.
+    select_registry = steps["Select deployment registry"]["run"]
+    assert "steps.mirror.outcome" in select_registry
+    assert "NEXUSDESK_IMAGE_REGISTRY=${DOCKERHUB_NAMESPACE}/" in select_registry
+    assert "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" in select_registry
+
+    deploy_step = steps["Deploy to server"]
+    assert "NEXUSDESK_IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
+    assert (
+        'export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"'
+        in deploy_step["with"]["script"]
+    )
+    assert deploy_step["with"]["command_timeout"] == "60m"
