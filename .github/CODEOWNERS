@@ -5,18 +5,15 @@
 # workflows, deployment configs, database migrations) always require a
 # core maintainer's review before merging.
 #
-# NOTE: @SECOND_OWNER_TODO is a placeholder — replace it with the second
-# core maintainer's GitHub username before enabling CODEOWNERS enforcement.
-
 # Default owner for everything.
-* @jackchow621 @SECOND_OWNER_TODO
+* @jackchow621 @GroundedCore
 
 # CI/CD workflow changes are high risk: they can alter required checks,
 # deployment triggers, and secret exposure.
-/.github/workflows/ @jackchow621 @SECOND_OWNER_TODO
+/.github/workflows/ @jackchow621 @GroundedCore
 
 # Deployment configuration and scripts.
-/deploy/ @jackchow621 @SECOND_OWNER_TODO
+/deploy/ @jackchow621 @GroundedCore
 
 # Database schema migrations affect production data and rollbacks.
-/backend/migrations/ @jackchow621 @SECOND_OWNER_TODO
+/backend/migrations/ @jackchow621 @GroundedCore
