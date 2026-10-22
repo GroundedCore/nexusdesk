@@ -2,10 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # CI covers both long-lived branches. Deploys are never triggered by CI
+    # or by pushes to these branches; see deploy.yml.
+    branches: [main, integration]
     paths-ignore:
-      # Docs-only changes skip CI. Since CD triggers on CI completion
-      # (workflow_run), skipping CI also skips deploys. Mixed commits
+      # Docs-only changes skip CI as a cost optimization. Mixed commits
       # (docs + code) still run CI — the workflow is skipped only when
       # every changed file matches an ignore pattern.
       - 'docs/**'
@@ -13,10 +14,10 @@ on:
       - 'LICENSE'
   # PRs always run CI: branch protection requires the backend/frontend checks,
   # and a workflow skipped by paths-ignore leaves them "waiting for status"
-  # forever (docs-only PRs could never merge). The push trigger above keeps
-  # its paths-ignore, so merging a docs-only PR to main still skips CI there
-  # and therefore does not trigger a deploy.
+  # forever (docs-only PRs could never merge). CI runs on the PR merge result
+  # with read-only permissions and no repository secrets, so fork PRs are safe.
   pull_request:
+    branches: [main, integration]
   workflow_dispatch:
 
 concurrency:
@@ -74,7 +75,7 @@ jobs:
 
       - name: Lint
         working-directory: backend
-        run: uv run ruff check . --fix
+        run: uv run ruff check .
 
       - name: Migrate the test database
         working-directory: backend
