@@ -31,3 +31,6 @@ scripts/
 # `${VAR:-default}` fallbacks and must never reach a public repository.
 *.local.yaml
 work/
+
+# Agent skills bundled helper scripts are source, not artifacts
+!.agents/skills/**/scripts/
