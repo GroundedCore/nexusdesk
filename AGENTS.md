@@ -35,6 +35,7 @@ sh nexusdesk quickstart
 | [groundedcoreai-python-backend-standards](.agents/skills/groundedcoreai-python-backend-standards/SKILL.md) | 编写/修改/审查 `backend/` 下 Python 代码（FastAPI、SQLAlchemy、Alembic、LangGraph） |
 | [groundedcoreai-typescript-frontend-standards](.agents/skills/groundedcoreai-typescript-frontend-standards/SKILL.md) | 编写/修改/审查 `frontend/` 前端代码或 `sdk/javascript`（React、TS、i18n） |
 | [groundedcoreai-shell-infra-standards](.agents/skills/groundedcoreai-shell-infra-standards/SKILL.md) | 编写/修改/审查 Shell/PowerShell 脚本、Dockerfile、docker compose 及 `deploy/` 配置 |
+| [groundedcoreai-commit-standard](.agents/skills/groundedcoreai-commit-standard/SKILL.md) | 提交代码、生成/校验 commit message、安装 commit 校验 hook 时（Conventional Commits + GitHub issue 引用 + 签名提交） |
 
 如果你的运行环境支持 Agent Skills 自动发现（如 Codex 扫 `.agents/skills/`、Claude Code 扫 `.claude/skills/`），直接按 skill 的 description 自动触发即可；否则按上表手动加载。
 
@@ -44,3 +45,4 @@ sh nexusdesk quickstart
 - **敏感信息（密码、密钥、Token 等）必须独立用环境文件维护**（`.env` 已 gitignore，仅提交 `.env.example` 占位模板），禁止写进任何代码、脚本或配置文件；各端细则见对应 SKILL.md 的"敏感信息管理"章节
 - 用户可见的前端文案必须走 i18n，禁止硬编码
 - 数据库改动必须配 Alembic 迁移，禁止手工改库
+- `docs/` 目录下的文档（含根目录 `README*`、`CHANGELOG*`）新增或修改时必须**同时维护中英文对照两个版本**（如 `xxx.md` + `xxx.en.md`），并在同一提交中一并提交
