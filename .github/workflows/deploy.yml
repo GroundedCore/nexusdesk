@@ -44,7 +44,6 @@ jobs:
     # secrets (DEPLOY_HOST, DEPLOY_SSH_KEY, ...) should live there.
     environment: production
     env:
-      IMAGE_TAG: ${{ env.VERSION }}
       # Loopback-only by default in compose; the server deployment opts into a
       # wider bind. Override with the NEXUSDESK_BIND repository variable.
       # NOTE: quickstart no longer injects an identity, so unauthenticated API
@@ -114,7 +113,7 @@ jobs:
           push: true
           # Only the immutable version tag is published; never `latest`.
           tags: |
-            ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:${{ env.VERSION }}
           cache-from: type=gha,scope=quickstart
           cache-to: type=gha,mode=max,scope=quickstart
 
@@ -134,8 +133,8 @@ jobs:
         # Registry-to-registry copy preserves the manifest and layer digests.
         run: |
           docker buildx imagetools create \
-            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}" \
-            "ghcr.io/${GHCR_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}"
+            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${VERSION}" \
+            "ghcr.io/${GHCR_NAMESPACE}/nexusdesk-quickstart:${VERSION}"
 
       - name: Select deployment registry
         # The deployment host can reach Docker Hub much faster than GHCR.
@@ -159,13 +158,13 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: IMAGE_TAG,NEXUSDESK_IMAGE_REGISTRY,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS,GHCR_NAMESPACE,GHCR_USER,GHCR_TOKEN
+          envs: VERSION,NEXUSDESK_IMAGE_REGISTRY,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS,GHCR_NAMESPACE,GHCR_USER,GHCR_TOKEN
           # Keep headroom for a first pull on a slow server-to-registry link.
           command_timeout: 60m
           script: |
             set -e
             cd /home/nexus/nexusdesk
-            export NEXUSDESK_VERSION="${IMAGE_TAG}"
+            export NEXUSDESK_VERSION="${VERSION}"
             export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"
             export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
             export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
@@ -184,7 +183,7 @@ jobs:
             docker image prune -f
             # Record the actually running version on the host for audit and
             # rollback reference.
-            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${IMAGE_TAG}" | tee -a /home/nexus/nexusdesk/.deployed-versions
+            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${VERSION}" | tee -a /home/nexus/nexusdesk/.deployed-versions
             docker compose -f deploy/quickstart/compose.yaml exec -T app python /app/deploy/healthcheck.py quickstart
 
       - name: Record deployment
