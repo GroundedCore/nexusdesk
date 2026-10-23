@@ -307,16 +307,9 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
         step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
     }
 
-    checkout = deploy["steps"][0]
-    assert checkout["with"]["fetch-depth"] == 2
-    changes = steps["Decide whether this commit needs a deployment"]
-    assert "git diff --name-only" in changes["run"]
-    assert r"^(\.github/|backend/tests/|docs/|.*\.md$)" in changes["run"]
-
     login = steps["Login to Docker Hub"]
     # An expired Docker Hub token or an outage there must not fail the deploy.
     assert login["continue-on-error"] is True
-    assert "steps.changes.outputs.deploy == 'true'" in login["if"]
     # The gate reads a repository variable, never a secret. Step-level `if` has no
     # access to the secrets context, so gating on the token would silently never match.
     assert "vars.DOCKERHUB_USERNAME" in login["if"]
@@ -342,7 +335,6 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     assert "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" in select_registry
 
     deploy_step = steps["Deploy to server"]
-    assert "steps.changes.outputs.deploy == 'true'" in deploy_step["if"]
     assert "NEXUSDESK_IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
     assert (
         'export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"'
@@ -352,3 +344,40 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
         deploy_step["with"]["script"]
     )
     assert deploy_step["with"]["command_timeout"] == "60m"
+
+
+def test_deploy_workflow_only_deploys_approved_release_tags():
+    import yaml
+
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    )
+
+    # Branch-management red line: main/integration events must never trigger a
+    # deploy. Only a published GitHub Release or an explicit version dispatch
+    # may start this workflow.
+    triggers = workflow[True] if True in workflow else workflow["on"]
+    assert "workflow_run" not in triggers
+    assert "push" not in triggers
+    assert "release" in triggers
+    version_input = triggers["workflow_dispatch"]["inputs"]["version"]
+    assert version_input["required"] is True
+
+    deploy = workflow["jobs"]["deploy"]
+    # Production deploys wait for approval on the `production` Environment.
+    assert deploy["environment"] == "production"
+
+    steps = {
+        step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
+    }
+    # The deploy input is validated as an immutable v* tag before anything runs,
+    # and the checkout is pinned to that tag.
+    validate = steps["Validate version tag"]["run"]
+    assert "^v[0-9]+" in validate
+    checkout = steps["Checkout the release tag"]
+    assert checkout["with"]["ref"] == "${{ env.VERSION }}"
+
+    # Mutable tags are never published: no step pushes a `latest` image tag
+    # (`latest` only appears in explanatory comments, so match the `:latest`
+    # image-ref form).
+    assert ":latest" not in yaml.dump(workflow["jobs"]["deploy"]["steps"])
