@@ -2,6 +2,11 @@
 
 Repository: `GroundedCoreAI/nexusdesk`
 
+> ⚠️ **本文档（V1）已被 `workflow-spec-v2.md` 取代（2026-10），仅作历史参考。**
+> V2 的主要变化：`integration` 不再要求人工审批（必需 CI 通过即可合并）；
+> `integration` Push 且 CI 通过后自动部署到测试服务器（镜像以 commit SHA 标识）；
+> 正式 Tag / GitHub Release 不再触发部署。
+>
 > 本文档为规范的最终参考版。日常实操速查见同目录上级 `SKILL.md`。
 
 ## 1. 核心原则

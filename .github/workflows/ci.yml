@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    # CI covers both long-lived branches. Deploys are never triggered by CI
-    # or by pushes to these branches; see deploy.yml.
+    # CI covers both long-lived branches (branch-management spec V2 §5.1).
+    # A successful CI run on an `integration` push triggers the test-server
+    # deploy in deploy.yml (workflow_run); `main` never deploys anything.
     branches: [main, integration]
     paths-ignore:
       # Docs-only changes skip CI as a cost optimization. Mixed commits

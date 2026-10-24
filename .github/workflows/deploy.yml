@@ -1,97 +1,136 @@
-name: CD
+name: CD (test deploy)
 
-# Deploys a released version of the quickstart stack to the server.
+# Deploys the CI-verified `integration` commit to the TEST server.
 #
-# Deployment red lines (branch-management spec §9):
-#   - main/integration events (push, CI completion, etc.) NEVER trigger a deploy.
-#   - Deploys are triggered ONLY by:
-#       1. Publishing a GitHub Release (tag v*), or
-#       2. Manually dispatching this workflow with an explicit version tag.
-#   - The deployed artifact is built from the specified tag; mutable tags such
-#     as `latest` are never used as a deploy source or pushed to registries.
-#   - Production deploys require approval via the `production` GitHub
-#     Environment (configure required reviewers in repo settings).
+# Branch-management spec V2 (.agents/skills/groundedcoreai-dev-workflow/
+# references/workflow-spec-v2.md), §5.2/§5.3/§5.4:
+#   - Triggers ONLY when the CI workflow completes for a PUSH to `integration`
+#     with conclusion `success` (workflow_run). PR checks, failed/cancelled
+#     runs and other branches never deploy.
+#   - Deploys the exact commit SHA the upstream CI verified — never the moving
+#     tip of `integration`; `latest` is never used as an image tag.
+#   - No manual approval, no git tags, no GitHub Releases.
+#   - `main` updates, release tags and GitHub Releases never deploy anything.
+#
+# Credential isolation (spec V2 §5.4):
+#   - workflow_run loads THIS file from the default branch, so code from an
+#     unreviewed PR cannot alter the deploy logic.
+#   - The build job receives no server credentials.
+#   - Only the deploy job (GitHub Environment `testing`) sees the SSH secrets;
+#     configure DEPLOY_HOST / DEPLOY_PORT / DEPLOY_USER / DEPLOY_SSH_KEY as
+#     secrets of the `testing` environment (no required reviewers).
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [integration]
+  # Manual redeploy of a historical integration commit (spec V2 §5.3: keep the
+  # ability to redeploy previously verified versions).
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version tag to deploy (e.g. v0.2.0). Must be an existing v* tag."
+      commit_sha:
+        description: "Full 40-char commit SHA on integration to redeploy (must already be merged there)."
         required: true
         type: string
 
 # Never cancel an in-flight deploy; queue the next one instead.
 concurrency:
-  group: deploy-production
+  group: deploy-testing
   cancel-in-progress: false
 
 permissions:
   contents: read
   packages: write # push images to GHCR with GITHUB_TOKEN
 
-env:
-  # Release events deploy the release tag; manual dispatch deploys the
-  # version input. Both are validated as v* tags before anything runs.
-  VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.version }}
-
 jobs:
-  deploy:
-    name: Build, push, and deploy
+  guard:
+    name: Validate deploy preconditions
     runs-on: ubuntu-latest
-    # Production deploys go through the `production` Environment: required
-    # reviewers must approve before this job starts. Environment-scoped
-    # secrets (DEPLOY_HOST, DEPLOY_SSH_KEY, ...) should live there.
-    environment: production
     env:
-      # Loopback-only by default in compose; the server deployment opts into a
-      # wider bind. Override with the NEXUSDESK_BIND repository variable.
-      # NOTE: quickstart no longer injects an identity, so unauthenticated API
-      # calls are rejected. Its sign-in password is still the public default, so
-      # put real authentication in front (basic auth or an IP allowlist) when
-      # binding beyond 127.0.0.1.
-      NEXUSDESK_BIND: ${{ vars.NEXUSDESK_BIND || '0.0.0.0' }}
-      # Addresses users actually type to reach the demo. The generated certificate
-      # must cover them, otherwise a browser reports a name mismatch even after
-      # ca.crt has been imported. Defaults to the deploy host, which is how the
-      # server is reached; set the NEXUSDESK_TLS_HOSTS repository variable when the
-      # addresses differ, and use a comma-separated list for more than one.
-      NEXUSDESK_TLS_HOSTS: ${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}
-      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
+      WR_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      WR_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      WR_EVENT: ${{ github.event.workflow_run.event }}
+      WR_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      WR_HTML_URL: ${{ github.event.workflow_run.html_url }}
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+      commit_sha: ${{ steps.check.outputs.commit_sha }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+      upstream_run_url: ${{ steps.check.outputs.upstream_run_url }}
     steps:
-      - name: Validate version tag
+      - name: Check preconditions and resolve image tag
+        id: check
         shell: bash
         run: |
-          # Mutable tags (latest, main, branch names, SHAs) are forbidden as
-          # deploy inputs; only immutable release tags may be deployed.
-          if ! [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
-            echo "::error::VERSION '${VERSION}' is not a valid release tag (expected e.g. v0.2.0)."
+          set -euo pipefail
+          echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+          echo "upstream_run_url=${WR_HTML_URL:-manual}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            # Deploy only when the upstream CI run was a push to `integration`
+            # that concluded successfully. Anything else (PR checks, failures,
+            # cancellations, other branches) must not deploy.
+            if [ "${WR_EVENT}" != "push" ] || [ "${WR_BRANCH}" != "integration" ]; then
+              echo "::notice::Upstream run is not a push to integration (event=${WR_EVENT}, branch=${WR_BRANCH}); skipping deploy."
+              exit 0
+            fi
+            if [ "${WR_CONCLUSION}" != "success" ]; then
+              echo "::notice::Upstream CI conclusion is '${WR_CONCLUSION}'; skipping deploy."
+              exit 0
+            fi
+            SHA="${WR_HEAD_SHA}"
+          else
+            SHA="${{ inputs.commit_sha }}"
+          fi
+
+          # Only immutable commit SHAs may be deployed; branch names and
+          # mutable tags such as `latest` are rejected.
+          if ! [[ "${SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Ref '${SHA}' is not a full 40-char commit SHA. Refusing to deploy."
             exit 1
           fi
-          echo "Deploying version ${VERSION}"
 
-      - name: Checkout the release tag
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual redeploys must target a commit already merged into
+            # integration (i.e. an ancestor of, or equal to, its tip).
+            status="$(curl -sf "https://api.github.com/repos/${{ github.repository }}/compare/${SHA}...integration" | jq -r .status)"
+            case "${status}" in
+              ahead|identical) ;;
+              *) echo "::error::Commit ${SHA} is not contained in integration (compare status: ${status})."; exit 1 ;;
+            esac
+          fi
+
+          IMAGE_TAG="$(echo "${SHA}" | cut -c1-12)"
+          echo "Deploying commit ${SHA} (image tag ${IMAGE_TAG})"
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and push image
+    needs: guard
+    if: needs.guard.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    # Credential isolation: this job must NOT receive SSH/deploy secrets.
+    env:
+      COMMIT_SHA: ${{ needs.guard.outputs.commit_sha }}
+      IMAGE_TAG: ${{ needs.guard.outputs.image_tag }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME }}
+    outputs:
+      image_registry: ${{ steps.registry.outputs.image_registry }}
+      ghcr_namespace: ${{ steps.ghcr.outputs.ghcr_namespace }}
+    steps:
+      - name: Checkout the verified commit
         uses: actions/checkout@v4
         with:
-          # Build the deployment artifact from the exact tagged code.
-          ref: ${{ env.VERSION }}
-
-      - name: Verify the checkout matches the tag
-        shell: bash
-        run: |
-          git fetch --depth=1 origin tag "${VERSION}" --no-tags || true
-          tag_sha="$(git rev-parse "${VERSION}^{commit}" 2>/dev/null || true)"
-          head_sha="$(git rev-parse HEAD)"
-          if [ -n "${tag_sha}" ] && [ "${tag_sha}" != "${head_sha}" ]; then
-            echo "::error::Checked-out commit ${head_sha} does not match tag ${VERSION} (${tag_sha})."
-            exit 1
-          fi
-          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "Checked out ${VERSION} at ${head_sha}"
+          # Build the deployment artifact from the exact commit the upstream
+          # CI verified, not from the moving tip of `integration`.
+          ref: ${{ needs.guard.outputs.commit_sha }}
 
       - name: Compute GHCR namespace
+        id: ghcr
         # GHCR requires a lowercase namespace.
-        run: echo "GHCR_NAMESPACE=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        run: echo "ghcr_namespace=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -111,9 +150,9 @@ jobs:
           build-args: |
             VITE_PREFILL_LOGIN=true
           push: true
-          # Only the immutable version tag is published; never `latest`.
+          # Only the immutable commit-SHA tag is published; never `latest`.
           tags: |
-            ghcr.io/${{ env.GHCR_NAMESPACE }}/nexusdesk-quickstart:${{ env.VERSION }}
+            ghcr.io/${{ steps.ghcr.outputs.ghcr_namespace }}/nexusdesk-quickstart:${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=quickstart
           cache-to: type=gha,mode=max,scope=quickstart
 
@@ -133,20 +172,45 @@ jobs:
         # Registry-to-registry copy preserves the manifest and layer digests.
         run: |
           docker buildx imagetools create \
-            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${VERSION}" \
-            "ghcr.io/${GHCR_NAMESPACE}/nexusdesk-quickstart:${VERSION}"
+            -t "${DOCKERHUB_NAMESPACE}/nexusdesk-quickstart:${IMAGE_TAG}" \
+            "ghcr.io/${{ steps.ghcr.outputs.ghcr_namespace }}/nexusdesk-quickstart:${IMAGE_TAG}"
 
       - name: Select deployment registry
+        id: registry
         # The deployment host can reach Docker Hub much faster than GHCR.
         # Mirror failures are non-fatal: fall back to the authenticated GHCR pull.
         run: |
           if [ "${{ steps.mirror.outcome }}" = "success" ]; then
-            echo "NEXUSDESK_IMAGE_REGISTRY=${DOCKERHUB_NAMESPACE}/" >> "$GITHUB_ENV"
+            echo "image_registry=${DOCKERHUB_NAMESPACE}/" >> "$GITHUB_OUTPUT"
           else
-            echo "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" >> "$GITHUB_ENV"
+            echo "image_registry=ghcr.io/${{ steps.ghcr.outputs.ghcr_namespace }}/" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Deploy to server
+  deploy:
+    name: Deploy to test server
+    needs: [guard, build]
+    if: needs.guard.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    # Test-server deploys run without manual approval (spec V2 §5.2), but the
+    # `testing` Environment scopes the SSH secrets to this job only. Create the
+    # environment in repo settings WITHOUT required reviewers and move
+    # DEPLOY_HOST / DEPLOY_PORT / DEPLOY_USER / DEPLOY_SSH_KEY into it.
+    environment: testing
+    env:
+      # Test server access must be restricted (spec V2 §6): VPN, IP allowlist
+      # or a real authentication layer in front. The quickstart sign-in
+      # password is a public default — do not expose the port unprotected.
+      NEXUSDESK_BIND: ${{ vars.NEXUSDESK_BIND || '0.0.0.0' }}
+      # Addresses users actually type to reach the test deployment. The
+      # generated certificate must cover them; set the NEXUSDESK_TLS_HOSTS
+      # repository variable (comma-separated) when they differ from the host.
+      NEXUSDESK_TLS_HOSTS: ${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}
+      COMMIT_SHA: ${{ needs.guard.outputs.commit_sha }}
+      IMAGE_TAG: ${{ needs.guard.outputs.image_tag }}
+      IMAGE_REGISTRY: ${{ needs.build.outputs.image_registry }}
+      GHCR_NAMESPACE: ${{ needs.build.outputs.ghcr_namespace }}
+    steps:
+      - name: Deploy to test server
         env:
           GHCR_USER: ${{ github.actor }}
           # The workflow token can read the private package created by this run.
@@ -158,14 +222,14 @@ jobs:
           port: ${{ secrets.DEPLOY_PORT || 22 }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: VERSION,NEXUSDESK_IMAGE_REGISTRY,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS,GHCR_NAMESPACE,GHCR_USER,GHCR_TOKEN
+          envs: IMAGE_TAG,IMAGE_REGISTRY,NEXUSDESK_BIND,NEXUSDESK_TLS_HOSTS,GHCR_NAMESPACE,GHCR_USER,GHCR_TOKEN,COMMIT_SHA
           # Keep headroom for a first pull on a slow server-to-registry link.
           command_timeout: 60m
           script: |
             set -e
             cd /home/nexus/nexusdesk
-            export NEXUSDESK_VERSION="${VERSION}"
-            export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"
+            export NEXUSDESK_VERSION="${IMAGE_TAG}"
+            export NEXUSDESK_IMAGE_REGISTRY="${IMAGE_REGISTRY}"
             export NEXUSDESK_BIND="${NEXUSDESK_BIND}"
             export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
@@ -181,9 +245,9 @@ jobs:
             docker compose -f deploy/quickstart/compose.yaml up -d --wait --wait-timeout 300
             docker compose -f deploy/quickstart/compose.yaml ps
             docker image prune -f
-            # Record the actually running version on the host for audit and
-            # rollback reference.
-            printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${VERSION}" | tee -a /home/nexus/nexusdesk/.deployed-versions
+            # Record the actually running commit on the host for audit and
+            # rollback reference (spec V2 §5.3/§6).
+            printf '%s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${COMMIT_SHA}" "${IMAGE_TAG}" | tee -a /home/nexus/nexusdesk/.deployed-versions
             docker compose -f deploy/quickstart/compose.yaml exec -T app python /app/deploy/healthcheck.py quickstart
 
       - name: Record deployment
@@ -191,8 +255,10 @@ jobs:
         shell: bash
         run: |
           {
-            echo "### Deployment ${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}"
-            echo "- Version: \`${VERSION}\`"
+            echo "### Test deployment ${GITHUB_WORKFLOW} #${GITHUB_RUN_NUMBER}"
+            echo "- Commit: \`${{ needs.guard.outputs.commit_sha }}\`"
+            echo "- Image tag: \`${{ needs.guard.outputs.image_tag }}\`"
+            echo "- Upstream CI: ${{ needs.guard.outputs.upstream_run_url }}"
             echo "- Trigger: ${{ github.event_name }}"
             echo "- Actor: ${{ github.actor }}"
             echo "- Result: ${{ job.status }}"
