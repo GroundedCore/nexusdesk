@@ -291,7 +291,7 @@ def test_deploy_workflow_forwards_the_tls_host_list():
     assert deploy["env"]["NEXUSDESK_TLS_HOSTS"] == (
         "${{ vars.NEXUSDESK_TLS_HOSTS || secrets.DEPLOY_HOST }}"
     )
-    step = next(s for s in deploy["steps"] if s.get("name") == "Deploy to server")
+    step = next(s for s in deploy["steps"] if s.get("name") == "Deploy to test server")
     assert "NEXUSDESK_TLS_HOSTS" in step["with"]["envs"].split(",")
     assert 'export NEXUSDESK_TLS_HOSTS="${NEXUSDESK_TLS_HOSTS}"' in step["with"]["script"]
 
@@ -302,9 +302,9 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
     )
-    deploy = workflow["jobs"]["deploy"]
+    build = workflow["jobs"]["build"]
     steps = {
-        step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
+        step["name"]: step for step in build["steps"] if isinstance(step.get("name"), str)
     }
 
     login = steps["Login to Docker Hub"]
@@ -331,13 +331,16 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     # A mirror failure selects the authenticated GHCR path and still deploys.
     select_registry = steps["Select deployment registry"]["run"]
     assert "steps.mirror.outcome" in select_registry
-    assert "NEXUSDESK_IMAGE_REGISTRY=${DOCKERHUB_NAMESPACE}/" in select_registry
-    assert "NEXUSDESK_IMAGE_REGISTRY=ghcr.io/${GHCR_NAMESPACE}/" in select_registry
+    assert "image_registry=${DOCKERHUB_NAMESPACE}/" in select_registry
+    assert "image_registry=ghcr.io/" in select_registry
 
-    deploy_step = steps["Deploy to server"]
-    assert "NEXUSDESK_IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
+    deploy = workflow["jobs"]["deploy"]
+    deploy_step = next(
+        s for s in deploy["steps"] if s.get("name") == "Deploy to test server"
+    )
+    assert "IMAGE_REGISTRY" in deploy_step["with"]["envs"].split(",")
     assert (
-        'export NEXUSDESK_IMAGE_REGISTRY="${NEXUSDESK_IMAGE_REGISTRY}"'
+        'export NEXUSDESK_IMAGE_REGISTRY="${IMAGE_REGISTRY}"'
         in deploy_step["with"]["script"]
     )
     assert 'export NEXUSDESK_IMAGE_REGISTRY="ghcr.io/${GHCR_NAMESPACE}/"' in (
@@ -346,38 +349,60 @@ def test_docker_hub_mirror_cannot_fail_a_deploy():
     assert deploy_step["with"]["command_timeout"] == "60m"
 
 
-def test_deploy_workflow_only_deploys_approved_release_tags():
+def test_deploy_workflow_only_deploys_ci_verified_integration_commits():
     import yaml
 
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
     )
 
-    # Branch-management red line: main/integration events must never trigger a
-    # deploy. Only a published GitHub Release or an explicit version dispatch
-    # may start this workflow.
+    # Branch-management spec V2: deploys happen only when the CI workflow
+    # completes for a push to `integration`; `main` events, release tags and
+    # GitHub Releases never deploy. Manual dispatch redeploys a historical
+    # integration commit by SHA.
     triggers = workflow[True] if True in workflow else workflow["on"]
-    assert "workflow_run" not in triggers
     assert "push" not in triggers
-    assert "release" in triggers
-    version_input = triggers["workflow_dispatch"]["inputs"]["version"]
-    assert version_input["required"] is True
+    assert "release" not in triggers
+    workflow_run = triggers["workflow_run"]
+    assert workflow_run["workflows"] == ["CI"]
+    assert workflow_run["types"] == ["completed"]
+    assert workflow_run["branches"] == ["integration"]
+    sha_input = triggers["workflow_dispatch"]["inputs"]["commit_sha"]
+    assert sha_input["required"] is True
+
+    # The guard job re-validates the upstream run: push event on `integration`
+    # with conclusion success, and resolves an immutable full commit SHA.
+    guard = workflow["jobs"]["guard"]
+    guard_run = "\n".join(
+        step.get("run", "") for step in guard["steps"]
+    )
+    assert '"${WR_EVENT}" != "push"' in guard_run
+    assert '"${WR_BRANCH}" != "integration"' in guard_run
+    assert '"${WR_CONCLUSION}" != "success"' in guard_run
+    assert "^[0-9a-f]{40}$" in guard_run
+
+    # The image is built from the exact commit the upstream CI verified,
+    # tagged with that commit's short SHA — never the branch tip or `latest`.
+    build = workflow["jobs"]["build"]
+    checkout = next(
+        s for s in build["steps"] if s.get("name") == "Checkout the verified commit"
+    )
+    assert checkout["with"]["ref"] == "${{ needs.guard.outputs.commit_sha }}"
+    build_push = next(
+        s for s in build["steps"] if s.get("name") == "Build and push quickstart image"
+    )
+    assert "nexusdesk-quickstart:${{ env.IMAGE_TAG }}" in build_push["with"]["tags"]
 
     deploy = workflow["jobs"]["deploy"]
-    # Production deploys wait for approval on the `production` Environment.
-    assert deploy["environment"] == "production"
+    # Test-server deploys run without approval on the `testing` Environment.
+    assert deploy["environment"] == "testing"
 
-    steps = {
-        step["name"]: step for step in deploy["steps"] if isinstance(step.get("name"), str)
-    }
-    # The deploy input is validated as an immutable v* tag before anything runs,
-    # and the checkout is pinned to that tag.
-    validate = steps["Validate version tag"]["run"]
-    assert "^v[0-9]+" in validate
-    checkout = steps["Checkout the release tag"]
-    assert checkout["with"]["ref"] == "${{ env.VERSION }}"
-
-    # Mutable tags are never published: no step pushes a `latest` image tag
-    # (`latest` only appears in explanatory comments, so match the `:latest`
-    # image-ref form).
-    assert ":latest" not in yaml.dump(workflow["jobs"]["deploy"]["steps"])
+    # Credential isolation: SSH deploy secrets appear only in the deploy job,
+    # never in guard/build, and no job creates git tags or GitHub Releases.
+    all_steps_dump = yaml.dump({k: v.get("steps", []) for k, v in workflow["jobs"].items()})
+    assert ":latest" not in all_steps_dump
+    assert "git tag" not in all_steps_dump
+    for job_name in ("guard", "build"):
+        job_dump = yaml.dump(workflow["jobs"][job_name])
+        assert "DEPLOY_SSH_KEY" not in job_dump
+        assert "DEPLOY_HOST" not in job_dump
