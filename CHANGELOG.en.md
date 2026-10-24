@@ -4,6 +4,64 @@
 
 Versions map to `v`-prefixed Git tags and follow [Semantic Versioning](https://semver.org/). During `0.x`, releases follow feature batches: `x` is the batch and `y` is a fix.
 
+## v0.2.0 — 2026-10-24
+
+Second feature batch: streamed answers, the agent memory system (phases 1–6), native channel integrations, member and access management, an evaluation workbench, and a release-gated deployment pipeline.
+
+### Added
+
+**Streamed answers**
+
+- Model deltas stream in real time to the console over LISTEN/NOTIFY, and to the public API and embedded chat widget as well.
+- Run traces are organised as rounds rather than raw events and can be opened directly from an answer; time-to-first-character is recorded.
+
+**Agent memory system (phases 1–6)**
+
+- Rolling summaries: conversation summary storage plus a memory task queue, with summaries updated as the conversation progresses.
+- Customer profiles: customer identity resolution and profile/preference memory; repeated memory-item decisions return 409.
+- Event memory: a MemoryStore (pgvector / TSVECTOR implementations), event writing and routing, a built-in `memory_search` tool, and idle-cycle maintenance.
+- Memory governance: PII masking, protection flags, delete/merge, rule scanning and confidence decay, plus a governance console UI.
+- Switches and visualisation: memory feature toggles, injection explainability (injection logs), and optional demo datasets seeded at server startup.
+- The memory worker is split into a standalone container topology; the console surfaces event memory and commitments.
+
+**Channels and access**
+
+- Native channel integrations with channel workers; the channel tab is named for what it carries and its translations are complete.
+
+**Members and permissions (P0)**
+
+- Member management and session management; audit records capture the real client IP (including behind proxies), with paginated tables.
+
+**Evaluation workbench**
+
+- Agent evaluation panel, case workbook import, and a cross-agent quality board, rendered with antd Table.
+
+**Conversation workbench**
+
+- An agent entry page with per-agent stats and a scoped workbench; the conversation list can be filtered by agent.
+
+**Engineering and release**
+
+- Branch governance: `integration` is the default branch, rulesets protect `main`/`integration`, and CODEOWNERS enforces review of sensitive paths.
+- Release-gated deployment: CD only runs on a published GitHub Release (`v*` tag) or a manual dispatch with an explicit version, gated by the `production` Environment; quickstart images are pushed to GHCR and mirrored to Docker Hub.
+- The quickstart defaults to the pgvector image; new AGENTS.md entry point and team-standard skills (commit standard, dev workflow, and more).
+- New brand mark (orbit logo with gradient wordmark); the quickstart pre-fills the demo sign-in form.
+
+### Changed
+
+- **The quickstart no longer injects an admin token for identity-less requests**: unauthenticated API calls are rejected. The demo account password is still the public default, so put real authentication (basic auth or an IP allowlist) in front when binding beyond the loopback address.
+
+### Known limitations
+
+- The demo uses a mock model and **does not represent real answer quality**; it does not connect to real order systems and provides no real OCR or GPU inference.
+- The production topology does not terminate TLS itself; the host or an ingress proxy is expected to.
+- Real parser, Milvus, and S3 integrations have not been validated end to end. See [module delivery notes](docs/modules-delivery.md).
+- The project is under active development and is not production ready.
+
+### Upgrade notes
+
+Database migrations run automatically when the container starts (41 migrations cumulative in this release) and **cannot be rolled back** — reverting the image does not revert the schema. Upgrading from v0.1.0 is a straight image pull and restart; on a self-hosted PostgreSQL, vector retrieval uses pgvector by default with no extra middleware. See [database migrations](docs/database-migrations.md).
+
 ## v0.1.0 — 2026-10-09
 
 First runnable release. The core customer-service flow is complete and usable.

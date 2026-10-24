@@ -1,0 +1,19 @@
+# Code owners for NexusDesk.
+#
+# These rules make GitHub automatically request review from the listed
+# owners when a PR touches the matching paths. Sensitive paths (CI/CD
+# workflows, deployment configs, database migrations) always require a
+# core maintainer's review before merging.
+#
+# Default owner for everything.
+* @jackchow621 @GroundedCore
+
+# CI/CD workflow changes are high risk: they can alter required checks,
+# deployment triggers, and secret exposure.
+/.github/workflows/ @jackchow621 @GroundedCore
+
+# Deployment configuration and scripts.
+/deploy/ @jackchow621 @GroundedCore
+
+# Database schema migrations affect production data and rollbacks.
+/backend/migrations/ @jackchow621 @GroundedCore

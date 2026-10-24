@@ -42,6 +42,7 @@ sh nexusdesk quickstart
 | [groundedcoreai-typescript-frontend-standards](.agents/skills/groundedcoreai-typescript-frontend-standards/SKILL.md) | 编写/修改/审查 `frontend/` 前端代码或 `sdk/javascript`（React、TS、i18n） |
 | [groundedcoreai-shell-infra-standards](.agents/skills/groundedcoreai-shell-infra-standards/SKILL.md) | 编写/修改/审查 Shell/PowerShell 脚本、Dockerfile、docker compose 及 `deploy/` 配置 |
 | [groundedcoreai-commit-standard](.agents/skills/groundedcoreai-commit-standard/SKILL.md) | 提交代码、生成/校验 commit message、安装 commit 校验 hook 时（Conventional Commits + GitHub issue 引用 + 签名提交） |
+| [groundedcoreai-dev-workflow](.agents/skills/groundedcoreai-dev-workflow/SKILL.md) | 创建分支、开 PR、发布版本、hotfix、部署等开发流程操作（提到哪个分支、合并方式、何时发布/部署；commit message 写法归 commit-standard） |
 
 如果你的运行环境支持 Agent Skills 自动发现（如 Codex 扫 `.agents/skills/`、Claude Code 扫 `.claude/skills/`），直接按 skill 的 description 自动触发即可；否则按上表手动加载。
 
